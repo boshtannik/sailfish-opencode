@@ -1136,9 +1136,10 @@ ApplicationWindow {
     function shareSession(id) { bridge.share_session(id) }
     function unshareSession(id) { bridge.unshare_session(id) }
     function summarizeSession(id) {
-        // Compaction runs in the background and only reports completion via
-        // `session.compacted`; switch to the chat so the live "Compacting…"
-        // notice and the resulting summary are visible.
+        // Compaction streams its summary as a normal assistant bubble now (the
+        // worker runs the blocking POST off-task so SSE keeps flowing), and
+        // `session.compacted` reloads the feed at the end. Switch to the chat so
+        // the live "Compacting…" notice and the growing summary are visible.
         bridge.summarize_session(id)
         app.requestPage(2)
     }

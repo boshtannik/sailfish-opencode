@@ -169,3 +169,22 @@ ALFED append len=53 prev=[[tool]]call_b45f...   <-- дубль
 **Диагностика на телефоне:** `cat ~/.config/harbour-opencode/settings.json` (пустой workdir = вот он), `tail ~/.cache/harbour-opencode/app.log`, `ls -l /usr/libexec/harbour-opencode/opencode`, ручной запуск бинарника по тому же пути.
 
 **Затронуто:** `opencode-client/src/settings.rs`, `opencode-client/src/server.rs`, `opencode-client/src/main.rs`.
+
+## Сжатие истории не росло живьём + залипал баннер (2026-10-18)
+
+**Симптом:** при компакции (кнопка Compact или авто-сжатие по переполнению) саммари появлялось в чате только после пере-открытия сессии; во время работы — лишь плашка «Compacting…». Если переключиться в другую сессию во время сжатия, плашка могла остаться.
+
+**Как это делает сам opencode (v1.19.0, сверялись с исходниками `packages/opencode/src/session/compaction.ts`):** саммари — это ОБЫЧНОЕ assistant-сообщение с `mode:"compaction", summary:true`, которое стримится штатными `message.part.updated`/`message.part.delta`. TUI рисует его как рядовой бабл, растущий вживую, а сверху — разделитель « Compaction ». События `session.next.compaction.*` в 1.19.0 не публикуются вовсе (в HEAD/2.x имена другие — `session.compaction.delta`).
+
+**Цепочка багов у нас:**
+1. Диспетчер намеренно игнорировал `mode:"compaction"` (`dispatcher.rs`): сообщение не попадало в `assistant_messages`, его дельты отбрасывались → бабл не рос.
+2. Перезагрузка истории по `session.compacted` выполнялась только если сжимаемая сессия = текущая; иначе событие «съедалось» (`compacted_session.take()`), и саммари появлялось лишь при возврате в сессию.
+3. `compacting`/`compaction_seen` не сбрасывались при переключении сессии (`Cmd::Open`) → «Compacting…» могло залипнуть.
+
+**Фикс:**
+- `dispatcher.rs`: compaction-сообщение регистрируется в `assistant_messages` (саммари стримится как обычный ответ) и дополнительно в `compaction_messages`.
+- `main.rs`: `compaction_messages` исключает саммари из авто-TTS (обе ветки: text-end и idle-fallback) — плашка/бабл видны, но текст не читается вслух.
+- `main.rs`: `Cmd::Open`/`New`/`Fork`/`DeleteAll` сбрасывают `compaction_seen` и `compacting`; ветка `session.compacted` сбрасывает `compaction_seen` для любой сессии (reload — только для текущей, с логом `…compacted in background`).
+- `types/keys.rs`: `MODE_COMPACTION` — чтобы не было магической строки в сравнении.
+
+**Затронуто:** `opencode-client/src/event/dispatcher.rs`, `opencode-client/src/main.rs`, `opencode-client/src/types/keys.rs`.

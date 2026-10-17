@@ -47,6 +47,11 @@ pub struct StreamState<'a> {
     pub status: &'a std::sync::Mutex<String>,
     /// IDs of assistant messages — only their text parts feed the answer.
     pub assistant_messages: &'a mut HashSet<String>,
+    /// IDs of `mode:"compaction"` assistant messages — the summary of the
+    /// compressed history. Their text streams into the transcript exactly like
+    /// a normal answer (mirrors the TUI's growing compaction bubble); the
+    /// caller reads this set to keep the summary out of auto-TTS.
+    pub compaction_messages: &'a mut HashSet<String>,
     /// Reasoning parts accumulated by part.id.
     pub reasonings: &'a mut HashMap<String, String>,
     /// part.ids confirmed (via `message.part.updated`) to be `type:"reasoning"`,
@@ -383,16 +388,18 @@ pub async fn dispatch(event: &Event, state: &mut DispatcherState, stream: &mut S
 /// created user bubble can offer revert/fork like the ones loaded from history.
 fn on_message_updated(stream: &mut StreamState<'_>, props: &MessageUpdatedProperties) {
     match &props.info {
-        // A `mode:"compaction"` assistant message is the SUMMARY of the
-        // compressed history. It streams its own text parts, but it is not a
-        // normal answer: routing it through the answer accumulator would make
-        // the summary grow as an ordinary bubble mid-turn. It is rendered from
-        // history after the `session.compacted` reload instead, right below the
-        // "Context compacted" marker.
-        Message::Assistant { id, mode, .. } if mode != "compaction" => {
+        // Every assistant message feeds the answer accumulator — including the
+        // `mode:"compaction"` summary of the compressed history, which thus
+        // grows as an ordinary bubble while it is written (exactly what the TUI
+        // does). `session.compacted` later reloads the history and replaces the
+        // live bubble with the final marker + summary. The summary is recorded
+        // in `compaction_messages` too, so the caller never reads it aloud.
+        Message::Assistant { id, mode, .. } => {
             stream.assistant_messages.insert(id.clone());
+            if mode == crate::types::keys::MODE_COMPACTION {
+                stream.compaction_messages.insert(id.clone());
+            }
         }
-        Message::Assistant { .. } => {}
         Message::User { id, sessionID, .. } => {
             if *stream.expect_user_id && stream.current_session == Some(sessionID.as_str()) {
                 *stream.expect_user_id = false;
@@ -679,6 +686,7 @@ mod tests {
         let status = Mutex::new(String::new());
         let mut assistant_messages: HashSet<String> =
             assistant.iter().map(|s| s.to_string()).collect();
+        let mut compaction_messages = HashSet::new();
         let mut reasonings = HashMap::new();
         let reasoning_part_ids: HashSet<String> =
             reasoning_ids.iter().map(|s| s.to_string()).collect();
@@ -695,6 +703,7 @@ mod tests {
                 pending: &pending,
                 status: &status,
                 assistant_messages: &mut assistant_messages,
+                compaction_messages: &mut compaction_messages,
                 reasonings: &mut reasonings,
                 reasoning_part_ids: &reasoning_part_ids,
                 live_reasoned_ids: &mut live_reasoned_ids,
@@ -754,6 +763,7 @@ mod tests {
         let pending = Mutex::new(Vec::new());
         let status = Mutex::new(String::new());
         let mut assistant_messages = HashSet::new();
+        let mut compaction_messages = HashSet::new();
         let mut reasonings = HashMap::new();
         let reasoning_part_ids = HashSet::new();
         let mut live_reasoned_ids = HashSet::new();
@@ -769,6 +779,7 @@ mod tests {
                 pending: &pending,
                 status: &status,
                 assistant_messages: &mut assistant_messages,
+                compaction_messages: &mut compaction_messages,
                 reasonings: &mut reasonings,
                 reasoning_part_ids: &reasoning_part_ids,
                 live_reasoned_ids: &mut live_reasoned_ids,
@@ -804,6 +815,7 @@ mod tests {
         let pending = Mutex::new(Vec::new());
         let status = Mutex::new(String::new());
         let mut assistant_messages = HashSet::new();
+        let mut compaction_messages = HashSet::new();
         let mut reasonings = HashMap::new();
         let reasoning_part_ids = HashSet::new();
         let mut live_reasoned_ids = HashSet::new();
@@ -819,6 +831,7 @@ mod tests {
                 pending: &pending,
                 status: &status,
                 assistant_messages: &mut assistant_messages,
+                compaction_messages: &mut compaction_messages,
                 reasonings: &mut reasonings,
                 reasoning_part_ids: &reasoning_part_ids,
                 live_reasoned_ids: &mut live_reasoned_ids,
@@ -862,5 +875,84 @@ mod tests {
         let q = pending.lock().unwrap();
         assert_eq!(q.len(), 1, "expected exactly one notice, got {q:?}");
         assert!(q[0].contains("[[s:Compacting history"), "{}", q[0]);
+    }
+
+    /// A `mode:"compaction"` assistant message is registered in BOTH sets:
+    /// `assistant_messages` (its text streams into the transcript like any
+    /// answer — the summary grows live, mirroring the TUI) and
+    /// `compaction_messages` (so the caller never reads it aloud). A normal
+    /// assistant message lands only in the former.
+    #[test]
+    fn compaction_message_streams_and_is_flagged() {
+        use crate::types::message::{AssistantPath, CacheUsage, MessageTime, MessageTokens};
+        let props = |id: &str, mode: &str| -> MessageUpdatedProperties {
+            MessageUpdatedProperties {
+                sessionID: "ses".to_string(),
+                info: Message::Assistant {
+                    id: id.to_string(),
+                    sessionID: "ses".to_string(),
+                    time: MessageTime {
+                        created: 1,
+                        completed: None,
+                    },
+                    error: None,
+                    parentID: "msg_u".to_string(),
+                    modelID: "m".to_string(),
+                    providerID: "p".to_string(),
+                    mode: mode.to_string(),
+                    path: AssistantPath {
+                        cwd: "/x".to_string(),
+                        root: "/x".to_string(),
+                    },
+                    cost: 0.0,
+                    tokens: MessageTokens {
+                        input: 0,
+                        output: 0,
+                        reasoning: 0,
+                        cache: CacheUsage { read: 0, write: 0 },
+                    },
+                    finish: None,
+                },
+            }
+        };
+        let pending = Mutex::new(Vec::new());
+        let status = Mutex::new(String::new());
+        let mut assistant_messages = HashSet::new();
+        let mut compaction_messages = HashSet::new();
+        let mut reasonings = HashMap::new();
+        let reasoning_part_ids = HashSet::new();
+        let mut live_reasoned_ids = HashSet::new();
+        let mut last_reasoning_push = 0u64;
+        let mut text_live = HashMap::new();
+        let mut last_answer_push = 0u64;
+        let mut expect_user_id = false;
+        let mut compacted = None;
+        let mut compaction_seen = None;
+        let compacting = Mutex::new(false);
+        {
+            let mut stream = StreamState {
+                pending: &pending,
+                status: &status,
+                assistant_messages: &mut assistant_messages,
+                compaction_messages: &mut compaction_messages,
+                reasonings: &mut reasonings,
+                reasoning_part_ids: &reasoning_part_ids,
+                live_reasoned_ids: &mut live_reasoned_ids,
+                last_reasoning_push: &mut last_reasoning_push,
+                text_live: &mut text_live,
+                last_answer_push: &mut last_answer_push,
+                current_session: None,
+                compacted: &mut compacted,
+                compaction_seen: &mut compaction_seen,
+                compacting: &compacting,
+                expect_user_id: &mut expect_user_id,
+            };
+            on_message_updated(&mut stream, &props("msg_n", "build"));
+            on_message_updated(&mut stream, &props("msg_c", crate::types::keys::MODE_COMPACTION));
+        }
+        assert!(assistant_messages.contains("msg_n"));
+        assert!(assistant_messages.contains("msg_c"));
+        assert!(!compaction_messages.contains("msg_n"));
+        assert!(compaction_messages.contains("msg_c"));
     }
 }

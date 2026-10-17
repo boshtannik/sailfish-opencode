@@ -210,10 +210,9 @@ Item {
     }
 
     // Compaction activity banner. While the shown session is compacted (manual
-    // "Compact" or auto on context overflow) the server pushes no UI events and
-    // `POST /summarize` blocks the worker for the whole operation (~20 s), so
-    // the screen would look frozen. A spinner + label appears the moment the
-    // worker flags it, and stays until `session.compacted` reloads the feed.
+    // "Compact" or auto on context overflow) the summary streams as a normal
+    // growing bubble; this banner marks the operation (spinner + label) until
+    // `session.compacted` reloads the feed.
     Rectangle {
         id: compactionBanner
         anchors {

@@ -409,6 +409,10 @@ async fn run_stream(
     // repeat `message.part.updated` for the same compaction does not stack a
     // second bubble (the dispatcher fills/reads this; see `StreamState`).
     let mut compaction_seen: Option<String> = None;
+    // IDs of `mode:"compaction"` assistant messages (the compressed-history
+    // summary). They render as a normal growing bubble, but auto-TTS must skip
+    // them — the summary is internal machinery, not an answer to the user.
+    let mut compaction_messages: std::collections::HashSet<String> = Default::default();
 
     // Show previously started sessions and available models immediately.
     refresh_sessions(&client, &sessions).await;
@@ -458,6 +462,7 @@ async fn run_stream(
                                 pending: &*worker_pending,
                                 status: &*status,
                                 assistant_messages: &mut assistant_messages,
+                                compaction_messages: &mut compaction_messages,
                                 reasonings: &mut reasonings,
                                 reasoning_part_ids: &reasoning_part_ids,
                                 live_reasoned_ids: &mut live_reasoned_ids,
@@ -478,17 +483,22 @@ async fn run_stream(
                         // marker appear right away (previously the feed only
                         // refreshed after leaving and re-entering the chat).
                         if let Some(sid) = compacted_session.take() {
+                            // The compaction that was announced is over: drop
+                            // the dedup marker regardless of which session it
+                            // belonged to, so a later compaction (or a return
+                            // to this session) starts from a clean state.
+                            compaction_seen = None;
                             if current_session.as_deref() == Some(sid.as_str()) {
                                 log::info!("session compacted: reloading history of {sid}");
                                 parts.clear();
                                 assistant_messages.clear();
+                                compaction_messages.clear();
                                 reasonings.clear();
                                 reasoning_order.clear();
                                 text_live.clear();
                                 text_order.clear();
                                 spoken_parts.clear();
                                 last_answer_push = 0;
-                                compaction_seen = None;
                                 if let Ok(mut g) = compacting.lock() {
                                     *g = false;
                                 }
@@ -499,10 +509,21 @@ async fn run_stream(
                                 load_history(&client, &sid, &worker_pending).await;
                                 refresh_sessions(&client, &sessions).await;
                                 refresh_todo(&client, &sid, &todos).await;
+                            } else {
+                                // Compaction ended in a session the user is not
+                                // looking at: nothing on screen to reload.
+                                log::info!("session {sid} compacted in background");
                             }
                         }
                         if let Some((sid, mid, id, text)) = ev.payload.text_part() {
                             if assistant_messages.contains(mid) {
+                                // The compaction summary renders as a normal
+                                // answer but must never be spoken: mark its part
+                                // as handled so both auto-TTS paths below (the
+                                // text-end one and the idle fallback) skip it.
+                                if compaction_messages.contains(mid) {
+                                    spoken_parts.insert(id.to_string());
+                                }
                                 let was_live = text_live.contains_key(id);
                                 if parts.insert(id.to_string(), text.clone()).is_none() {
                                     text_order.push(id.to_string());
@@ -700,12 +721,19 @@ async fn run_stream(
                                     persist_last_session(Some(id));
                                     parts.clear();
                                     assistant_messages.clear();
-reasonings.clear();
-                                        reasoning_order.clear();
-                                        text_live.clear();
-                                        text_order.clear();
-                                        spoken_parts.clear();
-                                        last_answer_push = 0;
+                                    compaction_messages.clear();
+                                    reasonings.clear();
+                                    reasoning_order.clear();
+                                    text_live.clear();
+                                    text_order.clear();
+                                    spoken_parts.clear();
+                                    last_answer_push = 0;
+                                    // Fresh session: no compaction state carries
+                                    // over from the previously shown one.
+                                    compaction_seen = None;
+                                    if let Ok(mut g) = compacting.lock() {
+                                        *g = false;
+                                    }
                                     clear_tools(&dispatcher, &tools).await;
                                     refresh_sessions(&client, &sessions).await;
                                     set_current_session(&current_session_shared, &current_session);
@@ -730,12 +758,20 @@ reasonings.clear();
                             persist_last_session(Some(id.as_str()));
                             parts.clear();
                             assistant_messages.clear();
+                            compaction_messages.clear();
                             reasonings.clear();
                             reasoning_order.clear();
                             text_live.clear();
                             text_order.clear();
                             spoken_parts.clear();
                             last_answer_push = 0;
+                            // The compaction state is per-shown-session: a
+                            // switch must not leave the "Compacting…" banner
+                            // (or the dedup marker) behind on the new session.
+                            compaction_seen = None;
+                            if let Ok(mut g) = compacting.lock() {
+                                *g = false;
+                            }
                             clear_tools(&dispatcher, &tools).await;
                             load_history(&client, id, &worker_pending).await;
                             set_status(&status, "idle");
@@ -754,12 +790,19 @@ reasonings.clear();
                                         persist_last_session(Some(new_id));
                                         parts.clear();
                                         assistant_messages.clear();
+                                        compaction_messages.clear();
                                         reasonings.clear();
                                         reasoning_order.clear();
                                         text_live.clear();
                                         text_order.clear();
                                         spoken_parts.clear();
                                         last_answer_push = 0;
+                                        // The fork is a different session: reset
+                                        // the per-shown-session compaction state.
+                                        compaction_seen = None;
+                                        if let Ok(mut g) = compacting.lock() {
+                                            *g = false;
+                                        }
                                         clear_tools(&dispatcher, &tools).await;
                                         load_history(&client, new_id, &worker_pending).await;
                                         refresh_sessions(&client, &sessions).await;
@@ -785,6 +828,7 @@ reasonings.clear();
                                 Ok(()) => {
                                     parts.clear();
                                     assistant_messages.clear();
+                                    compaction_messages.clear();
                                     reasonings.clear();
                                     reasoning_order.clear();
                                     text_live.clear();
@@ -812,6 +856,7 @@ reasonings.clear();
                                 Ok(()) => {
                                     parts.clear();
                                     assistant_messages.clear();
+                                    compaction_messages.clear();
                                     reasonings.clear();
                                     reasoning_order.clear();
                                     text_live.clear();
@@ -919,45 +964,53 @@ reasonings.clear();
                                 continue;
                             }
                             // Show the "compacting" banner the instant the user
-                            // asks: the POST below blocks for the whole
-                            // compaction (~20 s) and returns only when it is
-                            // done, so no server event reaches the UI in time.
+                            // asks.
                             if current_session.as_deref() == Some(id.as_str()) {
                                 if let Ok(mut g) = compacting.lock() {
                                     *g = true;
                                 }
                             }
-                            match client.get_session(id).await {
-                                Ok(s) => {
-                                    let provider = s["model"]["providerID"].as_str().unwrap_or("");
-                                    let model = s["model"]["id"].as_str().unwrap_or("");
-                                    if provider.is_empty() || model.is_empty() {
-                                        log::error!("summarize: у сессии нет модели: {s}");
-                                    } else {
-                                        match client.summarize_session(id, provider, model).await {
-                                            // The "Compacting…" notice is NOT
-                                            // pushed here: the server reports the
-                                            // compaction via a `type:"compaction"`
-                                            // part event, which the dispatcher
-                                            // turns into the notice (see the
-                                            // MessagePartUpdated branch). That
-                                            // same path covers AUTO-compaction on
-                                            // context overflow — the one the
-                                            // button-driven notice used to miss.
-                                            Ok(()) => log::info!("summarize {id} ({provider}/{model})"),
-                                            Err(e) => log::error!("summarize_session: {e}"),
+                            // `POST /summarize` on the server only returns once
+                            // the whole compaction is DONE (~20 s). Awaiting it
+                            // here would freeze this loop — the very loop that
+                            // reads the SSE stream — so every live event of the
+                            // compaction (the growing summary text) would only be
+                            // drained after the fact, and then immediately wiped
+                            // by the `session.compacted` reload: the summary
+                            // bubble would never grow live. Run the blocking POST
+                            // off-task so SSE keeps flowing while it is written.
+                            let task_client = client.clone();
+                            let task_compacting = compacting.clone();
+                            let task_id = id.clone();
+                            tokio::spawn(async move {
+                                match task_client.get_session(&task_id).await {
+                                    Ok(s) => {
+                                        let provider = s["model"]["providerID"].as_str().unwrap_or("");
+                                        let model = s["model"]["id"].as_str().unwrap_or("");
+                                        if provider.is_empty() || model.is_empty() {
+                                            log::error!("summarize: у сессии нет модели: {s}");
+                                        } else {
+                                            match task_client
+                                                .summarize_session(&task_id, provider, model)
+                                                .await
+                                            {
+                                                Ok(()) => {
+                                                    log::info!("summarize {task_id} ({provider}/{model})")
+                                                }
+                                                Err(e) => log::error!("summarize_session: {e}"),
+                                            }
                                         }
                                     }
+                                    Err(e) => log::error!("get_session: {e}"),
                                 }
-                                Err(e) => log::error!("get_session: {e}"),
-                            }
-                            // The compaction POST has returned: it is finished.
-                            // The buffered `session.compacted` (processed right
-                            // after) also clears this, but do it here too so a
-                            // failed/duplicate path never leaves the banner on.
-                            if let Ok(mut g) = compacting.lock() {
-                                *g = false;
-                            }
+                                // The compaction is over (the buffered
+                                // `session.compacted` also clears this for the
+                                // shown session; do it here too so a failed or
+                                // duplicate path never leaves the banner on).
+                                if let Ok(mut g) = task_compacting.lock() {
+                                    *g = false;
+                                }
+                            });
                         }
                         Cmd::Abort { id } => {
                             if id.is_empty() {
@@ -1074,12 +1127,19 @@ reasonings.clear();
                                         persist_last_session(Some(id));
                                         parts.clear();
                                         assistant_messages.clear();
+                                        compaction_messages.clear();
                                         reasonings.clear();
                                         reasoning_order.clear();
                                         text_live.clear();
                                         text_order.clear();
                                         spoken_parts.clear();
                                         last_answer_push = 0;
+                                        // A brand-new session: no compaction state
+                                        // from the deleted one survives.
+                                        compaction_seen = None;
+                                        if let Ok(mut g) = compacting.lock() {
+                                            *g = false;
+                                        }
                                         clear_tools(&dispatcher, &tools).await;
                                         set_current_session(&current_session_shared, &current_session);
                                         if let Ok(mut g) = todos.lock() {

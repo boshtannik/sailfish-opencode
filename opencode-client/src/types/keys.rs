@@ -35,3 +35,6 @@ pub const STATE: &str = "state";
 
 // ---- Message role discriminator values ----
 pub const ROLE_USER: &str = "user";
+
+// ---- Message `mode` discriminator values ----
+pub const MODE_COMPACTION: &str = "compaction";

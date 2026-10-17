@@ -5,6 +5,10 @@ pub mod session;
 
 use reqwest::Client;
 
+/// Cheap to clone: `reqwest::Client` shares the connection pool, so the worker
+/// can hand a copy to a background task (e.g. the blocking `/summarize` call)
+/// without losing the SSE stream.
+#[derive(Clone)]
 pub struct OpenCodeClient {
     pub http: Client,
     pub base: String,
