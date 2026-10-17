@@ -17,12 +17,12 @@ Built and tested on a Sony Xperia 10 IV running Sailfish OS 5.1.0.11 (aarch64).
 
 <table>
   <tr>
-    <td align="center"><img src="screenshots/photo_1_2026-10-13_04-24-18.jpg" width="240" alt="screenshot 1"></td>
-    <td align="center"><img src="screenshots/photo_2_2026-10-13_04-24-18.jpg" width="240" alt="screenshot 2"></td>
+    <td align="center"><img src="screenshots/photo_1_2026-10-18_01-46-12.jpg" width="240" alt="screenshot 1"></td>
+    <td align="center"><img src="screenshots/photo_2_2026-10-18_01-46-12.jpg" width="240" alt="screenshot 2"></td>
   </tr>
   <tr>
-    <td align="center"><img src="screenshots/photo_3_2026-10-13_04-24-18.jpg" width="240" alt="screenshot 3"></td>
-    <td align="center"><img src="screenshots/photo_4_2026-10-13_04-24-18.jpg" width="240" alt="screenshot 4"></td>
+    <td align="center"><img src="screenshots/photo_3_2026-10-18_01-46-12.jpg" width="240" alt="screenshot 3"></td>
+    <td align="center"><img src="screenshots/photo_4_2026-10-18_01-46-12.jpg" width="240" alt="screenshot 4"></td>
   </tr>
 </table>
 
