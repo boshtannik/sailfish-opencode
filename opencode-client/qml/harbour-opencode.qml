@@ -1063,10 +1063,32 @@ ApplicationWindow {
         return Math.round(b / 1024) + " KB"
     }
 
-    function newSession() {
+    function newSession(title) {
         app.messages = []
-        bridge.new_session()
+        bridge.new_session(title ? title : "")
         app.requestPage(2)
+    }
+
+    // Ask for a session name before creating one. Skipping the dialog (or
+    // accepting with an empty field) creates the session with a server-generated
+    // title, exactly like before.
+    function openNewSessionDialog() {
+        if (app.pageStack && app.pageStack.currentPage !== null)
+            app.pageStack.push(sessionNameDialog, { mode: "new" })
+        else
+            newSession()
+    }
+
+    // Rename an existing session (same dialog, "rename" mode).
+    function openRenameSessionDialog(id, title) {
+        if (app.pageStack && app.pageStack.currentPage !== null)
+            app.pageStack.push(sessionNameDialog, {
+                mode: "rename",
+                sessionId: id,
+                currentTitle: title
+            })
+        else
+            renameSession(id, title)
     }
 
     function openSession(id) {
@@ -1723,15 +1745,7 @@ ApplicationWindow {
             }
 
             CoverActionList {
-                // "＋": create a new session and open it.
-                CoverAction {
-                    iconSource: "image://theme/icon-m-add"
-                    onTriggered: {
-                        app.activate()
-                        app.newSession()
-                    }
-                }
-                // Second action — the icon follows what the user needs most:
+                // Single action — the icon follows what the user needs most:
                 // while TTS is active → stop (silences playback WITHOUT pulling
                 // the app to the foreground); otherwise by input mode:
                 // text-only → pen (opens the app, focuses the prompt input);
@@ -1753,6 +1767,59 @@ ApplicationWindow {
                         else
                             app.startQuickDictation()
                     }
+                }
+            }
+        }
+    }
+
+    // Session-name dialog, shared by "create new session" and "rename session"
+    // (same purpose — naming a session). In "new" mode accepting with an empty
+    // field (or swiping the dialog away) still creates the session; the server
+    // then generates the title automatically.
+    Component {
+        id: sessionNameDialog
+        Dialog {
+            id: nameDlg
+            property string mode: "new"
+            property string sessionId
+            property string currentTitle
+            readonly property string acceptLabel: mode === "new" ? qsTr("Create")
+                                                                 : qsTr("Rename")
+
+            canAccept: mode === "new" || titleField.text.trim().length > 0
+            onAccepted: {
+                if (mode === "new")
+                    app.newSession(titleField.text.trim())
+                else
+                    app.renameSession(sessionId, titleField.text.trim())
+            }
+            onStatusChanged: {
+                if (status === PageStatus.Active) {
+                    titleField.forceActiveFocus()
+                }
+            }
+
+            Column {
+                width: parent.width
+
+                DialogHeader {
+                    acceptText: nameDlg.acceptLabel
+                    title: nameDlg.mode === "new" ? qsTr("New session")
+                                                  : qsTr("Session name")
+                }
+                TextField {
+                    id: titleField
+                    width: parent.width
+                    label: nameDlg.mode === "new" ? qsTr("Session name (optional)")
+                                                  : qsTr("Session name")
+                    placeholderText: nameDlg.mode === "new"
+                                     ? qsTr("Leave empty to name automatically")
+                                     : ""
+                    text: nameDlg.currentTitle ? nameDlg.currentTitle : ""
+                    inputMethodHints: Qt.ImhNoPredictiveText
+                    EnterKey.enabled: nameDlg.canAccept
+                    EnterKey.iconSource: "image://theme/icon-m-enter-accept"
+                    EnterKey.onClicked: nameDlg.accept()
                 }
             }
         }

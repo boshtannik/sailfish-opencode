@@ -13,6 +13,11 @@ Built and tested on a Sony Xperia 10 IV running Sailfish OS 5.1.0.11 (aarch64).
 > **Compatibility (for now):** aarch64 devices only, built for **Sailfish OS 5.1**.
 > Other architectures are not built yet.
 
+> **Roadmap:** work has started on migrating this client to the new **opencode v2**
+> server API (new HTTP contract, event stream and message model). Development is
+> happening in parallel and is not yet part of this release — the current build
+> targets opencode v1. See the migration notes under `vault/`.
+
 ## Screenshots
 
 <table>

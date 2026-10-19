@@ -713,7 +713,7 @@ async fn run_stream(
                         }
                     };
                     match &command {
-                        Cmd::New => match client.create_session().await {
+                        Cmd::New { title } => match client.create_session(title.as_deref()).await {
                             Ok(sess) => match sess["id"].as_str() {
                                 Some(id) => {
                                     log::info!("new session: {id}");
@@ -1119,7 +1119,7 @@ async fn run_stream(
                             }
                             refresh_sessions(&client, &sessions).await;
                             // After deleting all sessions, immediately create a new one — the chat must not be empty.
-                            match client.create_session().await {
+                            match client.create_session(None).await {
                                 Ok(sess) => match sess["id"].as_str() {
                                     Some(id) => {
                                         log::info!("delete_all: creating new session {id}");
@@ -1254,7 +1254,7 @@ async fn run_stream(
                     set_status(&status, "busy");
                     // Create a session if there is none.
                     if current_session.is_none() {
-                        match client.create_session().await {
+                        match client.create_session(None).await {
                             Ok(sess) => match sess["id"].as_str() {
                                 Some(id) => {
                                     current_session = Some(id.to_string());
@@ -1736,7 +1736,7 @@ async fn resume_last_session(
     // No last session (first run or after deleting all) — create a new one.
     let sid = match resume_id {
         Some(id) => id,
-        None => match client.create_session().await {
+        None => match client.create_session(None).await {
             Ok(sess) => match sess["id"].as_str() {
                 Some(id) => {
                     log::info!("создаю новую сессию: {id}");

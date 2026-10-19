@@ -129,10 +129,13 @@ pub struct AppBridge {
         let v = self.sessions_shared.lock().map(|s| s.clone()).unwrap_or_default();
         QString::from(v)
     }),
-    /// QML: create a new session.
-    new_session: qt_method!(fn new_session(&self) {
-        log::info!("QML new_session");
-        self.push_command(Cmd::New.to_value());
+    /// QML: create a new session. `title` is optional — an empty string lets
+    /// the server generate the session title automatically.
+    new_session: qt_method!(fn new_session(&self, title: QString) {
+        let title = title.to_string();
+        log::info!("QML new_session title={title:?}");
+        let title = if title.trim().is_empty() { None } else { Some(title) };
+        self.push_command(Cmd::New { title }.to_value());
     }),
     /// QML: open a session by id (loads the history).
     open_session: qt_method!(fn open_session(&self, id: QString) {
