@@ -1,6 +1,7 @@
 # Rust
 target/
 */target/
+tools/gen-icon/target/
 /Cargo.lock
 
 # Логи и временное

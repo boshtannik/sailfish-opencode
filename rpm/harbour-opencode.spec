@@ -1,7 +1,7 @@
 Name:       harbour-opencode
 Summary:    Native opencode client for Sailfish OS
 Version:    0.1.0
-Release:    1
+Release:    2
 Group:      Qt/Qt
 License:    MIT
 URL:        https://github.com/boshtannik/sailfish-opencode
