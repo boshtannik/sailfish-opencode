@@ -37,10 +37,7 @@ Item {
                 }
                 MenuItem {
                     text: qsTr("Rename")
-                    onClicked: appWindow.pageStack.push(renameDialog, {
-                        sessionId: modelData.id,
-                        currentTitle: modelData.title
-                    })
+                    onClicked: appWindow.openRenameSessionDialog(modelData.id, modelData.title)
                 }
                 MenuItem {
                     text: qsTr("Delete")
@@ -71,7 +68,7 @@ Item {
             }
             MenuItem {
                 text: qsTr("New session")
-                onClicked: appWindow.newSession()
+                onClicked: appWindow.openNewSessionDialog()
             }
         }
 
@@ -86,41 +83,5 @@ Item {
 
     RemorsePopup {
         id: remorse
-    }
-
-    Component {
-        id: renameDialog
-
-        Dialog {
-            id: dlg
-            property string sessionId
-            property string currentTitle
-
-            canAccept: titleField.text.trim().length > 0
-            onAccepted: appWindow.renameSession(sessionId, titleField.text.trim())
-            onStatusChanged: {
-                if (status === PageStatus.Active) {
-                    titleField.forceActiveFocus()
-                }
-            }
-
-            Column {
-                width: parent.width
-
-                DialogHeader {
-                    acceptText: qsTr("Rename")
-                }
-                TextField {
-                    id: titleField
-                    width: parent.width
-                    label: qsTr("Session name")
-                    text: dlg.currentTitle
-                    inputMethodHints: Qt.ImhNoPredictiveText
-                    EnterKey.enabled: text.trim().length > 0
-                    EnterKey.iconSource: "image://theme/icon-m-enter-accept"
-                    EnterKey.onClicked: dlg.accept()
-                }
-            }
-        }
     }
 }

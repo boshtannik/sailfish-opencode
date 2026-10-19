@@ -20,10 +20,18 @@ pub enum PromptPart {
 
 impl OpenCodeClient {
     /// POST /session -> create a new session.
-    pub async fn create_session(&self) -> Result<serde_json::Value, String> {
+    ///
+    /// `title` is optional (`Session.CreateInput.title`): when absent/empty the
+    /// server generates the session title itself.
+    pub async fn create_session(&self, title: Option<&str>) -> Result<serde_json::Value, String> {
         let url = format!("{}/session", self.base);
+        let body = match title {
+            Some(t) if !t.trim().is_empty() => serde_json::json!({ "title": t.trim() }),
+            _ => serde_json::json!({}),
+        };
         let resp = self
             .authed(self.http.post(&url))
+            .json(&body)
             .send()
             .await
             .map_err(|e| e.to_string())?;
