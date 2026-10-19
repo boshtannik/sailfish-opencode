@@ -1336,7 +1336,7 @@ async fn run_stream(
 
 /// Load compact sessions list into shared buffer for QML.
 async fn refresh_sessions(
-    client: &api::OpenCodeClient,
+    client: &impl api::OpenCodeApi,
     sessions: &Arc<std::sync::Mutex<String>>,
 ) {
     match client.list_sessions().await {
@@ -1398,7 +1398,7 @@ async fn refresh_sessions(
 
 /// Load session TODOs into shared buffer for QML.
 async fn refresh_todo(
-    client: &api::OpenCodeClient,
+    client: &impl api::OpenCodeApi,
     session_id: &str,
     todos: &Arc<std::sync::Mutex<String>>,
 ) {
@@ -1414,7 +1414,7 @@ async fn refresh_todo(
 
 /// Load providers/models and flatten for QML.
 async fn refresh_models(
-    client: &api::OpenCodeClient,
+    client: &impl api::OpenCodeApi,
     models: &Arc<std::sync::Mutex<String>>,
 ) {
     let v = match client.providers().await {
@@ -1508,7 +1508,7 @@ fn refresh_sounds(sounds: &Arc<std::sync::Mutex<String>>) {
 
 /// Load session history (info/parts pairs) and push strings to QML queue.
 async fn load_history(
-    client: &api::OpenCodeClient,
+    client: &impl api::OpenCodeApi,
     session_id: &str,
     pending: &Arc<std::sync::Mutex<Vec<String>>>,
 ) {
@@ -1699,7 +1699,7 @@ fn persist_last_session(session: Option<&str>) {
 /// On startup, open the last session: check existence, load history.
 /// If there is no last session — create a new one (chat must not be empty).
 async fn resume_last_session(
-    client: &api::OpenCodeClient,
+    client: &impl api::OpenCodeApi,
     current_session: &mut Option<String>,
     current_session_shared: &Arc<std::sync::Mutex<String>>,
     pending: &Arc<std::sync::Mutex<Vec<String>>>,
