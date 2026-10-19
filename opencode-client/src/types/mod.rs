@@ -6,6 +6,7 @@ pub mod permission;
 pub mod question;
 pub mod session;
 pub mod tool;
+pub mod v2;
 
 pub use config::Config;
 pub use event::GlobalEvent;
