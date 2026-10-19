@@ -168,6 +168,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .expect("tokio runtime");
             rt.block_on(async move {
                 let st = Settings::load();
+                let api_version = api::ApiVersion::from_setting(&st.api_version);
+                log::info!("api_version from settings: {:?}", api_version);
                 let cwd = std::path::PathBuf::from(&st.workdir);
                 if let Err(e) = std::fs::create_dir_all(&cwd) {
                     log::warn!("failed to create workdir {cwd:?}: {e}");
@@ -207,6 +209,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         worker_questions,
                         worker_settings,
                         console_login,
+                        api_version,
                         worker_stop_rx,
                     )
                     .await
@@ -268,6 +271,7 @@ async fn run_worker(
     questions: Arc<std::sync::Mutex<String>>,
     settings: Arc<std::sync::Mutex<String>>,
     console_login: opencode_client::auth::ConsoleLogin,
+    api_version: api::ApiVersion,
     mut stop_rx: tokio::sync::watch::Receiver<bool>,
 ) {
     loop {
@@ -276,7 +280,8 @@ async fn run_worker(
                 log::info!("stop signal received, exiting");
                 return;
             }
-            r = run_stream(
+            r = run_stream_adapter(
+                api_version,
                 base.clone(),
                 auth.clone(),
                 dispatcher.clone(),
@@ -309,9 +314,59 @@ async fn run_worker(
     }
 }
 
+/// Build the adapter selected by `api_version` and run one SSE session with it.
+/// Static dispatch: each arm monomorphises `run_stream` for its concrete type,
+/// so the version choice costs nothing at runtime and no `dyn` is needed.
+#[allow(clippy::too_many_arguments)]
+async fn run_stream_adapter(
+    api_version: api::ApiVersion,
+    base: String,
+    auth: Option<(String, String)>,
+    dispatcher: event::dispatcher::SharedState,
+    worker_pending: Arc<std::sync::Mutex<Vec<String>>>,
+    worker_prompts: Arc<std::sync::Mutex<Vec<String>>>,
+    status: Arc<std::sync::Mutex<String>>,
+    sessions: Arc<std::sync::Mutex<String>>,
+    commands: Arc<std::sync::Mutex<Vec<String>>>,
+    current_session: Arc<std::sync::Mutex<String>>,
+    compacting: Arc<std::sync::Mutex<bool>>,
+    nav: Arc<std::sync::Mutex<i32>>,
+    todos: Arc<std::sync::Mutex<String>>,
+    models: Arc<std::sync::Mutex<String>>,
+    sounds: Arc<std::sync::Mutex<String>>,
+    voice: Arc<voice::VoiceState>,
+    tools: Arc<std::sync::Mutex<String>>,
+    permissions: Arc<std::sync::Mutex<String>>,
+    questions: Arc<std::sync::Mutex<String>>,
+    settings: Arc<std::sync::Mutex<String>>,
+    console_login: opencode_client::auth::ConsoleLogin,
+) -> Result<(), String> {
+    match api_version {
+        api::ApiVersion::V1 => {
+            let client = api::OpenCodeClient::new(base.clone(), auth.clone());
+            run_stream(
+                client, base, auth, dispatcher, worker_pending, worker_prompts, status, sessions,
+                commands, current_session, compacting, nav, todos, models, sounds, voice, tools,
+                permissions, questions, settings, console_login,
+            )
+            .await
+        }
+        api::ApiVersion::V2 => {
+            let client = api::V2Adapter::new(base.clone(), auth.clone());
+            run_stream(
+                client, base, auth, dispatcher, worker_pending, worker_prompts, status, sessions,
+                commands, current_session, compacting, nav, todos, models, sounds, voice, tools,
+                permissions, questions, settings, console_login,
+            )
+            .await
+        }
+    }
+}
+
 /// A single SSE session: `Ok(())` means the stream ended, `Err` means connection failed.
 #[allow(clippy::too_many_arguments)]
-async fn run_stream(
+async fn run_stream<A: api::OpenCodeApi>(
+    client: A,
     base: String,
     auth: Option<(String, String)>,
     dispatcher: event::dispatcher::SharedState,
@@ -333,8 +388,6 @@ async fn run_stream(
     settings: Arc<std::sync::Mutex<String>>,
     console_login: opencode_client::auth::ConsoleLogin,
 ) -> Result<(), String> {
-    let client = api::OpenCodeClient::new(base.clone(), auth.clone());
-
     let sse = event::sse::SseClient::new(base, auth);
     log::info!("connecting to /global/event...");
     let mut stream = sse.stream().await?;

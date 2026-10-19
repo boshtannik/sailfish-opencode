@@ -9,112 +9,153 @@
 //! Method set is deliberately limited to what consumers actually call — it is
 //! not a 1:1 mirror of the HTTP surface.
 //!
-//! Uses native `async fn` in traits (RPITIT, stable since Rust 1.75). The trait
-//! is not object-safe by design: consumers are generic over `T: OpenCodeApi` and
-//! use static dispatch, so there is no runtime cost and no extra dependency.
+//! Signatures return `impl Future<…> + Send` (RPITIT, stable since Rust 1.75)
+//! rather than plain `async fn`. The `Send` bound is required: the worker spawns
+//! a blocking call (`compact`) onto the runtime, and `tokio::spawn` needs a
+//! `Send` future — which `async fn` in a trait does not imply. The trait is not
+//! object-safe by design: consumers are generic over `A: OpenCodeApi` and use
+//! static dispatch, so there is no runtime cost and no extra dependency.
+
+use std::future::Future;
 
 use crate::types::event::PermissionReplyKind;
 
-/// Server protocol adapter (v1 for now; v2 will be a second implementation).
+/// Server protocol adapter (v1 and v2 implementations).
 pub trait OpenCodeApi: Clone + Send + Sync + 'static {
     /// GET /global/health — is the server up?
-    async fn health(&self) -> Result<bool, String>;
+    fn health(&self) -> impl Future<Output = Result<bool, String>> + Send;
 
     /// POST /global/dispose — drop all instances, releasing resources so the
     /// next request reloads config (e.g. a freshly written credential).
-    async fn global_dispose(&self) -> Result<(), String>;
+    fn global_dispose(&self) -> impl Future<Output = Result<(), String>> + Send;
 
     /// POST /session — create a session. Empty/absent title → server names it.
-    async fn create_session(&self, title: Option<&str>) -> Result<serde_json::Value, String>;
+    fn create_session(
+        &self,
+        title: Option<&str>,
+    ) -> impl Future<Output = Result<serde_json::Value, String>> + Send;
 
     /// GET /session — session list.
-    async fn list_sessions(&self) -> Result<serde_json::Value, String>;
+    fn list_sessions(&self) -> impl Future<Output = Result<serde_json::Value, String>> + Send;
 
     /// PATCH /session/{id} — rename a session.
-    async fn rename_session(&self, session_id: &str, title: &str) -> Result<(), String>;
+    fn rename_session(
+        &self,
+        session_id: &str,
+        title: &str,
+    ) -> impl Future<Output = Result<(), String>> + Send;
 
     /// DELETE /session/{id} — delete a session.
-    async fn delete_session(&self, session_id: &str) -> Result<(), String>;
+    fn delete_session(&self, session_id: &str) -> impl Future<Output = Result<(), String>> + Send;
 
     /// GET /session/{id} — a single session.
-    async fn get_session(&self, session_id: &str) -> Result<serde_json::Value, String>;
+    fn get_session(
+        &self,
+        session_id: &str,
+    ) -> impl Future<Output = Result<serde_json::Value, String>> + Send;
 
     /// POST /session/{id}/fork — branch a session (optionally cut at a message).
-    async fn fork_session(
+    fn fork_session(
         &self,
         session_id: &str,
         message_id: Option<&str>,
-    ) -> Result<serde_json::Value, String>;
+    ) -> impl Future<Output = Result<serde_json::Value, String>> + Send;
 
     /// POST /session/{id}/revert — hide the tail starting at `message_id`.
-    async fn revert_session(&self, session_id: &str, message_id: &str) -> Result<(), String>;
+    fn revert_session(
+        &self,
+        session_id: &str,
+        message_id: &str,
+    ) -> impl Future<Output = Result<(), String>> + Send;
 
     /// POST /session/{id}/unrevert — restore previously reverted messages.
-    async fn unrevert_session(&self, session_id: &str) -> Result<(), String>;
+    fn unrevert_session(
+        &self,
+        session_id: &str,
+    ) -> impl Future<Output = Result<(), String>> + Send;
 
     /// POST /session/{id}/share — create a public link.
-    async fn share_session(&self, session_id: &str) -> Result<serde_json::Value, String>;
+    fn share_session(
+        &self,
+        session_id: &str,
+    ) -> impl Future<Output = Result<serde_json::Value, String>> + Send;
 
     /// DELETE /session/{id}/share — revoke link access.
-    async fn unshare_session(&self, session_id: &str) -> Result<(), String>;
+    fn unshare_session(&self, session_id: &str)
+        -> impl Future<Output = Result<(), String>> + Send;
 
     /// POST /session/{id}/summarize — compact history for the given model.
-    async fn summarize_session(
+    fn summarize_session(
         &self,
         session_id: &str,
         provider_id: &str,
         model_id: &str,
-    ) -> Result<(), String>;
+    ) -> impl Future<Output = Result<(), String>> + Send;
 
     /// GET /config/providers — provider/model catalog.
-    async fn providers(&self) -> Result<serde_json::Value, String>;
+    fn providers(&self) -> impl Future<Output = Result<serde_json::Value, String>> + Send;
 
     /// GET /session/{id}/todo — the agent's task checklist.
-    async fn session_todo(&self, session_id: &str) -> Result<serde_json::Value, String>;
+    fn session_todo(
+        &self,
+        session_id: &str,
+    ) -> impl Future<Output = Result<serde_json::Value, String>> + Send;
 
     /// POST /api/session/{id}/model — switch the session model.
-    async fn set_model(
+    fn set_model(
         &self,
         session_id: &str,
         provider_id: &str,
         model_id: &str,
-    ) -> Result<(), String>;
+    ) -> impl Future<Output = Result<(), String>> + Send;
 
     /// POST /api/session/{id}/agent — switch the session agent (build/plan).
-    async fn set_session_agent(&self, session_id: &str, agent: &str) -> Result<(), String>;
+    fn set_session_agent(
+        &self,
+        session_id: &str,
+        agent: &str,
+    ) -> impl Future<Output = Result<(), String>> + Send;
 
     /// GET /session/{id}/message — full history as `[{info, parts}]`.
-    async fn session_messages(&self, session_id: &str) -> Result<serde_json::Value, String>;
+    fn session_messages(
+        &self,
+        session_id: &str,
+    ) -> impl Future<Output = Result<serde_json::Value, String>> + Send;
 
     /// POST /session/{id}/prompt_async — send a prompt without waiting.
-    async fn prompt_async(
+    fn prompt_async(
         &self,
         session_id: &str,
         text: &str,
         agent: Option<String>,
-    ) -> Result<(), String>;
+    ) -> impl Future<Output = Result<(), String>> + Send;
 
     /// POST /session/{id}/abort — abort execution.
-    async fn abort(&self, session_id: &str) -> Result<bool, String>;
+    fn abort(&self, session_id: &str) -> impl Future<Output = Result<bool, String>> + Send;
 
     /// POST /session/{id}/permissions/{pid} — answer a permission request.
-    async fn answer_permission(
+    fn answer_permission(
         &self,
         session_id: &str,
         permission_id: &str,
         response: &PermissionReplyKind,
-    ) -> Result<bool, String>;
+    ) -> impl Future<Output = Result<bool, String>> + Send;
 
     /// POST /question/{id}/reply — answer a question from the model.
-    async fn answer_question(
+    fn answer_question(
         &self,
         request_id: &str,
         answers: Vec<Vec<String>>,
-    ) -> Result<bool, String>;
+    ) -> impl Future<Output = Result<bool, String>> + Send;
 
     /// POST /question/{id}/reject — decline a question from the model.
-    async fn reject_question(&self, request_id: &str) -> Result<bool, String>;
+    fn reject_question(&self, request_id: &str)
+        -> impl Future<Output = Result<bool, String>> + Send;
 
     /// PUT /auth/{provider_id} — store an API-key credential for a provider.
-    async fn set_api_key(&self, provider_id: &str, key: &str) -> Result<(), String>;
+    fn set_api_key(
+        &self,
+        provider_id: &str,
+        key: &str,
+    ) -> impl Future<Output = Result<(), String>> + Send;
 }
