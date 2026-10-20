@@ -400,10 +400,15 @@ impl OpenCodeApi for V2Adapter {
         }
     }
 
-    /// POST /api/session/{id}/prompt `{text*, agents?}` → `{data: Inbox.User}`.
-    /// The response's `data.id` is the user-message ID the server assigned
-    /// (same value it later stores as the user `MessageInfo.id`), so the caller
-    /// gets revert/fork id without waiting for an SSE event.
+    /// POST /api/session/{id}/prompt `{prompt: {text*, agents?}}` →
+    /// `{data: Inbox.User}`. The request body nests the prompt under a `prompt`
+    /// key (the bundled opencode 1.19.0 rejects a flat `{text}` with
+    /// `Missing key at ["prompt"]`), and v2 `agents` is an array of
+    /// `Prompt.AgentAttachment` objects (`{name}`), not bare name strings —
+    /// sending `["build"]` is rejected with 400. The response's `data.id` is
+    /// the user-message ID the server assigned (same value it later stores as
+    /// the user `MessageInfo.id`), so the caller gets revert/fork id without
+    /// waiting for an SSE event.
     fn prompt_async(
         &self,
         session_id: &str,
@@ -412,11 +417,12 @@ impl OpenCodeApi for V2Adapter {
     ) -> impl Future<Output = Result<Option<String>, String>> + Send {
         async move {
             let url = format!("{}/api/session/{}/prompt", self.base, session_id);
-            let mut body = serde_json::Map::new();
-            body.insert("text".into(), serde_json::Value::String(text.to_string()));
+            let mut prompt = serde_json::Map::new();
+            prompt.insert("text".into(), serde_json::Value::String(text.to_string()));
             if let Some(a) = agent {
-                body.insert("agents".into(), serde_json::json!([a]));
+                prompt.insert("agents".into(), serde_json::json!([{ "name": a }]));
             }
+            let body = serde_json::json!({ "prompt": prompt });
             let resp = self
                 .authed(self.http.post(&url).json(&body))
                 .send()
