@@ -11,8 +11,8 @@ use serde::{Deserialize, Serialize};
 pub struct Settings {
     #[serde(default = "default_workdir")]
     pub workdir: String,
-    /// Server protocol adapter to use: `"v1"` (opencode 1.x, default) or
-    /// `"v2"` (opencode 2.x). Kept as a free string so an unknown value can be
+    /// Server protocol adapter to use: `"v1"` (opencode 1.x) or `"v2"`
+    /// (opencode 2.x, default). Kept as a free string so an unknown value can be
     /// logged and safely fall back to v1 instead of failing to load.
     #[serde(default = "default_api_version")]
     pub api_version: String,
@@ -32,9 +32,9 @@ pub fn default_workdir() -> String {
     "/home/defaultuser/opencode-home".to_string()
 }
 
-/// Default protocol adapter — v1, so an untouched install keeps working.
+/// Default protocol adapter — v2 (opencode 2.x).
 pub fn default_api_version() -> String {
-    "v1".to_string()
+    "v2".to_string()
 }
 
 fn settings_path() -> PathBuf {

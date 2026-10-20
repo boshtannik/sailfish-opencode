@@ -321,13 +321,14 @@ impl OpenCodeApi for V2Adapter {
         }
     }
 
-    /// todo has no v2 HTTP route (see `vault/Разведка-v2.md` §5). Kept as an
-    /// explicit unimplemented error until step 6.
+    /// todo has no v2 HTTP route (see `vault/Разведка-v2.md` §5). Report an
+    /// empty checklist instead of an error: the poll loop calls this often and
+    /// an error would spam the log. Real handling is deferred to step 6.
     fn session_todo(
         &self,
         _session_id: &str,
     ) -> impl Future<Output = Result<serde_json::Value, String>> + Send {
-        async move { Err("todo is not available in the opencode v2 HTTP API".to_string()) }
+        async move { Ok(serde_json::Value::Array(Vec::new())) }
     }
 
     /// POST /api/session/{id}/model `{model: Model.Ref}` → 204.

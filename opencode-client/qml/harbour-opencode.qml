@@ -286,9 +286,9 @@ ApplicationWindow {
     property bool sttModelReady: false
     // opencode working directory (setting). Loaded from bridge.settings_json().
     property string workdir: ""
-    // Server protocol adapter ("v1"/"v2"). Loaded from bridge.settings_json();
-    // changing it takes effect after the app (worker) restarts.
-    property string apiVersion: "v1"
+    // Server protocol adapter ("v1"/"v2", default v2). Loaded from
+    // bridge.settings_json(); changing it takes effect after the app (worker) restarts.
+    property string apiVersion: "v2"
     property bool ttsModelReady: chosenTts !== ""
 
     // For detecting the "agent busy → free" transition.
