@@ -307,6 +307,22 @@ Item {
                 wrapMode: Text.Wrap
             }
 
+            ComboBox {
+                label: qsTr("OpenCode API version (restart required)")
+                description: qsTr("v1 — opencode 1.x, v2 — opencode 2.x. Change only if you know the server version.")
+                currentIndex: (appWindow.apiVersion === "v2") ? 1 : 0
+                menu: ContextMenu {
+                    MenuItem { text: qsTr("v1 (opencode 1.x)") }
+                    MenuItem { text: qsTr("v2 (opencode 2.x)") }
+                }
+                onCurrentIndexChanged: {
+                    var v = (currentIndex === 1) ? "v2" : "v1"
+                    if (typeof appWindow !== "undefined" && appWindow
+                        && appWindow.apiVersion !== v)
+                        appWindow.setApiVersion(v)
+                }
+            }
+
             TextSwitch {
                 text: qsTr("Show model thinking (reasoning)")
                 description: qsTr("Show the model's reasoning as it works, not just final answers")

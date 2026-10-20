@@ -5,7 +5,7 @@ pub mod question;
 pub mod session;
 pub mod v2;
 
-pub use api::OpenCodeApi;
+pub use api::{ClientEvent, OpenCodeApi};
 pub use v2::V2Adapter;
 
 use std::future::Future;

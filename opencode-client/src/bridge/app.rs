@@ -365,6 +365,12 @@ pub struct AppBridge {
         log::info!("QML set_workdir -> {path:?}");
         self.push_command(Cmd::SetWorkdir { workdir: path }.to_value());
     }),
+    /// QML: set the server protocol adapter (`"v1"`/`"v2"`), effective after restart.
+    set_api_version: qt_method!(fn set_api_version(&self, value: QString) {
+        let value = value.to_string();
+        log::info!("QML set_api_version -> {value:?}");
+        self.push_command(Cmd::SetApiVersion { value }.to_value());
+    }),
     /// QML: URL of the OpenCode API-key page (for `Qt.openUrlExternally`).
     auth_url: qt_method!(fn auth_url(&self) -> QString {
         QString::from(crate::auth::OPENCODE_AUTH_URL)

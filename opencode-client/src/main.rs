@@ -1494,6 +1494,14 @@ async fn run_stream<A: api::OpenCodeApi>(
                                 *g = st.to_json();
                             }
                         }
+                        Cmd::SetApiVersion { value } => {
+                            let mut st = Settings::load();
+                            st.api_version = value.clone();
+                            st.save();
+                            if let Ok(mut g) = settings.lock() {
+                                *g = st.to_json();
+                            }
+                        }
                         Cmd::SetProviderKey { provider, key } => {
                             let key = key.trim().to_string();
                             if key.is_empty() {

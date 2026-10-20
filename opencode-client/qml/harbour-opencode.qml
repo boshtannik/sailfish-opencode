@@ -286,6 +286,9 @@ ApplicationWindow {
     property bool sttModelReady: false
     // opencode working directory (setting). Loaded from bridge.settings_json().
     property string workdir: ""
+    // Server protocol adapter ("v1"/"v2"). Loaded from bridge.settings_json();
+    // changing it takes effect after the app (worker) restarts.
+    property string apiVersion: "v1"
     property bool ttsModelReady: chosenTts !== ""
 
     // For detecting the "agent busy → free" transition.
@@ -909,6 +912,8 @@ ApplicationWindow {
                 var sjson = JSON.parse(sj)
                 if (sjson.workdir !== undefined && sjson.workdir !== "")
                     app.workdir = sjson.workdir
+                if (sjson.api_version !== undefined && sjson.api_version !== "")
+                    app.apiVersion = sjson.api_version
             } catch (e) {
                 console.log("settings parse error: " + e)
             }
@@ -1171,6 +1176,10 @@ ApplicationWindow {
     // The `bridge` object is a dynamic property of this root window, visible only
     // as a bare identifier in THIS file. Pages must go through these wrappers.
     function setWorkdir(path) { bridge.set_workdir(path) }
+    function setApiVersion(v) {
+        app.apiVersion = v
+        bridge.set_api_version(v)
+    }
     function authUrl() { return bridge.auth_url() }
     function providerKeySet() { return bridge.provider_key_set() }
     function saveProviderKey(key) { bridge.save_provider_key(key) }
