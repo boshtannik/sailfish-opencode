@@ -210,8 +210,14 @@ impl OpenCodeApi for OpenCodeClient {
         session_id: &str,
         text: &str,
         agent: Option<String>,
-    ) -> impl Future<Output = Result<(), String>> + Send {
-        async move { OpenCodeClient::prompt_async(self, session_id, text, agent).await }
+    ) -> impl Future<Output = Result<Option<String>, String>> + Send {
+        async move {
+            // v1 does not return the user-message id in the response; it arrives
+            // via `message.updated` (see `expect_user_id` in the worker loop).
+            OpenCodeClient::prompt_async(self, session_id, text, agent)
+                .await
+                .map(|()| None)
+        }
     }
 
     fn abort(&self, session_id: &str) -> impl Future<Output = Result<bool, String>> + Send {

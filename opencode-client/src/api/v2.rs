@@ -400,12 +400,15 @@ impl OpenCodeApi for V2Adapter {
     }
 
     /// POST /api/session/{id}/prompt `{text*, agents?}` → `{data: Inbox.User}`.
+    /// The response's `data.id` is the user-message ID the server assigned
+    /// (same value it later stores as the user `MessageInfo.id`), so the caller
+    /// gets revert/fork id without waiting for an SSE event.
     fn prompt_async(
         &self,
         session_id: &str,
         text: &str,
         agent: Option<String>,
-    ) -> impl Future<Output = Result<(), String>> + Send {
+    ) -> impl Future<Output = Result<Option<String>, String>> + Send {
         async move {
             let url = format!("{}/api/session/{}/prompt", self.base, session_id);
             let mut body = serde_json::Map::new();
@@ -418,11 +421,14 @@ impl OpenCodeApi for V2Adapter {
                 .send()
                 .await
                 .map_err(|e| e.to_string())?;
-            if resp.status().is_success() {
-                Ok(())
-            } else {
-                Err(format!("HTTP {}", resp.status()))
+            if !resp.status().is_success() {
+                return Err(format!("HTTP {}", resp.status()));
             }
+            let v: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+            Ok(Self::unwrap_data(v)
+                .get("id")
+                .and_then(|id| id.as_str())
+                .map(str::to_string))
         }
     }
 

@@ -1601,17 +1601,28 @@ async fn run_stream<A: api::OpenCodeApi>(
                         if let Ok(mut q) = worker_pending.lock() {
                             q.push(format!("{REVERTED_TAG}0"));
                         }
-                        if let Err(e) = client.prompt_async(&sid, &prompt, session_agents.get(&sid).cloned()).await {
-                            log::error!("prompt_async: {e}");
-                            let emsg = e.to_string();
-                            if let Ok(mut q) = worker_pending.lock() {
-                                q.push(svc_line(now_ms(), i18n::K_PROMPT_ERROR, &[emsg]));
+                        match client.prompt_async(&sid, &prompt, session_agents.get(&sid).cloned()).await {
+                            Err(e) => {
+                                log::error!("prompt_async: {e}");
+                                let emsg = e.to_string();
+                                if let Ok(mut q) = worker_pending.lock() {
+                                    q.push(svc_line(now_ms(), i18n::K_PROMPT_ERROR, &[emsg]));
+                                }
+                                set_status(&status, "error");
                             }
-                            set_status(&status, "error");
-                        } else {
-                            // The user message will arrive via `message.updated`;
-                            // grab its id to let QML offer revert/fork on the bubble.
-                            expect_user_id = true;
+                            // v2 returns the user-message id in the response:
+                            // hand it straight to QML so the fresh bubble offers
+                            // revert/fork, no SSE wait needed.
+                            Ok(Some(id)) => {
+                                if let Ok(mut q) = worker_pending.lock() {
+                                    q.push(format!("{SET_MSG_ID_TAG}{id}"));
+                                }
+                            }
+                            // v1 does not: the user message arrives via
+                            // `message.updated` — grab its id there.
+                            Ok(None) => {
+                                expect_user_id = true;
+                            }
                         }
                     }
                 }

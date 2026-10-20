@@ -146,12 +146,18 @@ pub trait OpenCodeApi: Clone + Send + Sync + 'static {
     ) -> impl Future<Output = Result<serde_json::Value, String>> + Send;
 
     /// POST /session/{id}/prompt_async — send a prompt without waiting.
+    ///
+    /// Returns the ID the server assigned to the user message, when the protocol
+    /// reports it. v1 does not (the id arrives later via the `message.updated`
+    /// SSE event, so this returns `None` and the caller waits); v2 returns it in
+    /// the `POST .../prompt` response (`{data: SessionInboxUser.id}`), so the
+    /// caller never has to guess via SSE.
     fn prompt_async(
         &self,
         session_id: &str,
         text: &str,
         agent: Option<String>,
-    ) -> impl Future<Output = Result<(), String>> + Send;
+    ) -> impl Future<Output = Result<Option<String>, String>> + Send;
 
     /// POST /session/{id}/abort — abort execution.
     fn abort(&self, session_id: &str) -> impl Future<Output = Result<bool, String>> + Send;
