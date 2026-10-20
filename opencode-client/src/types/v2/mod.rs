@@ -144,5 +144,57 @@ mod tests {
         assert!(matches!(f.fields[0], Field::String { .. }));
         assert!(matches!(f.fields[1], Field::Boolean { .. }));
     }
+
+    /// Strict coverage gate for the v2 event surface.
+    ///
+    /// The vendored fixture is the *exact* event registry extracted from the
+    /// opencode 2.0.32 binary (`scripts/gen-v2-fixtures.sh`). This test asserts
+    /// it matches `event::dispatcher::RECOGNISED_V2` as a set, in both
+    /// directions:
+    ///   - every fixture event is recognised (a new/renamed upstream event
+    ///     fails the build instead of silently logging at runtime), and
+    ///   - every recognised event is in the fixture (a stale entry we no longer
+    ///     need, or a typo, fails too).
+    #[test]
+    fn every_2_0_32_event_is_recognised() {
+        use crate::event::dispatcher::RECOGNISED_V2;
+        use std::collections::BTreeSet;
+
+        let fixture: BTreeSet<&str> = include_str!("../../../tests/fixtures/v2-events-2.0.32.txt")
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .collect();
+        let recognised: BTreeSet<&str> = RECOGNISED_V2.iter().copied().collect();
+
+        let unhandled: Vec<&&str> = fixture.difference(&recognised).collect();
+        assert!(
+            unhandled.is_empty(),
+            "events in the 2.0.32 registry but missing from RECOGNISED_V2 \
+             (add the constant to types/v2/keys.rs and list it): {unhandled:?}"
+        );
+
+        let stale: Vec<&&str> = recognised.difference(&fixture).collect();
+        assert!(
+            stale.is_empty(),
+            "RECOGNISED_V2 lists events not in the 2.0.32 registry \
+             (remove them, or refresh the fixture via scripts/gen-v2-fixtures.sh): {stale:?}"
+        );
+    }
+
+    /// No duplicate entries in the recognition table (a copy-paste slip would
+    /// otherwise hide a missing event behind a duplicate).
+    #[test]
+    fn recognised_v2_has_no_duplicates() {
+        use crate::event::dispatcher::RECOGNISED_V2;
+        use std::collections::BTreeSet;
+
+        let unique: BTreeSet<&str> = RECOGNISED_V2.iter().copied().collect();
+        assert_eq!(
+            unique.len(),
+            RECOGNISED_V2.len(),
+            "RECOGNISED_V2 has duplicate entries"
+        );
+    }
 }
 

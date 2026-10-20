@@ -159,6 +159,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let worker_auth = env_auth.clone();
     let worker_stop_rx = stop_rx;
     let worker_settings = settings.clone();
+    // Woken by `Cmd::SetApiVersion`: tells the running stream to drop out so the
+    // worker re-reads the settings and rebuilds the adapter (hot v1↔v2 switch).
+    let settings_changed = Arc::new(tokio::sync::Notify::new());
+    let worker_settings_changed = settings_changed.clone();
     let worker = std::thread::Builder::new()
         .name("opencode-worker".into())
         .spawn(move || {
@@ -168,8 +172,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .expect("tokio runtime");
             rt.block_on(async move {
                 let st = Settings::load();
-                let api_version = api::ApiVersion::from_setting(&st.api_version);
-                log::info!("api_version from settings: {:?}", api_version);
                 let cwd = std::path::PathBuf::from(&st.workdir);
                 if let Err(e) = std::fs::create_dir_all(&cwd) {
                     log::warn!("failed to create workdir {cwd:?}: {e}");
@@ -217,7 +219,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         worker_questions,
                         worker_settings,
                         console_login,
-                        api_version,
+                        worker_settings_changed,
                         worker_stop_rx,
                     )
                     .await
@@ -257,6 +259,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// Background worker: (1) SSE events → QML bridge, (2) prompts from QML → server.
+/// Why the SSE loop stopped. Drives the worker's decision: reconnect with the
+/// same adapter, or re-read the settings and pick the adapter again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StreamEnd {
+    /// The server closed the stream (or the session was dropped) — reconnect
+    /// with the same adapter.
+    Reconnect,
+    /// A setting changed while the stream was running (`api_version`) — the
+    /// adapter and the SSE subscription must be rebuilt.
+    Reconfigure,
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn run_worker(
     base: String,
@@ -279,10 +293,16 @@ async fn run_worker(
     questions: Arc<std::sync::Mutex<String>>,
     settings: Arc<std::sync::Mutex<String>>,
     console_login: opencode_client::auth::ConsoleLogin,
-    api_version: api::ApiVersion,
+    settings_changed: Arc<tokio::sync::Notify>,
     mut stop_rx: tokio::sync::watch::Receiver<bool>,
 ) {
     loop {
+        // Re-read the setting on every (re)connect: the UI applies
+        // `api_version` hot (no app restart), and an external change on disk
+        // must also be picked up. One `Settings::load()` per connection is
+        // cheap compared to the SSE session itself.
+        let api_version = api::ApiVersion::from_setting(&Settings::load().api_version);
+        log::info!("stream adapter: {api_version:?}");
         tokio::select! {
             _ = stop_rx.changed() => {
                 log::info!("stop signal received, exiting");
@@ -310,9 +330,16 @@ async fn run_worker(
                 questions.clone(),
                 settings.clone(),
                 console_login.clone(),
+                settings_changed.clone(),
             ) => {
                 match r {
-                    Ok(()) => log::warn!("SSE stream ended, reconnecting…"),
+                    Ok(StreamEnd::Reconnect) => log::warn!("SSE stream ended, reconnecting…"),
+                    Ok(StreamEnd::Reconfigure) => {
+                        log::info!("settings changed while streaming — rebuilding the adapter");
+                        // No backoff: this is not a failure, just a hot switch.
+                        set_status(&status, "connecting");
+                        continue;
+                    }
                     Err(e) => log::error!("SSE error: {e}, reconnecting…"),
                 }
                 set_status(&status, "connecting");
@@ -348,14 +375,15 @@ async fn run_stream_adapter(
     questions: Arc<std::sync::Mutex<String>>,
     settings: Arc<std::sync::Mutex<String>>,
     console_login: opencode_client::auth::ConsoleLogin,
-) -> Result<(), String> {
+    settings_changed: Arc<tokio::sync::Notify>,
+) -> Result<StreamEnd, String> {
     match api_version {
         api::ApiVersion::V1 => {
             let client = api::OpenCodeClient::new(base.clone(), auth.clone());
             run_stream(
                 client, dispatcher, worker_pending, worker_prompts, status, sessions,
                 commands, current_session, compacting, nav, todos, models, sounds, voice, tools,
-                permissions, questions, settings, console_login,
+                permissions, questions, settings, console_login, settings_changed,
             )
             .await
         }
@@ -364,7 +392,7 @@ async fn run_stream_adapter(
             run_stream(
                 client, dispatcher, worker_pending, worker_prompts, status, sessions,
                 commands, current_session, compacting, nav, todos, models, sounds, voice, tools,
-                permissions, questions, settings, console_login,
+                permissions, questions, settings, console_login, settings_changed,
             )
             .await
         }
@@ -525,7 +553,16 @@ impl<'a> TurnState<'a> {
         sessions: &Arc<std::sync::Mutex<String>>,
     ) {
         use opencode_client::types::v2::event as v2;
-        if env.kind != "session.idle" {
+        use opencode_client::types::v2::keys as k;
+        // Turn end in 2.0.32 is `session.execution.succeeded` (success) or
+        // `session.execution.interrupted` (user abort) — the legacy
+        // `session.idle` is not emitted on this path. All three end the turn
+        // cleanly; only `session.execution.failed` is an error (handled in the
+        // dispatcher).
+        if !matches!(
+            env.kind.as_str(),
+            k::IDLE | k::EXECUTION_SUCCEEDED | k::EXECUTION_INTERRUPTED
+        ) {
             return;
         }
         let Ok(d): Result<v2::SessionIdleData, _> = serde_json::from_value(env.data.clone()) else {
@@ -615,7 +652,8 @@ async fn run_stream<A: api::OpenCodeApi>(
     questions: Arc<std::sync::Mutex<String>>,
     settings: Arc<std::sync::Mutex<String>>,
     console_login: opencode_client::auth::ConsoleLogin,
-) -> Result<(), String> {
+    settings_changed: Arc<tokio::sync::Notify>,
+) -> Result<StreamEnd, String> {
     let mut stream = client.event_stream().await?;
     log::info!("SSE connected");
     set_status(&status, "idle");
@@ -703,6 +741,13 @@ async fn run_stream<A: api::OpenCodeApi>(
     // Main loop: listen to SSE and poll the bridge for new prompts in parallel.
     loop {
         tokio::select! {
+            // A settings change (`api_version`) while streaming: stop this SSE
+            // session so `run_worker` re-reads the settings and rebuilds the
+            // adapter. No error banner — a clean reconnect.
+            _ = settings_changed.notified() => {
+                log::info!("settings changed: leaving the stream to rebuild the adapter");
+                return Ok(StreamEnd::Reconfigure);
+            }
             item = stream.next() => {
                 match item {
                     Some(Ok(ce)) => {
@@ -1005,7 +1050,7 @@ async fn run_stream<A: api::OpenCodeApi>(
                     None => {
                         log::error!("SSE closed");
                         set_status(&status, "error");
-                        return Ok(());
+                        return Ok(StreamEnd::Reconnect);
                     }
                 }
             }
@@ -1509,6 +1554,10 @@ async fn run_stream<A: api::OpenCodeApi>(
                             if let Ok(mut g) = settings.lock() {
                                 *g = st.to_json();
                             }
+                            // Hot-switch: drop the current SSE/adapter so the
+                            // worker rebuilds it with the new version. No app
+                            // restart (Jack's requirement).
+                            settings_changed.notify_one();
                         }
                         Cmd::SetProviderKey { provider, key } => {
                             let key = key.trim().to_string();

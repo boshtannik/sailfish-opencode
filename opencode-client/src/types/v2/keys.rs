@@ -132,6 +132,8 @@ pub const PLUGIN_UPDATED: &str = "plugin.updated";
 // ── Permissions / questions / forms / server ─────────────────────────────
 pub const PERMISSION_ASKED: &str = "permission.asked";
 pub const PERMISSION_REPLIED: &str = "permission.replied";
+pub const PERMISSION_REJECTED: &str = "permission.rejected";
+// v1 questions are legacy (v2 uses forms) but the server still emits them.
 pub const QUESTION_ASKED: &str = "question.asked";
 pub const QUESTION_REPLIED: &str = "question.replied";
 pub const QUESTION_REJECTED: &str = "question.rejected";
@@ -139,3 +141,126 @@ pub const FORM_CREATED: &str = "form.created";
 pub const FORM_REPLIED: &str = "form.replied";
 pub const FORM_CANCELLED: &str = "form.cancelled";
 pub const SERVER_CONNECTED: &str = "server.connected";
+
+// ── Full 2.0.32 registry: events we consciously recognise (handled by an arm
+// or ignored on purpose). The completeness test
+// (`types::v2::tests::every_2_0_32_event_is_recognised`) asserts that every
+// name in `tests/fixtures/v2-events-2.0.32.txt` is listed in
+// `event::dispatcher::RECOGNISED_V2`, so a NEW upstream event fails the build
+// instead of silently logging. See `scripts/gen-v2-fixtures.sh`.
+//
+// Lifecycle / session metadata
+pub const SESSION_CREATED: &str = "session.created";
+pub const SESSION_UPDATED: &str = "session.updated";
+pub const SESSION_FORKED: &str = "session.forked";
+pub const SESSION_VIEWED: &str = "session.viewed";
+pub const SESSION_COMPACTED: &str = "session.compacted";
+pub const SESSION_DIFF: &str = "session.diff";
+pub const SESSION_ERROR: &str = "session.error";
+pub const SESSION_PERMISSIONS: &str = "session.permissions";
+pub const SESSION_RETRY_SCHEDULED: &str = "session.retry.scheduled";
+pub const SESSION_SKILL_ACTIVATED: &str = "session.skill.activated";
+pub const SESSION_INSTRUCTIONS_UPDATED: &str = "session.instructions.updated";
+pub const SESSION_METADATA_UPDATED: &str = "session.metadata.updated";
+// Session inbox (durable prompt queue)
+pub const SESSION_INBOX_ENQUEUED: &str = "session.inbox.enqueued";
+pub const SESSION_INBOX_DELIVERED: &str = "session.inbox.delivered";
+pub const SESSION_INBOX_CANCELLED: &str = "session.inbox.cancelled";
+pub const SESSION_INBOX_DELIVERY_CHANGED: &str = "session.inbox.delivery.changed";
+// Top-level compaction *job* events (distinct from the `session.compaction.*`
+// family above: those are per-session stream updates, these are queue/job
+// lifecycle notifications for the compaction worker).
+pub const COMPACTION_JOB_FAILED: &str = "compaction.failed";
+pub const COMPACTION_JOB_INTERRUPTED: &str = "compaction.interrupted";
+pub const COMPACTION_JOB_UNAVAILABLE: &str = "compaction.unavailable";
+// Tool-internal diagnostics
+pub const TOOL_EXECUTION: &str = "tool.execution";
+pub const TOOL_INPUT_INCOMPLETE: &str = "tool.input-incomplete";
+pub const TOOL_INPUT_JSON: &str = "tool.input-json";
+pub const TOOL_INTERRUPTED: &str = "tool.interrupted";
+pub const TOOL_RESULT_MISSING: &str = "tool.result-missing";
+pub const TOOL_UNKNOWN: &str = "tool.unknown";
+// Message lifecycle (v1 names; still on the bus)
+pub const MESSAGE_UPDATED: &str = "message.updated";
+pub const MESSAGE_REMOVED: &str = "message.removed";
+pub const MESSAGE_PART_UPDATED: &str = "message.part.updated";
+pub const MESSAGE_PART_DELTA: &str = "message.part.delta";
+pub const MESSAGE_PART_REMOVED: &str = "message.part.removed";
+// Provider diagnostics
+pub const PROVIDER_AUTH: &str = "provider.auth";
+pub const PROVIDER_CONTENT_FILTER: &str = "provider.content-filter";
+pub const PROVIDER_ERROR: &str = "provider.error";
+pub const PROVIDER_NO_ROUTE: &str = "provider.no-route";
+pub const PROVIDER_UNKNOWN: &str = "provider.unknown";
+pub const PROVIDER_UNSUPPORTED_OPERATION: &str = "provider.unsupported-operation";
+// PTY (terminal) lifecycle
+pub const PTY_CREATED: &str = "pty.created";
+pub const PTY_UPDATED: &str = "pty.updated";
+pub const PTY_DELETED: &str = "pty.deleted";
+pub const PTY_EXITED: &str = "pty.exited";
+pub const PERSISTENT_PTY_ADDED: &str = "persistent-pty.added";
+pub const PERSISTENT_PTY_REMOVED: &str = "persistent-pty.removed";
+// Shell lifecycle
+pub const SHELL_CREATED: &str = "shell.created";
+pub const SHELL_DELETED: &str = "shell.deleted";
+pub const SHELL_EXITED: &str = "shell.exited";
+// Workspace / worktree
+pub const WORKSPACE_READY: &str = "workspace.ready";
+pub const WORKSPACE_FAILED: &str = "workspace.failed";
+pub const WORKSPACE_STATUS: &str = "workspace.status";
+pub const WORKTREE_READY: &str = "worktree.ready";
+pub const WORKTREE_FAILED: &str = "worktree.failed";
+pub const WORKTREE_RESOLVED: &str = "worktree.resolved";
+pub const WORKTREE_UPDATED: &str = "worktree.updated";
+// mcp / lsp / vcs / fs / file / config / credential
+pub const MCP_TOOLS_CHANGED: &str = "mcp.tools.changed";
+pub const MCP_PROMPTS_CHANGED: &str = "mcp.prompts.changed";
+pub const MCP_RESOURCES_CHANGED: &str = "mcp.resources.changed";
+pub const MCP_STATUS_CHANGED: &str = "mcp.status.changed";
+pub const LSP_UPDATED: &str = "lsp.updated";
+pub const VCS_BRANCH_UPDATED: &str = "vcs.branch.updated";
+pub const FILESYSTEM_CHANGED: &str = "filesystem.changed";
+pub const FILE_EDITED: &str = "file.edited";
+pub const CONFIG_UPDATED: &str = "config.updated";
+pub const CREDENTIAL_UPDATED: &str = "credential.updated";
+pub const CREDENTIAL_SWITCHED: &str = "credential.switched";
+pub const INSTRUCTION_DISCOVERY_UPDATED: &str = "instruction-discovery.updated";
+pub const MODELS_DEV_REFRESHED: &str = "models-dev.refreshed";
+pub const WELLKNOWN_UPDATED: &str = "wellknown.updated";
+// Command / installation / update
+pub const COMMAND_EXECUTED: &str = "command.executed";
+pub const INSTALLATION_UPDATED: &str = "installation.updated";
+pub const INSTALLATION_UPDATE_AVAILABLE: &str = "installation.update-available";
+// Turn / queue
+pub const TURN_IDLE: &str = "turn.idle";
+pub const TURN_SEND: &str = "turn.send";
+pub const TURN_DURATION: &str = "turn.duration";
+pub const QUEUED_PROMPTS: &str = "queued.prompts";
+// SDK plugin (emitted by the JS SDK layer, not the core bus)
+pub const SDK_PLUGIN_UPDATED: &str = "sdk.plugin.updated";
+// TUI-driven events (no UI effect in this client; recognised to stay quiet)
+pub const TUI_COMMAND_EXECUTE: &str = "tui.command.execute";
+pub const TUI_PROMPT_APPEND: &str = "tui.prompt.append";
+pub const TUI_SESSION_SELECT: &str = "tui.session.select";
+pub const TUI_TOAST_SHOW: &str = "tui.toast.show";
+// UI / transport / rpc internals (never relevant to this client, but present
+// in the registry; recognised so the strict completeness test passes and a
+// rename upstream still gets caught by the fixture diff).
+pub const CLIENT_CONNECTION: &str = "client.connection";
+pub const GLOBAL_DISPOSED: &str = "global.disposed";
+pub const LOCATION_SHUTDOWN: &str = "location.shutdown";
+pub const LOG_SYNCED: &str = "log.synced";
+pub const RPC_INTERNAL: &str = "rpc.internal";
+pub const RESPONSE_CREATE: &str = "response.create";
+pub const RESPONSE_OUTPUT_ITEM_DONE: &str = "response.output_item.done";
+pub const STREAM_PATCH: &str = "stream.patch";
+pub const STREAM_SUBAGENT: &str = "stream.subagent";
+pub const STREAM_VIEW: &str = "stream.view";
+pub const UI_ARROW: &str = "ui.arrow";
+pub const UI_CLICK: &str = "ui.click";
+pub const UI_ENTER: &str = "ui.enter";
+pub const UI_FOCUS: &str = "ui.focus";
+pub const UI_MOUSE: &str = "ui.mouse";
+pub const UI_PRESS: &str = "ui.press";
+pub const UI_RESIZE: &str = "ui.resize";
+pub const UI_TYPE: &str = "ui.type";

@@ -1209,6 +1209,12 @@ ApplicationWindow {
     // At startup we sync the saved TTS mode (auto/button/off)
     // with the Rust side — otherwise `onTtsModeChanged` will not fire for the initial value.
     Component.onCompleted: {
+        // Pull the persisted settings (api_version/workdir) once at start: the
+        // worker republishes them only when a settings command runs, so without
+        // this the UI would keep the QML defaults even though the saved value
+        // differs (visually "the setting does not survive a restart"). poll()
+        // reads settings_json() and applies it to app.apiVersion/app.workdir.
+        bridge.get_settings()
         app.voiceCmd(app.cmdTtsMode, app.ttsMode)
     }
 

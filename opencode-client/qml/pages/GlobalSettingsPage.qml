@@ -309,8 +309,8 @@ Item {
 
             ComboBox {
                 id: apiVersionCombo
-                label: qsTr("OpenCode API version (restart required)")
-                description: qsTr("v1 — opencode 1.x, v2 — opencode 2.x. Change only if you know the server version.")
+                label: qsTr("OpenCode API version")
+                description: qsTr("v1 — opencode 1.x, v2 — opencode 2.x. Applied immediately.")
                 currentIndex: (appWindow.apiVersion === "v2") ? 1 : 0
                 menu: ContextMenu {
                     MenuItem { text: qsTr("v1 (opencode 1.x)") }

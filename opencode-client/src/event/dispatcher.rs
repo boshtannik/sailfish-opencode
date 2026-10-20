@@ -23,6 +23,7 @@ use crate::types::message::Message;
 use crate::types::permission::Permission;
 use crate::types::tool::ToolState;
 use crate::types::v2::EventEnvelope;
+use crate::types::v2::keys as k;
 use crate::types::QuestionRequest;
 
 /// Minimum interval between two live pushes (reasoning or answer) — throttles a
@@ -438,7 +439,15 @@ pub fn dispatch_v2(
         }
         k::STEP_FAILED => match from_data::<v2::StepEndedData>(env) {
             Ok(d) => {
-                on_session_error_v2(stream, d.error.as_ref());
+                // A user-initiated abort also arrives as `step.failed` (payload
+                // `{error:{type:"aborted",…}}`) right before
+                // `session.execution.interrupted`. In v1 an abort was a clean
+                // stop, so we must NOT paint the error banner for it — the
+                // execution.* arm below drives the turn end. Real failures
+                // (non-aborted) still surface as errors.
+                if !is_aborted_error(d.error.as_ref()) {
+                    on_session_error_v2(stream, d.error.as_ref());
+                }
                 true
             }
             Err(e) => from_data_error(env, &e),
@@ -578,8 +587,19 @@ pub fn dispatch_v2(
         // own send path). Recognised so they are not reported as unknown.
         k::SYNTHETIC | k::REVERT_STAGED | k::REVERT_CLEARED | k::REVERT_COMMITTED
         | k::SHELL_STARTED | k::SHELL_ENDED | k::MESSAGE_CONTENT_UPDATED
-        | k::USAGE_RECORDED | k::USAGE_UPDATED | k::EXECUTION_STARTED | k::EXECUTION_FAILED
-        | k::EXECUTION_INTERRUPTED | k::EXECUTION_SUCCEEDED => true,
+        | k::USAGE_RECORDED | k::USAGE_UPDATED | k::EXECUTION_STARTED => true,
+        // ── turn lifecycle (2.0.32) ───────────────────────────────────
+        // The real turn-end signal: `session.execution.succeeded` on success,
+        // `session.execution.interrupted` on a user stop. Both are a clean end
+        // (the main loop's `on_v2_idle` flushes the answer and sets idle).
+        // `session.execution.failed` is a genuine failure → error banner.
+        k::EXECUTION_SUCCEEDED | k::EXECUTION_INTERRUPTED => true,
+        k::EXECUTION_FAILED => {
+            if let Ok(mut s) = stream.status.lock() {
+                *s = "error".to_string();
+            }
+            true
+        },
         // ── catalog/config invalidation (2.0.32): re-read lazily ──────
         k::PROJECT_UPDATED | k::INTEGRATION_UPDATED | k::PROVIDER_UPDATED | k::MODEL_UPDATED
         | k::AGENT_UPDATED | k::COMMAND_UPDATED | k::SKILL_UPDATED | k::WEBSEARCH_UPDATED
@@ -700,10 +720,14 @@ pub fn dispatch_v2(
         k::FORM_REPLIED | k::FORM_CANCELLED => false,
         // ── notifications we do not render ────────────────────────────
         k::SERVER_CONNECTED => false,
-        // Everything else is a v2 event with no UI handling yet. Listed via the
-        // fallback so a NEW upstream event is surfaced once (never dropped).
+        // Everything else is a v2 event with no UI handling. Recognised types
+        // (see `RECOGNISED_V2`) are ignored silently; a genuinely unknown type
+        // is reported once (never dropped). The completeness test keeps
+        // `RECOGNISED_V2` in lockstep with the server registry.
         _ => {
-            note_unimplemented_v2(&env.kind);
+            if !is_recognised_v2(kind) {
+                note_unimplemented_v2(kind);
+            }
             false
         }
     }
@@ -832,6 +856,17 @@ fn on_session_error_v2(stream: &mut StreamState<'_>, error: Option<&serde_json::
     }
 }
 
+/// True when a v2 structured error marks a user-initiated abort
+/// (`{type:"aborted", …}`). Such a stop is a clean interrupt, not a failure, so
+/// it must not raise the error banner (v1 parity).
+fn is_aborted_error(error: Option<&serde_json::Value>) -> bool {
+    use crate::types::v2::keys as k;
+    error
+        .and_then(|e| e.get(k::TYPE))
+        .and_then(|v| v.as_str())
+        == Some("aborted")
+}
+
 /// Human-readable text from a v2 structured error (`{type, message, status?}`).
 fn human_session_error_value(error: Option<&serde_json::Value>) -> String {
     use crate::types::v2::keys as k;
@@ -934,6 +969,202 @@ fn on_tool_failed_v2(state: &mut DispatcherState, id: &str, data: &serde_json::V
         .map(content_to_string)
         .unwrap_or_default();
     state.tools.set_state(id, ToolState::Error { input, error });
+}
+
+/// Every v2 event type this client consciously knows about — either handled by
+/// a dedicated arm in `dispatch_v2`, or recognised and deliberately ignored.
+///
+/// This is the strict-gate source of truth for
+/// `types::v2::tests::every_2_0_32_event_is_recognised`: that test asserts the
+/// set below is *exactly* the event registry of the vendored opencode fixture
+/// (`tests/fixtures/v2-events-2.0.32.txt`). A new upstream event (or a renamed
+/// one) makes the test fail, so drift is caught at build time rather than by a
+/// silent `note_unimplemented_v2` warning at runtime.
+///
+/// Keep in sync with `types::v2::keys` (each entry is one of those constants)
+/// and refresh the fixture via `scripts/gen-v2-fixtures.sh` when bumping
+/// opencode. See `vault/Разведка-v2.md` §10.
+pub const RECOGNISED_V2: &[&str] = &[
+    // Turn / step / text / reasoning
+    k::STEP_STARTED,
+    k::STEP_ENDED,
+    k::STEP_STREAMED,
+    k::STEP_FAILED,
+    k::TEXT_STARTED,
+    k::TEXT_DELTA,
+    k::TEXT_ENDED,
+    k::REASONING_STARTED,
+    k::REASONING_DELTA,
+    k::REASONING_ENDED,
+    // Tool calls
+    k::TOOL_INPUT_STARTED,
+    k::TOOL_INPUT_DELTA,
+    k::TOOL_INPUT_ENDED,
+    k::TOOL_CALLED,
+    k::TOOL_PROGRESS,
+    k::TOOL_SUCCESS,
+    k::TOOL_FAILED,
+    // Tool diagnostics (no UI effect)
+    k::TOOL_EXECUTION,
+    k::TOOL_INPUT_INCOMPLETE,
+    k::TOOL_INPUT_JSON,
+    k::TOOL_INTERRUPTED,
+    k::TOOL_RESULT_MISSING,
+    k::TOOL_UNKNOWN,
+    // Compaction (session-scoped + top-level)
+    k::COMPACTION_STARTED,
+    k::COMPACTION_DELTA,
+    k::COMPACTION_ENDED,
+    k::COMPACTION_FAILED,
+    k::COMPACTION_JOB_FAILED,
+    k::COMPACTION_JOB_INTERRUPTED,
+    k::COMPACTION_JOB_UNAVAILABLE,
+    // Session lifecycle / metadata
+    k::SESSION_CREATED,
+    k::SESSION_UPDATED,
+    k::SESSION_FORKED,
+    k::SESSION_VIEWED,
+    k::SESSION_COMPACTED,
+    k::SESSION_DIFF,
+    k::SESSION_ERROR,
+    k::SESSION_PERMISSIONS,
+    k::SESSION_RETRY_SCHEDULED,
+    k::SESSION_SKILL_ACTIVATED,
+    k::SESSION_INSTRUCTIONS_UPDATED,
+    k::SESSION_METADATA_UPDATED,
+    k::RENAMED,
+    k::MOVED,
+    k::DELETED,
+    k::IDLE,
+    k::STATUS,
+    k::AGENT_SELECTED,
+    k::MODEL_SELECTED,
+    k::MESSAGE_CONTENT_UPDATED,
+    k::USAGE_RECORDED,
+    k::USAGE_UPDATED,
+    k::EXECUTION_STARTED,
+    k::EXECUTION_FAILED,
+    k::EXECUTION_INTERRUPTED,
+    k::EXECUTION_SUCCEEDED,
+    // Session inbox (durable prompt queue)
+    k::SESSION_INBOX_ENQUEUED,
+    k::SESSION_INBOX_DELIVERED,
+    k::SESSION_INBOX_CANCELLED,
+    k::SESSION_INBOX_DELIVERY_CHANGED,
+    // Revert / shell / synthetic
+    k::REVERT_STAGED,
+    k::REVERT_CLEARED,
+    k::REVERT_COMMITTED,
+    k::SHELL_STARTED,
+    k::SHELL_ENDED,
+    k::SHELL_CREATED,
+    k::SHELL_DELETED,
+    k::SHELL_EXITED,
+    k::SYNTHETIC,
+    // Catalog / config invalidation
+    k::PROJECT_UPDATED,
+    k::INTEGRATION_UPDATED,
+    k::PROVIDER_UPDATED,
+    k::MODEL_UPDATED,
+    k::AGENT_UPDATED,
+    k::COMMAND_UPDATED,
+    k::SKILL_UPDATED,
+    k::WEBSEARCH_UPDATED,
+    k::REFERENCE_UPDATED,
+    k::PLUGIN_UPDATED,
+    k::SDK_PLUGIN_UPDATED,
+    k::CONFIG_UPDATED,
+    k::CREDENTIAL_UPDATED,
+    k::CREDENTIAL_SWITCHED,
+    k::INSTRUCTION_DISCOVERY_UPDATED,
+    k::MODELS_DEV_REFRESHED,
+    k::WELLKNOWN_UPDATED,
+    k::LSP_UPDATED,
+    k::VCS_BRANCH_UPDATED,
+    k::MCP_TOOLS_CHANGED,
+    k::MCP_PROMPTS_CHANGED,
+    k::MCP_RESOURCES_CHANGED,
+    k::MCP_STATUS_CHANGED,
+    k::FILE_EDITED,
+    k::FILESYSTEM_CHANGED,
+    k::COMMAND_EXECUTED,
+    k::INSTALLATION_UPDATED,
+    k::INSTALLATION_UPDATE_AVAILABLE,
+    // Message lifecycle (v1 names, still on the bus)
+    k::MESSAGE_UPDATED,
+    k::MESSAGE_REMOVED,
+    k::MESSAGE_PART_UPDATED,
+    k::MESSAGE_PART_DELTA,
+    k::MESSAGE_PART_REMOVED,
+    // Provider diagnostics
+    k::PROVIDER_AUTH,
+    k::PROVIDER_CONTENT_FILTER,
+    k::PROVIDER_ERROR,
+    k::PROVIDER_NO_ROUTE,
+    k::PROVIDER_UNKNOWN,
+    k::PROVIDER_UNSUPPORTED_OPERATION,
+    // PTY / persistent PTY
+    k::PTY_CREATED,
+    k::PTY_UPDATED,
+    k::PTY_DELETED,
+    k::PTY_EXITED,
+    k::PERSISTENT_PTY_ADDED,
+    k::PERSISTENT_PTY_REMOVED,
+    // Permissions / forms / server
+    // NOTE: v1 `question.*` arms still exist in `dispatch_v2` for protocol
+    // compatibility, but questions are NOT in the 2.0.32 event registry (v2
+    // uses forms), so they are intentionally absent from this list.
+    k::PERMISSION_ASKED,
+    k::PERMISSION_REPLIED,
+    k::PERMISSION_REJECTED,
+    k::FORM_CREATED,
+    k::FORM_REPLIED,
+    k::FORM_CANCELLED,
+    k::SERVER_CONNECTED,
+    // Turn / queue
+    k::TURN_IDLE,
+    k::TURN_SEND,
+    k::TURN_DURATION,
+    k::QUEUED_PROMPTS,
+    // Workspace / worktree
+    k::WORKSPACE_READY,
+    k::WORKSPACE_FAILED,
+    k::WORKSPACE_STATUS,
+    k::WORKTREE_READY,
+    k::WORKTREE_FAILED,
+    k::WORKTREE_RESOLVED,
+    k::WORKTREE_UPDATED,
+    // TUI-driven (no effect in this client)
+    k::TUI_COMMAND_EXECUTE,
+    k::TUI_PROMPT_APPEND,
+    k::TUI_SESSION_SELECT,
+    k::TUI_TOAST_SHOW,
+    // UI / transport / rpc internals
+    k::CLIENT_CONNECTION,
+    k::GLOBAL_DISPOSED,
+    k::LOCATION_SHUTDOWN,
+    k::LOG_SYNCED,
+    k::RPC_INTERNAL,
+    k::RESPONSE_CREATE,
+    k::RESPONSE_OUTPUT_ITEM_DONE,
+    k::STREAM_PATCH,
+    k::STREAM_SUBAGENT,
+    k::STREAM_VIEW,
+    k::UI_ARROW,
+    k::UI_CLICK,
+    k::UI_ENTER,
+    k::UI_FOCUS,
+    k::UI_MOUSE,
+    k::UI_PRESS,
+    k::UI_RESIZE,
+    k::UI_TYPE,
+];
+
+/// Is `kind` an event type this client knows about (handled or intentionally
+/// ignored)? Backs the `dispatch_v2` fallback so only genuinely unknown types
+/// are reported.
+pub fn is_recognised_v2(kind: &str) -> bool {
+    RECOGNISED_V2.contains(&kind)
 }
 
 /// Logs (once per event type) that a v2 event is not implemented in the UI.
