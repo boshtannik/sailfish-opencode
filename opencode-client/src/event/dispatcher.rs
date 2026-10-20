@@ -22,6 +22,7 @@ use crate::types::event::{
 use crate::types::message::Message;
 use crate::types::permission::Permission;
 use crate::types::tool::ToolState;
+use crate::types::v2::EventEnvelope;
 use crate::types::QuestionRequest;
 
 /// Minimum interval between two live pushes (reasoning or answer) — throttles a
@@ -378,6 +379,559 @@ pub async fn dispatch(event: &Event, state: &mut DispatcherState, stream: &mut S
             note_unimplemented(event);
             false
         }
+    }
+}
+
+// ── v2 event dispatch (`GET /api/event`) ─────────────────────────────────
+//
+// v2 events arrive as flat envelopes (`{id, type, created, data}`) on
+// `/api/event`; their fields and identifiers differ from v1 (see
+// `vault/Разведка-v2.md` §2–§4). The handlers below normalise them onto the
+// SAME `DispatcherState`/`StreamState` accumulators the v1 path uses, so the
+// main loop's rendering (live text/reasoning, idle flush, tools strip) is
+// version-agnostic.
+//
+// Key mapping (v1 → v2):
+//   * text/reasoning part id → `(assistantMessageID, ordinal)`;
+//   * tool `callID` → `id`;
+//   * `message.updated` (register assistant) → `session.step.started` /
+//     `session.text.started` (`assistantMessageID`);
+//   * `session.compacted` → `session.compaction.ended`.
+
+/// Stable accumulator key for a v2 text/reasoning block: v1 keyed parts by a
+/// server `partID`; v2 identifies a block by `(assistantMessageID, ordinal)`.
+fn v2_part_key(assistant_message_id: &str, ordinal: i64) -> String {
+    format!("{assistant_message_id}:{ordinal}")
+}
+
+/// Dispatch a single v2 envelope onto the shared state. Mirrors `dispatch`:
+/// every known type is handled, the rest warn once via `note_unimplemented_v2`.
+pub fn dispatch_v2(
+    env: &EventEnvelope,
+    state: &mut DispatcherState,
+    stream: &mut StreamState<'_>,
+) -> bool {
+    use crate::types::v2::event as v2;
+    match env.kind.as_str() {
+        // ── turn lifecycle ────────────────────────────────────────────
+        "session.step.started" => {
+            match from_data::<v2::StepStartedData>(env) {
+                Ok(d) => {
+                    // A step opens the assistant message: register it so its
+                    // text parts feed the answer (v1 did this at
+                    // `message.updated`).
+                    stream.assistant_messages.insert(d.assistant_message_id);
+                    true
+                }
+                Err(e) => from_data_error(env, &e),
+            }
+        }
+        "session.step.ended" | "session.step.streamed" => {
+            // Terminal step info (cost/tokens/finish) is not rendered yet; the
+            // turn end is driven by `session.idle`/`session.status`. Nothing to
+            // record here — but the envelopes must still be recognised.
+            false
+        }
+        "session.step.failed" => match from_data::<v2::StepEndedData>(env) {
+            Ok(d) => {
+                on_session_error_v2(stream, d.error.as_ref());
+                true
+            }
+            Err(e) => from_data_error(env, &e),
+        },
+        // ── answer text ───────────────────────────────────────────────
+        "session.text.started" => match from_data::<v2::TextStartedData>(env) {
+            Ok(d) => {
+                stream.assistant_messages.insert(d.assistant_message_id);
+                true
+            }
+            Err(e) => from_data_error(env, &e),
+        },
+        "session.text.delta" => match from_data::<v2::TextDeltaData>(env) {
+            Ok(d) => {
+                on_v2_text_delta(stream, &d);
+                true
+            }
+            Err(e) => from_data_error(env, &e),
+        },
+        "session.text.ended" => match from_data::<v2::TextEndedData>(env) {
+            Ok(d) => {
+                on_v2_text_ended(stream, &d);
+                true
+            }
+            Err(e) => from_data_error(env, &e),
+        },
+        // ── reasoning ─────────────────────────────────────────────────
+        "session.reasoning.started" => match from_data::<v2::TextStartedData>(env) {
+            Ok(_) => true,
+            Err(e) => from_data_error(env, &e),
+        },
+        "session.reasoning.delta" => match from_data::<v2::TextDeltaData>(env) {
+            Ok(d) => {
+                on_v2_reasoning_delta(stream, &d);
+                true
+            }
+            Err(e) => from_data_error(env, &e),
+        },
+        "session.reasoning.ended" => match from_data::<v2::TextEndedData>(env) {
+            Ok(d) => {
+                on_v2_reasoning_ended(stream, &d);
+                true
+            }
+            Err(e) => from_data_error(env, &e),
+        },
+        // ── tool calls ────────────────────────────────────────────────
+        "session.tool.input.started" => match from_data::<v2::ToolInputStartedData>(env) {
+            Ok(d) => {
+                on_tool_input_started_v2(state, &d.id, &d.name);
+                true
+            }
+            Err(e) => from_data_error(env, &e),
+        },
+        "session.tool.input.delta" => match from_data::<v2::ToolInputDeltaData>(env) {
+            Ok(d) => {
+                on_tool_input_delta_v2(state, &d.id, &d.delta);
+                true
+            }
+            Err(e) => from_data_error(env, &e),
+        },
+        "session.tool.input.ended" => match from_data::<v2::ToolInputEndedData>(env) {
+            Ok(d) => {
+                on_tool_input_ended_v2(state, &d.id, &d.text);
+                true
+            }
+            Err(e) => from_data_error(env, &e),
+        },
+        "session.tool.called" => match from_data::<v2::ToolCalledData>(env) {
+            Ok(d) => {
+                on_tool_called_v2(state, &d.id, &env.data);
+                true
+            }
+            Err(e) => from_data_error(env, &e),
+        },
+        "session.tool.progress" => match from_data::<v2::ToolProgressData>(env) {
+            Ok(d) => {
+                on_tool_progress_v2(state, &d.id);
+                true
+            }
+            Err(e) => from_data_error(env, &e),
+        },
+        "session.tool.success" => match from_data::<v2::ToolSuccessData>(env) {
+            Ok(d) => {
+                on_tool_success_v2(state, &d.id, &env.data);
+                true
+            }
+            Err(e) => from_data_error(env, &e),
+        },
+        "session.tool.failed" => match from_data::<v2::ToolFailedData>(env) {
+            Ok(d) => {
+                on_tool_failed_v2(state, &d.id, &env.data);
+                true
+            }
+            Err(e) => from_data_error(env, &e),
+        },
+        // ── compaction ────────────────────────────────────────────────
+        "session.compaction.started" => match from_data::<v2::CompactionStartedData>(env) {
+            Ok(d) => {
+                on_compaction_started_v2(stream, &d.session_id);
+                true
+            }
+            Err(e) => from_data_error(env, &e),
+        },
+        "session.compaction.delta" => {
+            // The growing compaction summary is not rendered live yet; the
+            // final text arrives with `compaction.ended`, which reloads history.
+            false
+        }
+        "session.compaction.ended" => match from_data::<v2::CompactionEndedData>(env) {
+            Ok(d) => {
+                on_compaction_ended_v2(stream, &d.session_id);
+                true
+            }
+            Err(e) => from_data_error(env, &e),
+        },
+        "session.compaction.failed" => match from_data::<v2::CompactionFailedData>(env) {
+            Ok(d) => {
+                if stream.current_session == Some(d.session_id.as_str()) {
+                    if let Ok(mut g) = stream.compacting.lock() {
+                        *g = false;
+                    }
+                }
+                on_session_error_v2(stream, Some(&d.error));
+                true
+            }
+            Err(e) => from_data_error(env, &e),
+        },
+        // ── session lifecycle ─────────────────────────────────────────
+        "session.renamed" | "session.moved" | "session.agent.selected"
+        | "session.model.selected" => {
+            // Session metadata changes are re-read from the sessions list on the
+            // next poll; no live-accumulator effect.
+            true
+        }
+        "session.deleted" => {
+            if let Some(sid) = env.data.get("sessionID").and_then(|v| v.as_str()) {
+                state.sessions.remove(sid);
+                state.session_meta.remove(sid);
+            }
+            true
+        }
+        // ── status / idle ─────────────────────────────────────────────
+        "session.idle" => match from_data::<v2::SessionIdleData>(env) {
+            Ok(d) => {
+                if let Some(fsm) = state.sessions.get_mut(&d.sessionID) {
+                    fsm.apply(crate::types::session::SessionStatus::Idle);
+                }
+                if stream.current_session == Some(d.sessionID.as_str()) {
+                    if let Ok(mut g) = stream.compacting.lock() {
+                        *g = false;
+                    }
+                }
+                // The main loop flushes the answer on `session.idle` via
+                // `idle_session_id_v2`.
+                true
+            }
+            Err(e) => from_data_error(env, &e),
+        },
+        "session.status" => match from_data::<v2::SessionStatusData>(env) {
+            Ok(d) => {
+                let fsm = state
+                    .sessions
+                    .entry(d.sessionID.clone())
+                    .or_insert_with(SessionFsm::default);
+                match d.status {
+                    v2::SessionStatusValue::Idle => {
+                        fsm.apply(crate::types::session::SessionStatus::Idle)
+                    }
+                    v2::SessionStatusValue::Busy => {
+                        fsm.apply(crate::types::session::SessionStatus::Busy)
+                    }
+                    v2::SessionStatusValue::Retry { attempt, message, next } => fsm.apply(
+                        crate::types::session::SessionStatus::Retry { attempt, message, next },
+                    ),
+                    v2::SessionStatusValue::Unknown => {}
+                }
+                true
+            }
+            Err(e) => from_data_error(env, &e),
+        },
+        // ── permissions ───────────────────────────────────────────────
+        "permission.asked" => match from_data::<v2::PermissionAskedData>(env) {
+            Ok(d) => {
+                state.permissions.push(Permission {
+                    id: d.id,
+                    sessionID: d.session_id,
+                    action: d.action,
+                    resources: d.resources,
+                    save: d.save,
+                    metadata: d.metadata,
+                    source: d.source.map(|s| match s {
+                        crate::types::v2::permission::PermissionSource::Tool {
+                            message_id,
+                            id,
+                        } => crate::types::event::PermissionV2Source {
+                            kind: "tool".to_string(),
+                            messageID: message_id,
+                            callID: id,
+                        },
+                        crate::types::v2::permission::PermissionSource::Unknown => {
+                            crate::types::event::PermissionV2Source {
+                                kind: "unknown".to_string(),
+                                messageID: String::new(),
+                                callID: String::new(),
+                            }
+                        }
+                    }),
+                });
+                true
+            }
+            Err(e) => from_data_error(env, &e),
+        },
+        "permission.replied" => match from_data::<v2::PermissionRepliedData>(env) {
+            Ok(d) => {
+                state.permissions.pop(&d.requestID);
+                true
+            }
+            Err(e) => from_data_error(env, &e),
+        },
+        // ── questions (legacy, still emitted) ─────────────────────────
+        "question.asked" => match from_data::<v2::QuestionAskedData>(env) {
+            Ok(d) => {
+                state.questions.push(QuestionRequest {
+                    id: d.id,
+                    sessionID: d.session_id,
+                    questions: d.questions,
+                    tool: d.tool,
+                });
+                true
+            }
+            Err(e) => from_data_error(env, &e),
+        },
+        "question.replied" | "question.rejected" => {
+            match from_data::<v2::QuestionResolvedData>(env) {
+                Ok(d) => {
+                    state.questions.pop(&d.requestID);
+                    true
+                }
+                Err(e) => from_data_error(env, &e),
+            }
+        }
+        // ── forms (replace questions) ─────────────────────────────────
+        "form.created" => {
+            // The form panel is step 6 work; recognised here so the envelope is
+            // not reported as an unknown type.
+            false
+        }
+        "form.replied" | "form.cancelled" => false,
+        // ── notifications we do not render ────────────────────────────
+        "server.connected" => false,
+        // Everything else is a v2 event with no UI handling yet. Listed via the
+        // fallback so a NEW upstream event is surfaced once (never dropped).
+        _ => {
+            note_unimplemented_v2(&env.kind);
+            false
+        }
+    }
+}
+
+/// Deserialise an envelope's `data` into a typed v2 body. A malformed body is
+/// reported like a parse error, not silently ignored.
+fn from_data<T: serde::de::DeserializeOwned>(env: &EventEnvelope) -> Result<T, String> {
+    serde_json::from_value(env.data.clone()).map_err(|e| format!("data: {e}"))
+}
+
+/// Log a malformed v2 body once per event type and keep going.
+fn from_data_error(env: &EventEnvelope, err: &str) -> bool {
+    log::warn!("v2 event '{}' has an unparseable body ({err})", env.kind);
+    false
+}
+
+/// v2 answer-delta: append to the live answer accumulator keyed by
+/// `(assistantMessageID, ordinal)` and (throttled) mirror it to QML.
+fn on_v2_text_delta(stream: &mut StreamState<'_>, d: &crate::types::v2::event::TextDeltaData) {
+    if !stream.assistant_messages.contains(&d.assistant_message_id) {
+        return;
+    }
+    let key = v2_part_key(&d.assistant_message_id, d.ordinal);
+    let entry = stream.text_live.entry(key.clone()).or_default();
+    entry.push_str(&d.delta);
+    if entry.trim().is_empty() {
+        return;
+    }
+    let now = now_ms();
+    if now.saturating_sub(*stream.last_answer_push) < REASONING_LIVE_MS {
+        return;
+    }
+    *stream.last_answer_push = now;
+    if let Ok(mut q) = stream.pending.lock() {
+        q.push(proto_live_line(now, ANSWER_LIVE_TAG, entry.trim_end(), &key));
+    }
+}
+
+/// v2 answer-end: the block's exact final text replaces the live-grown one in
+/// the accumulator. The QML-facing final line is emitted by the worker loop
+/// (`TurnState::on_v2_event`), which owns the per-turn text bookkeeping.
+fn on_v2_text_ended(stream: &mut StreamState<'_>, d: &crate::types::v2::event::TextEndedData) {
+    if !stream.assistant_messages.contains(&d.assistant_message_id) {
+        return;
+    }
+    let key = v2_part_key(&d.assistant_message_id, d.ordinal);
+    if stream.text_live.contains_key(&key) {
+        stream.text_live.insert(key, d.text.clone());
+    }
+}
+
+/// v2 reasoning-delta: same as the answer path but into the think accumulator.
+fn on_v2_reasoning_delta(
+    stream: &mut StreamState<'_>,
+    d: &crate::types::v2::event::TextDeltaData,
+) {
+    let key = v2_part_key(&d.assistant_message_id, d.ordinal);
+    let entry = stream.reasonings.entry(key.clone()).or_default();
+    entry.push_str(&d.delta);
+    if entry.trim().is_empty() {
+        return;
+    }
+    let now = now_ms();
+    if now.saturating_sub(*stream.last_reasoning_push) < REASONING_LIVE_MS {
+        return;
+    }
+    *stream.last_reasoning_push = now;
+    stream.live_reasoned_ids.insert(key.clone());
+    if let Ok(mut q) = stream.pending.lock() {
+        q.push(proto_live_line(now, THINK_LIVE_TAG, entry.trim_end(), &key));
+    }
+}
+
+/// v2 reasoning-end: finalise the block in the accumulator (the worker loop
+/// emits the QML-facing final line via `TurnState::on_v2_event`).
+fn on_v2_reasoning_ended(
+    stream: &mut StreamState<'_>,
+    d: &crate::types::v2::event::TextEndedData,
+) {
+    let key = v2_part_key(&d.assistant_message_id, d.ordinal);
+    stream.reasonings.insert(key, d.text.clone());
+}
+
+/// v2 `session.compaction.started` — announce once for the shown session and
+/// raise the "compacting" banner (mirrors the v1 `message.part.updated`
+/// compaction part handling).
+fn on_compaction_started_v2(stream: &mut StreamState<'_>, session_id: &str) {
+    if stream.current_session != Some(session_id) {
+        return;
+    }
+    if let Ok(mut g) = stream.compacting.lock() {
+        *g = true;
+    }
+    if stream.compaction_seen.as_deref() != Some(session_id) {
+        *stream.compaction_seen = Some(session_id.to_string());
+        if let Ok(mut q) = stream.pending.lock() {
+            q.push(svc_line(now_ms(), crate::i18n::K_COMPACTING, &[]));
+        }
+    }
+}
+
+/// v2 `session.compaction.ended` — the transcript changed: record the session
+/// for the caller to reload (mirrors v1 `session.compacted`).
+fn on_compaction_ended_v2(stream: &mut StreamState<'_>, session_id: &str) {
+    *stream.compacted = Some(session_id.to_string());
+    if stream.current_session == Some(session_id) {
+        if let Ok(mut g) = stream.compacting.lock() {
+            *g = false;
+        }
+    }
+}
+
+/// v2 `session.error`-equivalent: surface a structured error as a feed line.
+fn on_session_error_v2(stream: &mut StreamState<'_>, error: Option<&serde_json::Value>) {
+    let msg = human_session_error_value(error);
+    if msg.is_empty() {
+        return;
+    }
+    log::error!("v2 session error: {msg}");
+    if let Ok(mut q) = stream.pending.lock() {
+        q.push(err_line(now_ms(), crate::i18n::K_SERVER_ERROR, &[msg]));
+    }
+    if let Ok(mut s) = stream.status.lock() {
+        *s = "error".to_string();
+    }
+}
+
+/// Human-readable text from a v2 structured error (`{type, message, status?}`).
+fn human_session_error_value(error: Option<&serde_json::Value>) -> String {
+    let Some(e) = error else {
+        return String::new();
+    };
+    if let Some(m) = e.get("message").and_then(|v| v.as_str()) {
+        if !m.is_empty() {
+            return m.to_string();
+        }
+    }
+    String::new()
+}
+
+// v2 tool handlers: same ToolStore transitions as the v1 `on_tool_*`, but the
+// v2 `data` uses `id` (not `callID`) and carries the v1 field-name-independent
+// `input`/`content`/`error` shapes.
+
+fn on_tool_input_started_v2(state: &mut DispatcherState, id: &str, name: &str) {
+    state.tools.upsert(
+        id.to_string(),
+        name.to_string(),
+        ToolState::Pending {
+            input: serde_json::Value::Null,
+        },
+    );
+}
+
+fn on_tool_input_delta_v2(state: &mut DispatcherState, id: &str, delta: &str) {
+    if state.tools.name_of(id).is_none() {
+        state.tools.ensure(id, "");
+    }
+    let prev = state.tools.input_of(id);
+    let mut s = prev.as_str().unwrap_or("").to_string();
+    s.push_str(delta);
+    state.tools.set_state(
+        id,
+        ToolState::Pending {
+            input: serde_json::Value::String(s),
+        },
+    );
+}
+
+fn on_tool_input_ended_v2(state: &mut DispatcherState, id: &str, text: &str) {
+    if state.tools.name_of(id).is_none() {
+        state.tools.ensure(id, "");
+    }
+    let input = serde_json::from_str(text)
+        .unwrap_or_else(|_| serde_json::Value::String(text.to_string()));
+    state.tools.set_state(id, ToolState::Pending { input });
+}
+
+fn on_tool_called_v2(state: &mut DispatcherState, id: &str, data: &serde_json::Value) {
+    let name = state.tools.name_of(id).unwrap_or("").to_string();
+    let input = data
+        .get("input")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    // `name` is not in `tool.called`; keep the one learned at input.started.
+    if name.is_empty() {
+        state.tools.ensure(id, "");
+    }
+    state.tools.set_state(id, ToolState::Running { input });
+}
+
+fn on_tool_progress_v2(state: &mut DispatcherState, id: &str) {
+    if state.tools.name_of(id).is_none() {
+        return;
+    }
+    let input = state.tools.input_of(id);
+    state.tools.set_state(id, ToolState::Running { input });
+}
+
+fn on_tool_success_v2(state: &mut DispatcherState, id: &str, data: &serde_json::Value) {
+    let input = state.tools.input_of(id);
+    let title = short_input(&input)
+        .or_else(|| state.tools.name_of(id).map(str::to_string))
+        .unwrap_or_else(|| "tool".to_string());
+    let output = data
+        .get("content")
+        .map(content_to_string)
+        .unwrap_or_default();
+    state.tools.set_state(
+        id,
+        ToolState::Completed {
+            input,
+            output,
+            title,
+        },
+    );
+}
+
+fn on_tool_failed_v2(state: &mut DispatcherState, id: &str, data: &serde_json::Value) {
+    let input = state.tools.input_of(id);
+    let error = data
+        .get("error")
+        .map(content_to_string)
+        .unwrap_or_default();
+    state.tools.set_state(id, ToolState::Error { input, error });
+}
+
+/// Logs (once per event type) that a v2 event is not implemented in the UI.
+fn note_unimplemented_v2(kind: &str) {
+    use std::collections::HashSet;
+    use std::sync::{Mutex, OnceLock};
+
+    static SEEN: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    let seen = SEEN.get_or_init(|| Mutex::new(HashSet::new()));
+    let first_time = seen
+        .lock()
+        .map(|mut set| set.insert(kind.to_string()))
+        .unwrap_or(true);
+    if first_time {
+        log::warn!("v2 event '{kind}' is not implemented in the UI yet — dispatch ignores it");
+    } else {
+        log::debug!("v2 event '{kind}' (not implemented) ignored again");
     }
 }
 

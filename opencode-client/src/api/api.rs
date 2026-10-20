@@ -17,11 +17,34 @@
 //! static dispatch, so there is no runtime cost and no extra dependency.
 
 use std::future::Future;
+use std::pin::Pin;
+
+use futures_util::Stream;
 
 use crate::types::event::PermissionReplyKind;
+use crate::types::v2::EventEnvelope;
+use crate::types::GlobalEvent;
+
+/// One SSE frame from the server, tagged by protocol version. The worker loop
+/// matches on this so the v1 (`/global/event`) and v2 (`/api/event`) paths share
+/// one event pump (see `vault/План-v2.md` §8 step 5).
+#[derive(Debug, Clone)]
+pub enum ClientEvent {
+    V1(GlobalEvent),
+    V2(EventEnvelope),
+}
 
 /// Server protocol adapter (v1 and v2 implementations).
 pub trait OpenCodeApi: Clone + Send + Sync + 'static {
+    /// Open the server's event stream. v1 reads `/global/event`
+    /// ([`GlobalEvent`]); v2 reads `/api/event` ([`EventEnvelope`]). Each adapter
+    /// picks its own endpoint, so the worker never hard-codes a version.
+    fn event_stream(
+        &self,
+    ) -> impl Future<
+        Output = Result<Pin<Box<dyn Stream<Item = Result<ClientEvent, String>> + Send>>, String>,
+    > + Send;
+
     /// GET /global/health — is the server up?
     fn health(&self) -> impl Future<Output = Result<bool, String>> + Send;
 

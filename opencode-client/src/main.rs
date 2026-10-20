@@ -345,7 +345,7 @@ async fn run_stream_adapter(
         api::ApiVersion::V1 => {
             let client = api::OpenCodeClient::new(base.clone(), auth.clone());
             run_stream(
-                client, base, auth, dispatcher, worker_pending, worker_prompts, status, sessions,
+                client, dispatcher, worker_pending, worker_prompts, status, sessions,
                 commands, current_session, compacting, nav, todos, models, sounds, voice, tools,
                 permissions, questions, settings, console_login,
             )
@@ -354,7 +354,7 @@ async fn run_stream_adapter(
         api::ApiVersion::V2 => {
             let client = api::V2Adapter::new(base.clone(), auth.clone());
             run_stream(
-                client, base, auth, dispatcher, worker_pending, worker_prompts, status, sessions,
+                client, dispatcher, worker_pending, worker_prompts, status, sessions,
                 commands, current_session, compacting, nav, todos, models, sounds, voice, tools,
                 permissions, questions, settings, console_login,
             )
@@ -363,12 +363,232 @@ async fn run_stream_adapter(
     }
 }
 
+/// Normalised retry/busy/idle state, from v1 `session.status` or v2
+/// `session.status` — so the main loop formats the status banner once.
+enum RetryStatus {
+    Idle,
+    Busy,
+    Retry {
+        attempt: u32,
+        message: String,
+        next: u64,
+    },
+}
+
+/// Extract the retry/busy/idle state from an event of either protocol.
+fn retry_status(ce: &api::ClientEvent) -> Option<(String, RetryStatus)> {
+    use opencode_client::types::session::SessionStatus;
+    match ce {
+        api::ClientEvent::V1(ev) => match &ev.payload {
+            opencode_client::types::event::Event::SessionStatus { properties } => {
+                let st = match &properties.status {
+                    SessionStatus::Retry { attempt, message, next } => RetryStatus::Retry {
+                        attempt: *attempt,
+                        message: message.clone(),
+                        next: *next,
+                    },
+                    SessionStatus::Busy => RetryStatus::Busy,
+                    SessionStatus::Idle => RetryStatus::Idle,
+                };
+                Some((properties.sessionID.clone(), st))
+            }
+            _ => None,
+        },
+        api::ClientEvent::V2(env) => {
+            if env.kind != "session.status" {
+                return None;
+            }
+            let d: opencode_client::types::v2::event::SessionStatusData =
+                serde_json::from_value(env.data.clone()).ok()?;
+            use opencode_client::types::v2::event::SessionStatusValue;
+            let st = match d.status {
+                SessionStatusValue::Retry { attempt, message, next } => {
+                    RetryStatus::Retry { attempt, message, next }
+                }
+                SessionStatusValue::Busy => RetryStatus::Busy,
+                SessionStatusValue::Idle => RetryStatus::Idle,
+                SessionStatusValue::Unknown => return None,
+            };
+            Some((d.sessionID, st))
+        }
+    }
+}
+
+/// Per-turn streaming accumulators plus the shared IO handles a terminal
+/// streaming event needs. Bundling them keeps the v2 terminal handlers
+/// (`on_v2_event`/`on_v2_idle`) signature small; the fields mirror the v1
+/// inline block one-to-one, so a v2 text/reasoning block behaves exactly like a
+/// v1 one.
+struct TurnState<'a> {
+    parts: &'a mut std::collections::HashMap<String, String>,
+    text_order: &'a mut Vec<String>,
+    text_live: &'a mut std::collections::HashMap<String, String>,
+    spoken_parts: &'a mut std::collections::HashSet<String>,
+    assistant_messages: &'a std::collections::HashSet<String>,
+    compaction_messages: &'a std::collections::HashSet<String>,
+    reasonings: &'a mut std::collections::HashMap<String, String>,
+    reasoning_order: &'a mut Vec<String>,
+    reasoning_part_ids: &'a mut std::collections::HashSet<String>,
+    live_reasoned_ids: &'a mut std::collections::HashSet<String>,
+    last_reasoning_push: &'a mut u64,
+    last_answer_push: &'a mut u64,
+    current_session: Option<&'a str>,
+    pending: &'a Arc<std::sync::Mutex<Vec<String>>>,
+    status: &'a Arc<std::sync::Mutex<String>>,
+    voice: &'a Arc<voice::VoiceState>,
+}
+
+impl<'a> TurnState<'a> {
+    /// v2 terminal streaming events: `session.text.ended` / `session.reasoning.ended`
+    /// carry the final text of one block (v1 delivered the same at
+    /// `message.part.updated`; hence the shared accumulator semantics).
+    async fn on_v2_event(&mut self, env: &opencode_client::types::v2::EventEnvelope, _client: &impl api::OpenCodeApi) {
+        use opencode_client::types::v2::event as v2;
+        match env.kind.as_str() {
+            "session.text.ended" => {
+                let Ok(d): Result<v2::TextEndedData, _> = serde_json::from_value(env.data.clone())
+                else {
+                    return;
+                };
+                if !self.assistant_messages.contains(&d.assistant_message_id) {
+                    return;
+                }
+                let key = v2_part_key(&d.assistant_message_id, d.ordinal);
+                if self.compaction_messages.contains(&d.assistant_message_id) {
+                    self.spoken_parts.insert(key.clone());
+                }
+                let was_live = self.text_live.contains_key(&key);
+                if self.parts.insert(key.clone(), d.text.clone()).is_none() {
+                    self.text_order.push(key.clone());
+                }
+                if was_live && !d.text.trim().is_empty() {
+                    if let Ok(mut q) = self.pending.lock() {
+                        q.push(proto_live_line(
+                            now_ms(),
+                            ANSWER_LIVE_TAG,
+                            d.text.trim_end(),
+                            &key,
+                        ));
+                    }
+                    let tts_mode = self.voice.tts_mode.lock().map(|m| *m).unwrap_or_default();
+                    if tts_mode == voice::TtsMode::Auto
+                        && self.current_session == Some(d.session_id.as_str())
+                        && !self.voice.dictating()
+                        && self.spoken_parts.insert(key.clone())
+                    {
+                        voice::tts_from_call(self.voice, d.text.trim_end(), self.pending).await;
+                    }
+                }
+            }
+            "session.reasoning.ended" => {
+                let Ok(d): Result<v2::TextEndedData, _> = serde_json::from_value(env.data.clone())
+                else {
+                    return;
+                };
+                if !self.assistant_messages.contains(&d.assistant_message_id) {
+                    return;
+                }
+                let key = v2_part_key(&d.assistant_message_id, d.ordinal);
+                self.reasoning_part_ids.insert(key.clone());
+                if self.reasonings.insert(key.clone(), d.text.clone()).is_none() {
+                    self.reasoning_order.push(key.clone());
+                }
+                if self.live_reasoned_ids.contains(&key) && !d.text.trim().is_empty() {
+                    if let Ok(mut q) = self.pending.lock() {
+                        q.push(proto_live_line(
+                            now_ms(),
+                            THINK_LIVE_TAG,
+                            d.text.trim_end(),
+                            &key,
+                        ));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// v2 `session.idle` — flush the accumulated answer + reasoning to QML and
+    /// reset the turn (mirrors the v1 `idle_session_id` block).
+    async fn on_v2_idle(
+        &mut self,
+        env: &opencode_client::types::v2::EventEnvelope,
+        client: &impl api::OpenCodeApi,
+        sessions: &Arc<std::sync::Mutex<String>>,
+    ) {
+        use opencode_client::types::v2::event as v2;
+        if env.kind != "session.idle" {
+            return;
+        }
+        let Ok(d): Result<v2::SessionIdleData, _> = serde_json::from_value(env.data.clone()) else {
+            return;
+        };
+        if self.current_session != Some(d.sessionID.as_str()) {
+            return;
+        }
+        let text: String = self
+            .text_order
+            .iter()
+            .filter_map(|pid| self.parts.get(pid))
+            .map(|s| s.as_str())
+            .collect();
+        if !text.trim().is_empty() {
+            for rid in self.reasoning_order.iter() {
+                if let Some(rea) = self.reasonings.get(rid) {
+                    if !rea.trim().is_empty() && !self.live_reasoned_ids.contains(rid) {
+                        if let Ok(mut q) = self.pending.lock() {
+                            let body = format!("{THINK_TAG}{}", rea.trim_end());
+                            q.push(proto_line(now_ms(), &body));
+                        }
+                    }
+                }
+            }
+            let answer_was_live = self.parts.keys().any(|k| self.text_live.contains_key(k));
+            if !answer_was_live {
+                if let Ok(mut q) = self.pending.lock() {
+                    q.push(proto_line(now_ms(), text.trim_end()));
+                }
+            }
+            let tts_mode = self.voice.tts_mode.lock().map(|m| *m).unwrap_or_default();
+            if tts_mode == voice::TtsMode::Auto {
+                for pid in self.text_order.iter() {
+                    if self.spoken_parts.contains(pid) || self.voice.dictating() {
+                        continue;
+                    }
+                    if let Some(p) = self.parts.get(pid) {
+                        let p = p.trim_end();
+                        if !p.is_empty() {
+                            self.spoken_parts.insert(pid.clone());
+                            voice::tts_from_call(self.voice, p, self.pending).await;
+                        }
+                    }
+                }
+            }
+        }
+        set_status(self.status, "idle");
+        self.parts.clear();
+        self.text_live.clear();
+        self.text_order.clear();
+        self.spoken_parts.clear();
+        self.reasonings.clear();
+        self.reasoning_order.clear();
+        self.reasoning_part_ids.clear();
+        self.live_reasoned_ids.clear();
+        *self.last_reasoning_push = 0;
+        *self.last_answer_push = 0;
+        refresh_sessions(client, sessions).await;
+    }
+}
+
+/// Accumulator key for a v2 text/reasoning block (`assistantMessageID:ordinal`).
+fn v2_part_key(assistant_message_id: &str, ordinal: i64) -> String {
+    format!("{assistant_message_id}:{ordinal}")
+}
+
 /// A single SSE session: `Ok(())` means the stream ended, `Err` means connection failed.
 #[allow(clippy::too_many_arguments)]
 async fn run_stream<A: api::OpenCodeApi>(
     client: A,
-    base: String,
-    auth: Option<(String, String)>,
     dispatcher: event::dispatcher::SharedState,
     worker_pending: Arc<std::sync::Mutex<Vec<String>>>,
     worker_prompts: Arc<std::sync::Mutex<Vec<String>>>,
@@ -388,9 +608,7 @@ async fn run_stream<A: api::OpenCodeApi>(
     settings: Arc<std::sync::Mutex<String>>,
     console_login: opencode_client::auth::ConsoleLogin,
 ) -> Result<(), String> {
-    let sse = event::sse::SseClient::new(base, auth);
-    log::info!("connecting to /global/event...");
-    let mut stream = sse.stream().await?;
+    let mut stream = client.event_stream().await?;
     log::info!("SSE connected");
     set_status(&status, "idle");
 
@@ -479,31 +697,30 @@ async fn run_stream<A: api::OpenCodeApi>(
         tokio::select! {
             item = stream.next() => {
                 match item {
-                    Some(Ok(ev)) => {
+                    Some(Ok(ce)) => {
                         // The server reports its own retry state (retryable model
                         // errors such as a failed URL call or an exhausted quota):
                         // `session.status` carries the human message, the attempt
                         // number and `next` — the ms timestamp of the next try.
                         // Mirror the TUI: show "message — retrying in N s (#attempt)".
-                        if let opencode_client::types::event::Event::SessionStatus { properties } = &ev.payload {
-                            if current_session.as_deref() == Some(properties.sessionID.as_str()) {
-                                use opencode_client::types::session::SessionStatus;
-                                match &properties.status {
-                                    SessionStatus::Retry { attempt, message, next } => {
+                        // v1 and v2 carry the same information under different tags.
+                        if let Some((sid, retry)) = retry_status(&ce) {
+                            if current_session.as_deref() == Some(sid.as_str()) {
+                                match retry {
+                                    RetryStatus::Retry { attempt, message, next } => {
                                         // Token consumed by QML StatusHeader (live countdown):
                                         // `retry|<next_ms>|<attempt>|<message>`.
                                         log::info!(
                                             "session retry #{} at {}: {message}",
-                                            attempt,
-                                            *next
+                                            attempt, next
                                         );
                                         set_status(
                                             &status,
                                             &format!("retry|{next}|{attempt}|{message}"),
                                         );
                                     }
-                                    SessionStatus::Busy => set_status(&status, "busy"),
-                                    SessionStatus::Idle => {}
+                                    RetryStatus::Busy => set_status(&status, "busy"),
+                                    RetryStatus::Idle => {}
                                 }
                             }
                         }
@@ -529,7 +746,14 @@ async fn run_stream<A: api::OpenCodeApi>(
                                 expect_user_id: &mut expect_user_id,
                             };
                             let mut st = dispatcher.lock().await;
-                            let _ = event::dispatcher::dispatch(&ev.payload, &mut st, &mut stream).await;
+                            match &ce {
+                                api::ClientEvent::V1(ev) => {
+                                    let _ = event::dispatcher::dispatch(&ev.payload, &mut st, &mut stream).await;
+                                }
+                                api::ClientEvent::V2(env) => {
+                                    let _ = event::dispatcher::dispatch_v2(env, &mut st, &mut stream);
+                                }
+                            }
                         }
                         // The server compacted the shown session: reload its
                         // history so the summary and the "Context compacted"
@@ -568,6 +792,7 @@ async fn run_stream<A: api::OpenCodeApi>(
                                 log::info!("session {sid} compacted in background");
                             }
                         }
+                        if let api::ClientEvent::V1(ev) = &ce {
                         if let Some((sid, mid, id, text)) = ev.payload.text_part() {
                             if assistant_messages.contains(mid) {
                                 // The compaction summary renders as a normal
@@ -743,6 +968,29 @@ async fn run_stream<A: api::OpenCodeApi>(
                                 last_answer_push = 0;
                                 refresh_sessions(&client, &sessions).await;
                             }
+                        }
+                        }
+                        if let api::ClientEvent::V2(env) = &ce {
+                            let mut turn = TurnState {
+                                parts: &mut parts,
+                                text_order: &mut text_order,
+                                text_live: &mut text_live,
+                                spoken_parts: &mut spoken_parts,
+                                assistant_messages: &assistant_messages,
+                                compaction_messages: &compaction_messages,
+                                reasonings: &mut reasonings,
+                                reasoning_order: &mut reasoning_order,
+                                reasoning_part_ids: &mut reasoning_part_ids,
+                                live_reasoned_ids: &mut live_reasoned_ids,
+                                last_reasoning_push: &mut last_reasoning_push,
+                                last_answer_push: &mut last_answer_push,
+                                current_session: current_session.as_deref(),
+                                pending: &worker_pending,
+                                status: &status,
+                                voice: &voice,
+                            };
+                            turn.on_v2_event(env, &client).await;
+                            turn.on_v2_idle(env, &client, &sessions).await;
                         }
                     }
                     Some(Err(e)) => log::error!("sse error: {e}"),
@@ -1559,6 +1807,86 @@ fn refresh_sounds(sounds: &Arc<std::sync::Mutex<String>>) {
     }
 }
 
+/// Render a v2 `MessageInfo[]` history (`GET /api/session/{id}/message`) into
+/// the same feed lines the v1 `load_history` path emits: user bubbles, `[[think]]`
+/// reasoning bubbles, answer text, inline tool rows and compaction notices.
+/// `revert_id` hides the reverted tail (id >= boundary) exactly as in v1.
+fn history_lines_v2(arr: &[serde_json::Value], revert_id: Option<&str>) -> Vec<String> {
+    use opencode_client::types::v2::message::{Content, MessageBody, MessageInfo};
+    let mut msgs: Vec<MessageInfo> = Vec::new();
+    for raw in arr {
+        match serde_json::from_value::<MessageInfo>(raw.clone()) {
+            Ok(m) => msgs.push(m),
+            Err(e) => log::warn!("history v2: message is unparseable ({e}) — skipped"),
+        }
+    }
+    msgs.sort_by_key(|m| m.time.created);
+
+    let mut lines: Vec<String> = Vec::new();
+    for m in &msgs {
+        // Hide the reverted tail (mirror SessionRevert.cleanup boundaries).
+        if let Some(r) = revert_id {
+            if !m.id.is_empty() && m.id.as_bytes() >= r.as_bytes() {
+                continue;
+            }
+        }
+        let created = m.time.created;
+        match &m.body {
+            MessageBody::User { text, .. } => {
+                if !text.trim().is_empty() {
+                    lines.push(proto_user_line(created, &m.id, text));
+                }
+            }
+            MessageBody::Assistant(a) => {
+                // Reasoning first (mirrors the live stream), then answer, then tool rows.
+                let reasoning_ts = created;
+                let mut reasoning = String::new();
+                let mut text = String::new();
+                let mut tool_lines: Vec<String> = Vec::new();
+                for c in &a.content {
+                    match c {
+                        Content::Text { text: t } => text.push_str(t),
+                        Content::Reasoning { text: t, time } => {
+                            let _ = time;
+                            reasoning.push_str(t);
+                        }
+                        Content::Tool { id, name, state, .. } => {
+                            if !id.is_empty() {
+                                tool_lines.push(proto_tool_line(
+                                    created,
+                                    id,
+                                    name,
+                                    state.ui_status(),
+                                    &state.description(),
+                                ));
+                            }
+                        }
+                        Content::Unknown => log::warn!(
+                            "history v2: assistant content type is not implemented in the UI (skipped)"
+                        ),
+                    }
+                }
+                if !reasoning.trim().is_empty() {
+                    let body = format!("{THINK_TAG}{}", reasoning.trim_end());
+                    lines.push(proto_line(reasoning_ts, &body));
+                }
+                if !text.trim().is_empty() {
+                    lines.push(proto_line(created, &text));
+                }
+                lines.extend(tool_lines);
+            }
+            MessageBody::Compaction { .. } => {
+                lines.push(svc_line(created, i18n::K_COMPACTED, &[]));
+            }
+            // Switches, synthetic/system/skill/shell/idle messages and unknown
+            // kinds do not render in the feed (mirrors the v1 path skipping
+            // non-user/assistant roles).
+            _ => {}
+        }
+    }
+    lines
+}
+
 /// Load session history (info/parts pairs) and push strings to QML queue.
 async fn load_history(
     client: &impl api::OpenCodeApi,
@@ -1585,8 +1913,23 @@ async fn load_history(
     }
     match client.session_messages(session_id).await {
         Ok(v) => {
-            let mut items: Vec<&serde_json::Value> =
-                v.as_array().map(|a| a.iter().collect()).unwrap_or_default();
+            let arr = v.as_array().cloned().unwrap_or_default();
+            // v2 returns `MessageInfo[]` inline (no `{info, parts}` wrapper — the
+            // v2 body carries its parts as `content[]`). Route it to the v2
+            // renderer so history renders the same way as the v1 path does.
+            let is_v2 = arr
+                .first()
+                .map(|e| e.get(keys::INFO).is_none() && e.get(keys::TYPE).is_some())
+                .unwrap_or(false);
+            if is_v2 {
+                let lines = history_lines_v2(&arr, revert_id.as_deref());
+                log::info!("история сессии {session_id} (v2): {} строк", lines.len());
+                if let Ok(mut q) = pending.lock() {
+                    q.extend(lines);
+                }
+                return;
+            }
+            let mut items: Vec<&serde_json::Value> = v.as_array().map(|a| a.iter().collect()).unwrap_or_default();
             items.sort_by_key(|e| {
                 e[keys::INFO][keys::TIME][keys::CREATED]
                     .as_u64()

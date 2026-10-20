@@ -22,6 +22,7 @@ use reqwest::Client;
 use crate::types::event::PermissionReplyKind;
 
 use super::api::OpenCodeApi;
+use super::api::ClientEvent;
 
 /// v2 protocol adapter. Cheap to clone (shared `reqwest` pool), like the v1
 /// client, so a background task can hold a copy.
@@ -507,6 +508,28 @@ impl OpenCodeApi for V2Adapter {
                 "auth moved to credentials/integrations in opencode v2 — not implemented yet"
                     .to_string(),
             )
+        }
+    }
+
+    /// v2: subscribe to `/api/event`, yielding [`EventEnvelope`] frames.
+    fn event_stream(
+        &self,
+    ) -> impl Future<
+        Output = Result<
+            std::pin::Pin<
+                Box<dyn futures_util::Stream<Item = Result<ClientEvent, String>> + Send>,
+            >,
+            String,
+        >,
+    > + Send {
+        async move {
+            let sse = crate::event::sse::SseClient::new(self.base.clone(), self.auth.clone());
+            let stream = sse.stream_v2().await?;
+            let mapped = futures_util::StreamExt::map(stream, |r| r.map(ClientEvent::V2));
+            Ok(Box::pin(mapped)
+                as std::pin::Pin<
+                    Box<dyn futures_util::Stream<Item = Result<ClientEvent, String>> + Send>,
+                >)
         }
     }
 }

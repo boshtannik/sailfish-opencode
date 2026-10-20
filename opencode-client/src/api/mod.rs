@@ -251,4 +251,28 @@ impl OpenCodeApi for OpenCodeClient {
     ) -> impl Future<Output = Result<(), String>> + Send {
         async move { OpenCodeClient::set_api_key(self, provider_id, key).await }
     }
+
+    /// v1: subscribe to `/global/event`, yielding [`GlobalEvent`] frames.
+    fn event_stream(
+        &self,
+    ) -> impl Future<
+        Output = Result<
+            std::pin::Pin<
+                Box<dyn futures_util::Stream<Item = Result<api::ClientEvent, String>> + Send>,
+            >,
+            String,
+        >,
+    > + Send {
+        async move {
+            let sse = crate::event::sse::SseClient::new(self.base.clone(), self.auth.clone());
+            let stream = sse.stream().await?;
+            // Wrap each v1 frame in the shared `ClientEvent` enum so the worker
+            // sees one stream type regardless of protocol version.
+            let mapped = futures_util::StreamExt::map(stream, |r| r.map(api::ClientEvent::V1));
+            Ok(Box::pin(mapped)
+                as std::pin::Pin<
+                    Box<dyn futures_util::Stream<Item = Result<api::ClientEvent, String>> + Send>,
+                >)
+        }
+    }
 }

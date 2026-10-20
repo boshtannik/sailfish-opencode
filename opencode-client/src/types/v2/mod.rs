@@ -5,11 +5,13 @@
 //! (`vault/План-v2.md` §10 decision #3). Steps 5–6 (events, forms) parse into
 //! these as the v2 path is wired up.
 
+pub mod event;
 pub mod form;
 pub mod message;
 pub mod permission;
 pub mod session;
 
+pub use event::EventEnvelope;
 pub use form::{Field, FormInfo, FormState};
 pub use message::{
     AssistantFields, CompactionReason, CompactionStatus, Content, FileAttachment, IdleOutcome,

@@ -194,7 +194,52 @@ pub enum ToolState {
     Unknown,
 }
 
-/// A tool result content item — union by `type` (`text|file`).
+impl ToolState {
+    /// Status for the chat feed: running | completed | error (mirrors the v1
+    /// `types::tool::ToolState::ui_status`).
+    pub fn ui_status(&self) -> &'static str {
+        use crate::types::tool::{STATUS_COMPLETED, STATUS_ERROR, STATUS_RUNNING};
+        match self {
+            ToolState::Streaming { .. } | ToolState::Running { .. } => STATUS_RUNNING,
+            ToolState::Completed { .. } => STATUS_COMPLETED,
+            ToolState::Error { .. } => STATUS_ERROR,
+            ToolState::Unknown => STATUS_RUNNING,
+        }
+    }
+
+    /// The tool-call input, or `Null` while still streaming/unknown.
+    pub fn input(&self) -> serde_json::Value {
+        match self {
+            ToolState::Running { input, .. }
+            | ToolState::Completed { input, .. }
+            | ToolState::Error { input, .. } => input.clone(),
+            ToolState::Streaming { input } => serde_json::Value::String(input.clone()),
+            ToolState::Unknown => serde_json::Value::Null,
+        }
+    }
+
+    /// Short description for the inline tool row (mirrors the v1
+    /// `types::tool::ToolState::description`): the human-relevant input field
+    /// (command / path / pattern / …), else the streamed raw fragment, else the
+    /// error message.
+    pub fn description(&self) -> String {
+        let input = self.input();
+        if let Some(s) = input.as_str() {
+            return s.to_string();
+        }
+        for key in crate::types::tool::LABEL_INPUT_KEYS {
+            if let Some(s) = input.get(key).and_then(|v| v.as_str()) {
+                if !s.is_empty() {
+                    return s.to_string();
+                }
+            }
+        }
+        match self {
+            ToolState::Error { error, .. } => error.message.clone(),
+            _ => String::new(),
+        }
+    }
+}
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type")]
 pub enum ToolContent {
