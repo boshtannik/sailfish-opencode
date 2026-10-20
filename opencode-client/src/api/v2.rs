@@ -434,12 +434,11 @@ impl OpenCodeApi for V2Adapter {
     ) -> impl Future<Output = Result<Option<String>, String>> + Send {
         async move {
             let url = format!("{}/api/session/{}/prompt", self.base, session_id);
-            let mut prompt = serde_json::Map::new();
-            prompt.insert(k::TEXT.into(), serde_json::Value::String(text.to_string()));
+            let mut body = serde_json::Map::new();
+            body.insert(k::TEXT.into(), serde_json::Value::String(text.to_string()));
             if let Some(a) = agent {
-                prompt.insert(k::AGENTS.into(), serde_json::json!([{ k::NAME: a }]));
+                body.insert(k::AGENTS.into(), serde_json::json!([{ k::NAME: a }]));
             }
-            let body = serde_json::json!({ k::PROMPT: prompt });
             let resp = self
                 .authed(self.http.post(&url).json(&body))
                 .send()

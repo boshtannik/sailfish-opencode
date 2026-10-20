@@ -4,8 +4,8 @@
 //! string literal, because a typo in a bare `"..."` is invisible to the
 //! compiler while a typo in a `keys::` constant is a compile error. Keep these
 //! in sync with the `serde` attributes in `types/v2/*` and with the live
-//! server (opencode 1.19.0 bundles the exact event names — see
-//! `vault/План-v2.md` §12).
+//! server (opencode 2.0.32 bundles the exact event names — see
+//! `vault/Разведка-v2.md` §10).
 //!
 //! Event-type constants are `&str` so they can be used directly as `match`
 //! patterns in `event::dispatcher::dispatch_v2`.
@@ -41,7 +41,6 @@ pub const REQUEST_ID: &str = "requestID";
 pub const INTERRUPTED: &str = "interrupted";
 pub const INPUT: &str = "input";
 pub const CONTENT: &str = "content";
-pub const PROMPT: &str = "prompt";
 pub const AGENTS: &str = "agents";
 
 // ── request-body fields ──────────────────────────────────────────────────
