@@ -10,6 +10,10 @@ use tokio::time::sleep;
 
 use crate::api::OpenCodeClient;
 
+/// HTTP Basic username opencode 2.0.32 requires on its v2 API (paired with the
+/// startup-printed password; see `parse_server_password`).
+const BASIC_AUTH_USER: &str = "opencode";
+
 /// RAII owner of the `opencode serve` process.
 ///
 /// - `start()` — starts the server in the constructor
@@ -23,7 +27,7 @@ pub struct ServerConfig {
     pub port: u16,
     /// opencode binary ($OPENCODE_BIN → which).
     pub bin: Option<std::path::PathBuf>,
-    /// Extra arguments (--pure to run without plugins).
+    /// Extra arguments for `opencode serve`.
     pub args: Vec<String>,
     /// Working directory for opencode serve (cwd). Defaults to $HOME/opencode-home
     pub cwd: Option<PathBuf>,
@@ -34,7 +38,11 @@ impl Default for ServerConfig {
         Self {
             port: 0,
             bin: None,
-            args: vec!["--pure".to_string()],
+            // No `--pure`: opencode 2.0.32 dropped that flag (`serve` rejects it
+            // with "Unrecognized flag: --pure" and exits 1 — the server never
+            // came up). 1.19.0 accepted it to run without plugins; 2.0.32 has no
+            // equivalent and does not need one to start.
+            args: Vec::new(),
             cwd: None,
         }
     }
@@ -112,6 +120,7 @@ impl ServerGuard {
         // well over the old 5 s — a too-short wait killed it and left the UI on
         // a red "error" badge. Give it up to 30 s.
         let mut port: Option<u16> = None;
+        let mut password: Option<String> = None;
         const MAX_ATTEMPTS: u32 = 300;
         for _i in 0..MAX_ATTEMPTS {
             match child.try_wait() {
@@ -126,6 +135,9 @@ impl ServerGuard {
                 debug!("[opencode] {line}");
                 if port.is_none() {
                     port = parse_listening_port(&line);
+                }
+                if password.is_none() {
+                    password = parse_server_password(&line);
                 }
             }
             if port.is_some() {
@@ -143,7 +155,11 @@ impl ServerGuard {
             }
         };
         let base = format!("http://127.0.0.1:{port}");
-        let auth = None;
+        // opencode 2.0.32 guards the v2 API with HTTP Basic auth. The username
+        // is the fixed literal `opencode`; the password is the one the server
+        // printed on startup. Absent (older builds that print none) → no auth
+        // header, same as before.
+        let auth = password.map(|pw| (BASIC_AUTH_USER.to_string(), pw));
 
         // Background log collector.
         tokio::spawn(async move {
@@ -385,4 +401,19 @@ fn parse_listening_port(line: &str) -> Option<u16> {
         .collect::<String>()
         .parse()
         .ok()
+}
+
+/// "server password <pw>" → Some("<pw>"). opencode 2.0.32 protects the v2 API
+/// with HTTP Basic auth (user `opencode`) and prints the password once on
+/// startup. We feed it into `ServerGuard::auth` so every request/SSE carries
+/// `Authorization: Basic`.
+fn parse_server_password(line: &str) -> Option<String> {
+    let needle = "server password ";
+    let pos = line.find(needle)?;
+    let rest = line[pos + needle.len()..].trim();
+    if rest.is_empty() {
+        None
+    } else {
+        Some(rest.to_string())
+    }
 }

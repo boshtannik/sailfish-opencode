@@ -38,3 +38,13 @@ pub const ROLE_USER: &str = "user";
 
 // ---- Message `mode` discriminator values ----
 pub const MODE_COMPACTION: &str = "compaction";
+
+// ---- Tool-call input fields (used for the short tool label) ----
+pub const COMMAND: &str = "command";
+pub const FILE_PATH: &str = "filePath";
+pub const PATH: &str = "path";
+pub const PATTERN: &str = "pattern";
+pub const QUERY: &str = "query";
+pub const URL: &str = "url";
+pub const PROMPT: &str = "prompt";
+pub const DESCRIPTION: &str = "description";

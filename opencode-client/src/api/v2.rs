@@ -20,6 +20,7 @@ use std::future::Future;
 use reqwest::Client;
 
 use crate::types::event::PermissionReplyKind;
+use crate::types::v2::keys as k;
 
 use super::api::OpenCodeApi;
 use super::api::ClientEvent;
@@ -54,8 +55,8 @@ impl V2Adapter {
     /// stays usable for the handful of endpoints that answer unenveloped.
     fn unwrap_data(mut v: serde_json::Value) -> serde_json::Value {
         if let Some(map) = v.as_object_mut() {
-            if map.contains_key("data") {
-                return map.remove("data").unwrap_or(serde_json::Value::Null);
+            if map.contains_key(k::DATA) {
+                return map.remove(k::DATA).unwrap_or(serde_json::Value::Null);
             }
         }
         v
@@ -73,6 +74,21 @@ impl V2Adapter {
         } else {
             Err(format!("HTTP {}", resp.status()))
         }
+    }
+
+    /// GET /api/model → `{location, data:[Model.Info]}` (the server's model
+    /// catalog for the current directory).
+    async fn models(&self) -> Result<serde_json::Value, String> {
+        let url = format!("{}/api/model", self.base);
+        let resp = self
+            .authed(self.http.get(&url))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        if !resp.status().is_success() {
+            return Err(format!("HTTP {}", resp.status()));
+        }
+        resp.json().await.map_err(|e| e.to_string())
     }
 }
 
@@ -149,7 +165,7 @@ impl OpenCodeApi for V2Adapter {
     ) -> impl Future<Output = Result<(), String>> + Send {
         async move {
             let url = format!("{}/api/session/{}", self.base, session_id);
-            let body = serde_json::json!({ "title": title });
+            let body = serde_json::json!({ k::TITLE: title });
             let resp = self
                 .authed(self.http.patch(&url).json(&body))
                 .send()
@@ -213,7 +229,7 @@ impl OpenCodeApi for V2Adapter {
             let url = format!("{}/api/session/{}/fork", self.base, session_id);
             let mut body = serde_json::Map::new();
             if let Some(m) = message_id {
-                body.insert("before".into(), serde_json::Value::String(m.to_string()));
+                body.insert(k::BEFORE.into(), serde_json::Value::String(m.to_string()));
             }
             let resp = self
                 .authed(self.http.post(&url).json(&body))
@@ -236,7 +252,7 @@ impl OpenCodeApi for V2Adapter {
     ) -> impl Future<Output = Result<(), String>> + Send {
         async move {
             let url = format!("{}/api/session/{}/revert/stage", self.base, session_id);
-            let body = serde_json::json!({ "messageID": message_id });
+            let body = serde_json::json!({ k::MESSAGE_ID: message_id });
             let resp = self
                 .authed(self.http.post(&url).json(&body))
                 .send()
@@ -304,20 +320,21 @@ impl OpenCodeApi for V2Adapter {
         }
     }
 
-    /// GET /api/provider → `{location, data: [Provider.Info]}`.
+    /// Provider/model catalog, normalised to the v1 `{providers:[{id, name,
+    /// models:{id:{name}}}]}` shape that `refresh_models` flattens for QML.
+    ///
+    /// v2 has no equivalent to v1's `/config/providers`: `/api/provider` needs a
+    /// `location[directory]` query and only lists *configured* providers (empty
+    /// on the bundled 1.19.0 → the model picker would be blank), while the
+    /// catalog actually offered by the server is `GET /api/model`
+    /// (`{location, data:[{id, providerID, name, …}]}`, verified live — see
+    /// `vault/План-v2.md` §12.2). We therefore build the v1 shape from
+    /// `/api/model`, synthesising a provider entry per `providerID` (the display
+    /// name is the id — v2 does not expose a provider title we need here).
     fn providers(&self) -> impl Future<Output = Result<serde_json::Value, String>> + Send {
         async move {
-            let url = format!("{}/api/provider", self.base);
-            let resp = self
-                .authed(self.http.get(&url))
-                .send()
-                .await
-                .map_err(|e| e.to_string())?;
-            if !resp.status().is_success() {
-                return Err(format!("HTTP {}", resp.status()));
-            }
-            let v: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
-            Ok(Self::unwrap_data(v))
+            let v = self.models().await?;
+            Ok(fold_models_into_providers(&v))
         }
     }
 
@@ -341,7 +358,7 @@ impl OpenCodeApi for V2Adapter {
         async move {
             let url = format!("{}/api/session/{}/model", self.base, session_id);
             let body = serde_json::json!({
-                "model": { "providerID": provider_id, "id": model_id }
+                k::MODEL: { k::PROVIDER_ID: provider_id, k::ID: model_id }
             });
             let resp = self
                 .authed(self.http.post(&url).json(&body))
@@ -364,7 +381,7 @@ impl OpenCodeApi for V2Adapter {
     ) -> impl Future<Output = Result<(), String>> + Send {
         async move {
             let url = format!("{}/api/session/{}/agent", self.base, session_id);
-            let body = serde_json::json!({ "agent": agent });
+            let body = serde_json::json!({ k::AGENT: agent });
             let resp = self
                 .authed(self.http.post(&url).json(&body))
                 .send()
@@ -418,11 +435,11 @@ impl OpenCodeApi for V2Adapter {
         async move {
             let url = format!("{}/api/session/{}/prompt", self.base, session_id);
             let mut prompt = serde_json::Map::new();
-            prompt.insert("text".into(), serde_json::Value::String(text.to_string()));
+            prompt.insert(k::TEXT.into(), serde_json::Value::String(text.to_string()));
             if let Some(a) = agent {
-                prompt.insert("agents".into(), serde_json::json!([{ "name": a }]));
+                prompt.insert(k::AGENTS.into(), serde_json::json!([{ k::NAME: a }]));
             }
-            let body = serde_json::json!({ "prompt": prompt });
+            let body = serde_json::json!({ k::PROMPT: prompt });
             let resp = self
                 .authed(self.http.post(&url).json(&body))
                 .send()
@@ -433,7 +450,7 @@ impl OpenCodeApi for V2Adapter {
             }
             let v: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
             Ok(Self::unwrap_data(v)
-                .get("id")
+                .get(k::ID)
                 .and_then(|id| id.as_str())
                 .map(str::to_string))
         }
@@ -452,7 +469,7 @@ impl OpenCodeApi for V2Adapter {
                 return Err(format!("HTTP {}", resp.status()));
             }
             let v: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
-            Ok(v.get("interrupted").and_then(|b| b.as_bool()).unwrap_or(false))
+            Ok(v.get(k::INTERRUPTED).and_then(|b| b.as_bool()).unwrap_or(false))
         }
     }
 
@@ -469,11 +486,11 @@ impl OpenCodeApi for V2Adapter {
                 self.base, session_id, permission_id
             );
             let decision = match response {
-                PermissionReplyKind::Once => "once",
-                PermissionReplyKind::Always => "always",
-                PermissionReplyKind::Reject => "reject",
+                PermissionReplyKind::Once => k::DECISION_ONCE,
+                PermissionReplyKind::Always => k::DECISION_ALWAYS,
+                PermissionReplyKind::Reject => k::DECISION_REJECT,
             };
-            let body = serde_json::json!({ "decision": decision });
+            let body = serde_json::json!({ k::DECISION: decision });
             let resp = self
                 .authed(self.http.post(&url).json(&body))
                 .send()
@@ -544,5 +561,96 @@ impl OpenCodeApi for V2Adapter {
                     Box<dyn futures_util::Stream<Item = Result<ClientEvent, String>> + Send>,
                 >)
         }
+    }
+}
+
+/// Build the v1-shaped provider catalog (`{providers:[{id, name, models}]}`)
+/// from a v2 `/api/model` response (`{location, data:[{id, providerID, name}]}`).
+///
+/// Models are grouped by `providerID` (providers in first-seen order, models
+/// within a provider sorted by id via the `BTreeMap`); each model carries only
+/// the `name` field `refresh_models` reads. A model without `id`/`providerID`
+/// is skipped. Kept free so it can be unit-tested without an HTTP server.
+fn fold_models_into_providers(v: &serde_json::Value) -> serde_json::Value {
+    let empty = Vec::new();
+    let models = v[k::DATA].as_array().unwrap_or(&empty);
+    let mut order: Vec<String> = Vec::new();
+    let mut by_provider: std::collections::BTreeMap<String, serde_json::Map<String, serde_json::Value>> =
+        std::collections::BTreeMap::new();
+    for m in models {
+        let pid = m[k::PROVIDER_ID].as_str().unwrap_or("");
+        let id = m[k::ID].as_str().unwrap_or("");
+        if pid.is_empty() || id.is_empty() {
+            continue;
+        }
+        if !by_provider.contains_key(pid) {
+            order.push(pid.to_string());
+            by_provider.insert(pid.to_string(), serde_json::Map::new());
+        }
+        let name = m[k::NAME].as_str().unwrap_or(id);
+        if let Some(ms) = by_provider.get_mut(pid) {
+            ms.insert(id.to_string(), serde_json::json!({ k::NAME: name }));
+        }
+    }
+    let providers: Vec<serde_json::Value> = order
+        .iter()
+        .map(|pid| {
+            let models = by_provider
+                .remove(pid)
+                .map(serde_json::Value::Object)
+                .unwrap_or_else(|| serde_json::json!({}));
+            serde_json::json!({ k::ID: pid, k::NAME: pid, k::MODELS: models })
+        })
+        .collect();
+    serde_json::json!({ k::PROVIDERS: providers })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn fold_models_groups_by_provider() {
+        let v = json!({
+            "location": { "directory": "/tmp" },
+            "data": [
+                { "id": "b-model", "providerID": "opencode", "name": "B" },
+                { "id": "a-model", "providerID": "opencode", "name": "A" },
+                { "id": "x", "providerID": "other", "name": "X" }
+            ]
+        });
+        let out = fold_models_into_providers(&v);
+        let provs = out["providers"].as_array().expect("providers array");
+        assert_eq!(provs.len(), 2);
+        assert_eq!(provs[0]["id"], "opencode");
+        assert_eq!(provs[1]["id"], "other");
+        // v1 consumes `{id: {name}}`; models sorted by id.
+        let opencode = provs[0]["models"].as_object().unwrap();
+        let keys: Vec<&String> = opencode.keys().collect();
+        assert_eq!(keys, vec!["a-model", "b-model"]);
+        assert_eq!(opencode["a-model"]["name"], "A");
+    }
+
+    #[test]
+    fn fold_models_skips_incomplete_entries() {
+        let v = json!({ "data": [
+            { "id": "", "providerID": "opencode", "name": "n" },
+            { "id": "m", "providerID": "", "name": "n" },
+            { "id": "ok", "providerID": "p" }
+        ] });
+        let out = fold_models_into_providers(&v);
+        let provs = out["providers"].as_array().unwrap();
+        assert_eq!(provs.len(), 1);
+        let models = provs[0]["models"].as_object().unwrap();
+        assert!(models.contains_key("ok"));
+        // Missing `name` falls back to the id.
+        assert_eq!(models["ok"]["name"], "ok");
+    }
+
+    #[test]
+    fn fold_models_handles_empty_catalog() {
+        let out = fold_models_into_providers(&json!({ "data": [] }));
+        assert_eq!(out["providers"].as_array().unwrap().len(), 0);
     }
 }

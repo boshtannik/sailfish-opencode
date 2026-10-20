@@ -175,9 +175,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     log::warn!("failed to create workdir {cwd:?}: {e}");
                 }
                 let guard = server::ServerGuard::start(server::ServerConfig { cwd: Some(cwd), ..Default::default() }).await;
+                // Auth for the connection the worker will use. Our own server
+                // (2.0.32) prints a Basic-auth password on startup → take it
+                // from the guard; the env auth only matters for a pre-existing
+                // external server (`base` from the environment).
+                let mut worker_auth = worker_auth;
                 let base = match &guard {
                     Ok(g) => {
                         log::info!("opencode serve started: {}", g.base_url());
+                        if worker_base.is_none() {
+                            worker_auth = g.auth.clone();
+                        }
                         Some(worker_base.unwrap_or_else(|| g.base_url().to_string()))
                     }
                     Err(e) => {

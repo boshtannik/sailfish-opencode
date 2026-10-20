@@ -308,6 +308,7 @@ Item {
             }
 
             ComboBox {
+                id: apiVersionCombo
                 label: qsTr("OpenCode API version (restart required)")
                 description: qsTr("v1 — opencode 1.x, v2 — opencode 2.x. Change only if you know the server version.")
                 currentIndex: (appWindow.apiVersion === "v2") ? 1 : 0
@@ -315,7 +316,17 @@ Item {
                     MenuItem { text: qsTr("v1 (opencode 1.x)") }
                     MenuItem { text: qsTr("v2 (opencode 2.x)") }
                 }
+                // Persist only real user picks. `currentIndex` is also assigned
+                // programmatically (binding + first init), which would otherwise
+                // write the value back to settings on every page open and can
+                // pin the setting to a stale value (e.g. v1 on a v2-default
+                // install). `armed` flips true one event-loop turn after the
+                // initial binding settles.
+                property bool armed: false
+                Component.onCompleted: Qt.callLater(function() { apiVersionCombo.armed = true })
                 onCurrentIndexChanged: {
+                    if (!armed)
+                        return
                     var v = (currentIndex === 1) ? "v2" : "v1"
                     if (typeof appWindow !== "undefined" && appWindow
                         && appWindow.apiVersion !== v)

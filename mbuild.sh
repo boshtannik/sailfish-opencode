@@ -106,15 +106,20 @@ docker run --rm \
   # opencode CLI: we bundle the arm64 binary into the RPM (/home/harbour-opencode/opencode,
   # symlinked from /usr/libexec/harbour-opencode/opencode)
   # so the client does not depend on a separately installed opencode or conflict with it via PATH.
-  # Version 1.19.0 ships a native arm64 build again (1.18.31/1.18.32 were Bun builds: `--version`
-  # without args printed 1.3.14 (Bun) and `serve` failed with "Script not found serve").
-  # 1.19.0 was verified on the phone: `--version`→1.19.0, `serve` starts, /global/health ok.
-  OC_VERSION="1.19.0"
-  # SHA-256 of the reference 1.19.0 binary (linux-arm64, verified on the phone).
-  # We check not only the version but the file itself: protection against cache substitution
-  # (e.g. a Bun binary with an already matching opencode.version), which could otherwise slip
-  # the wrong "opencode" into the RPM.
-  OC_SHA256="1e392db1d558a9eebaef618d4da3927f8b61fbcbd9a19513ed77f911142415df"
+  #
+  # opencode has TWO release lines (see vault/Разведка-v2.md §10):
+  #   * v1.x (1.19.0..1.19.3) — "OpenCode 1": GitHub Releases + npm `latest`.
+  #   * v2.0.x (2.0.28..2.0.32) — the real "OpenCode 2": CDN only, NOT in GitHub Releases.
+  # 1.19.0 was a *bridge* build (v1 routes AND /api/* v2 routes, live events under
+  # `session.next.*`). We target the real v2 now: 2.0.32 drops the bridge (no
+  # `session.next.*`, no v1 routes) and emits the plain `session.*` v2 events the
+  # client already handles. 2.0.x binaries live on the CDN, not under GitHub Releases:
+  #   https://opencode.ai/files/bin/<ver>/opencode-linux-arm64.tar.gz
+  OC_VERSION="2.0.32"
+  # SHA-256 of the reference 2.0.32 binary (linux-arm64, extracted from the CDN tarball).
+  # We check not only the version but the file itself: protection against cache substitution,
+  # which could otherwise slip the wrong "opencode" into the RPM.
+  OC_SHA256="4199ae2d2c96ad2a140d32cabe6a1d9280b4cd1d9d8ed533a5431f54c422693c"
   OC_CLI="$HOME/cargo-cache/opencode-cli"
   # set -e: sha256sum of a missing file exits with 1 — that is not an error
   # but a signal that the file "needs downloading" (checked in the if below).
@@ -124,7 +129,7 @@ docker run --rm \
      || [ "$(cat "$OC_CLI/opencode.version" 2>/dev/null)" != "$OC_VERSION" ] \
      || [ "$OC_SHA_HAVE" != "$OC_SHA256" ]; then
     curl -fsSL -o /tmp/opencode-linux-arm64.tar.gz \
-      "https://github.com/anomalyco/opencode/releases/download/v${OC_VERSION}/opencode-linux-arm64.tar.gz"
+      "https://opencode.ai/files/bin/${OC_VERSION}/opencode-linux-arm64.tar.gz"
     rm -rf "$OC_CLI"
     mkdir -p "$OC_CLI"
     tar -xzf /tmp/opencode-linux-arm64.tar.gz -C "$OC_CLI"

@@ -412,9 +412,13 @@ pub fn dispatch_v2(
     stream: &mut StreamState<'_>,
 ) -> bool {
     use crate::types::v2::event as v2;
-    match env.kind.as_str() {
+    use crate::types::v2::keys as k;
+    // opencode 2.0.32 emits the plain `session.*` v2 event names, so the raw
+    // envelope type is matched directly (no bridge prefix to strip).
+    let kind = env.kind.as_str();
+    match kind {
         // ── turn lifecycle ────────────────────────────────────────────
-        "session.step.started" => {
+        k::STEP_STARTED => {
             match from_data::<v2::StepStartedData>(env) {
                 Ok(d) => {
                     // A step opens the assistant message: register it so its
@@ -426,13 +430,13 @@ pub fn dispatch_v2(
                 Err(e) => from_data_error(env, &e),
             }
         }
-        "session.step.ended" | "session.step.streamed" => {
+        k::STEP_ENDED | k::STEP_STREAMED => {
             // Terminal step info (cost/tokens/finish) is not rendered yet; the
             // turn end is driven by `session.idle`/`session.status`. Nothing to
             // record here — but the envelopes must still be recognised.
             false
         }
-        "session.step.failed" => match from_data::<v2::StepEndedData>(env) {
+        k::STEP_FAILED => match from_data::<v2::StepEndedData>(env) {
             Ok(d) => {
                 on_session_error_v2(stream, d.error.as_ref());
                 true
@@ -440,21 +444,21 @@ pub fn dispatch_v2(
             Err(e) => from_data_error(env, &e),
         },
         // ── answer text ───────────────────────────────────────────────
-        "session.text.started" => match from_data::<v2::TextStartedData>(env) {
+        k::TEXT_STARTED => match from_data::<v2::TextStartedData>(env) {
             Ok(d) => {
                 stream.assistant_messages.insert(d.assistant_message_id);
                 true
             }
             Err(e) => from_data_error(env, &e),
         },
-        "session.text.delta" => match from_data::<v2::TextDeltaData>(env) {
+        k::TEXT_DELTA => match from_data::<v2::TextDeltaData>(env) {
             Ok(d) => {
                 on_v2_text_delta(stream, &d);
                 true
             }
             Err(e) => from_data_error(env, &e),
         },
-        "session.text.ended" => match from_data::<v2::TextEndedData>(env) {
+        k::TEXT_ENDED => match from_data::<v2::TextEndedData>(env) {
             Ok(d) => {
                 on_v2_text_ended(stream, &d);
                 true
@@ -462,18 +466,18 @@ pub fn dispatch_v2(
             Err(e) => from_data_error(env, &e),
         },
         // ── reasoning ─────────────────────────────────────────────────
-        "session.reasoning.started" => match from_data::<v2::TextStartedData>(env) {
+        k::REASONING_STARTED => match from_data::<v2::TextStartedData>(env) {
             Ok(_) => true,
             Err(e) => from_data_error(env, &e),
         },
-        "session.reasoning.delta" => match from_data::<v2::TextDeltaData>(env) {
+        k::REASONING_DELTA => match from_data::<v2::TextDeltaData>(env) {
             Ok(d) => {
                 on_v2_reasoning_delta(stream, &d);
                 true
             }
             Err(e) => from_data_error(env, &e),
         },
-        "session.reasoning.ended" => match from_data::<v2::TextEndedData>(env) {
+        k::REASONING_ENDED => match from_data::<v2::TextEndedData>(env) {
             Ok(d) => {
                 on_v2_reasoning_ended(stream, &d);
                 true
@@ -481,49 +485,49 @@ pub fn dispatch_v2(
             Err(e) => from_data_error(env, &e),
         },
         // ── tool calls ────────────────────────────────────────────────
-        "session.tool.input.started" => match from_data::<v2::ToolInputStartedData>(env) {
+        k::TOOL_INPUT_STARTED => match from_data::<v2::ToolInputStartedData>(env) {
             Ok(d) => {
                 on_tool_input_started_v2(state, &d.id, &d.name);
                 true
             }
             Err(e) => from_data_error(env, &e),
         },
-        "session.tool.input.delta" => match from_data::<v2::ToolInputDeltaData>(env) {
+        k::TOOL_INPUT_DELTA => match from_data::<v2::ToolInputDeltaData>(env) {
             Ok(d) => {
                 on_tool_input_delta_v2(state, &d.id, &d.delta);
                 true
             }
             Err(e) => from_data_error(env, &e),
         },
-        "session.tool.input.ended" => match from_data::<v2::ToolInputEndedData>(env) {
+        k::TOOL_INPUT_ENDED => match from_data::<v2::ToolInputEndedData>(env) {
             Ok(d) => {
                 on_tool_input_ended_v2(state, &d.id, &d.text);
                 true
             }
             Err(e) => from_data_error(env, &e),
         },
-        "session.tool.called" => match from_data::<v2::ToolCalledData>(env) {
+        k::TOOL_CALLED => match from_data::<v2::ToolCalledData>(env) {
             Ok(d) => {
                 on_tool_called_v2(state, &d.id, &env.data);
                 true
             }
             Err(e) => from_data_error(env, &e),
         },
-        "session.tool.progress" => match from_data::<v2::ToolProgressData>(env) {
+        k::TOOL_PROGRESS => match from_data::<v2::ToolProgressData>(env) {
             Ok(d) => {
                 on_tool_progress_v2(state, &d.id);
                 true
             }
             Err(e) => from_data_error(env, &e),
         },
-        "session.tool.success" => match from_data::<v2::ToolSuccessData>(env) {
+        k::TOOL_SUCCESS => match from_data::<v2::ToolSuccessData>(env) {
             Ok(d) => {
                 on_tool_success_v2(state, &d.id, &env.data);
                 true
             }
             Err(e) => from_data_error(env, &e),
         },
-        "session.tool.failed" => match from_data::<v2::ToolFailedData>(env) {
+        k::TOOL_FAILED => match from_data::<v2::ToolFailedData>(env) {
             Ok(d) => {
                 on_tool_failed_v2(state, &d.id, &env.data);
                 true
@@ -531,26 +535,26 @@ pub fn dispatch_v2(
             Err(e) => from_data_error(env, &e),
         },
         // ── compaction ────────────────────────────────────────────────
-        "session.compaction.started" => match from_data::<v2::CompactionStartedData>(env) {
+        k::COMPACTION_STARTED => match from_data::<v2::CompactionStartedData>(env) {
             Ok(d) => {
                 on_compaction_started_v2(stream, &d.session_id);
                 true
             }
             Err(e) => from_data_error(env, &e),
         },
-        "session.compaction.delta" => {
+        k::COMPACTION_DELTA => {
             // The growing compaction summary is not rendered live yet; the
             // final text arrives with `compaction.ended`, which reloads history.
             false
         }
-        "session.compaction.ended" => match from_data::<v2::CompactionEndedData>(env) {
+        k::COMPACTION_ENDED => match from_data::<v2::CompactionEndedData>(env) {
             Ok(d) => {
                 on_compaction_ended_v2(stream, &d.session_id);
                 true
             }
             Err(e) => from_data_error(env, &e),
         },
-        "session.compaction.failed" => match from_data::<v2::CompactionFailedData>(env) {
+        k::COMPACTION_FAILED => match from_data::<v2::CompactionFailedData>(env) {
             Ok(d) => {
                 if stream.current_session == Some(d.session_id.as_str()) {
                     if let Ok(mut g) = stream.compacting.lock() {
@@ -563,21 +567,32 @@ pub fn dispatch_v2(
             Err(e) => from_data_error(env, &e),
         },
         // ── session lifecycle ─────────────────────────────────────────
-        "session.renamed" | "session.moved" | "session.agent.selected"
-        | "session.model.selected" => {
+        k::RENAMED | k::MOVED | k::AGENT_SELECTED | k::MODEL_SELECTED => {
             // Session metadata changes are re-read from the sessions list on the
             // next poll; no live-accumulator effect.
             true
         }
-        "session.deleted" => {
-            if let Some(sid) = env.data.get("sessionID").and_then(|v| v.as_str()) {
+        // ── notifications we recognise but do not render (yet) ────────
+        // The UI gets nothing from them yet (turn end is
+        // `session.idle`/`session.status`, prompt admission is driven by our
+        // own send path). Recognised so they are not reported as unknown.
+        k::SYNTHETIC | k::REVERT_STAGED | k::REVERT_CLEARED | k::REVERT_COMMITTED
+        | k::SHELL_STARTED | k::SHELL_ENDED | k::MESSAGE_CONTENT_UPDATED
+        | k::USAGE_RECORDED | k::USAGE_UPDATED | k::EXECUTION_STARTED | k::EXECUTION_FAILED
+        | k::EXECUTION_INTERRUPTED | k::EXECUTION_SUCCEEDED => true,
+        // ── catalog/config invalidation (2.0.32): re-read lazily ──────
+        k::PROJECT_UPDATED | k::INTEGRATION_UPDATED | k::PROVIDER_UPDATED | k::MODEL_UPDATED
+        | k::AGENT_UPDATED | k::COMMAND_UPDATED | k::SKILL_UPDATED | k::WEBSEARCH_UPDATED
+        | k::REFERENCE_UPDATED | k::PLUGIN_UPDATED => true,
+        k::DELETED => {
+            if let Some(sid) = env.data.get(k::SESSION_ID).and_then(|v| v.as_str()) {
                 state.sessions.remove(sid);
                 state.session_meta.remove(sid);
             }
             true
         }
         // ── status / idle ─────────────────────────────────────────────
-        "session.idle" => match from_data::<v2::SessionIdleData>(env) {
+        k::IDLE => match from_data::<v2::SessionIdleData>(env) {
             Ok(d) => {
                 if let Some(fsm) = state.sessions.get_mut(&d.sessionID) {
                     fsm.apply(crate::types::session::SessionStatus::Idle);
@@ -593,7 +608,7 @@ pub fn dispatch_v2(
             }
             Err(e) => from_data_error(env, &e),
         },
-        "session.status" => match from_data::<v2::SessionStatusData>(env) {
+        k::STATUS => match from_data::<v2::SessionStatusData>(env) {
             Ok(d) => {
                 let fsm = state
                     .sessions
@@ -616,7 +631,7 @@ pub fn dispatch_v2(
             Err(e) => from_data_error(env, &e),
         },
         // ── permissions ───────────────────────────────────────────────
-        "permission.asked" => match from_data::<v2::PermissionAskedData>(env) {
+        k::PERMISSION_ASKED => match from_data::<v2::PermissionAskedData>(env) {
             Ok(d) => {
                 state.permissions.push(Permission {
                     id: d.id,
@@ -630,13 +645,13 @@ pub fn dispatch_v2(
                             message_id,
                             id,
                         } => crate::types::event::PermissionV2Source {
-                            kind: "tool".to_string(),
+                            kind: k::SOURCE_TOOL.to_string(),
                             messageID: message_id,
                             callID: id,
                         },
                         crate::types::v2::permission::PermissionSource::Unknown => {
                             crate::types::event::PermissionV2Source {
-                                kind: "unknown".to_string(),
+                                kind: k::SOURCE_UNKNOWN.to_string(),
                                 messageID: String::new(),
                                 callID: String::new(),
                             }
@@ -647,7 +662,7 @@ pub fn dispatch_v2(
             }
             Err(e) => from_data_error(env, &e),
         },
-        "permission.replied" => match from_data::<v2::PermissionRepliedData>(env) {
+        k::PERMISSION_REPLIED => match from_data::<v2::PermissionRepliedData>(env) {
             Ok(d) => {
                 state.permissions.pop(&d.requestID);
                 true
@@ -655,7 +670,7 @@ pub fn dispatch_v2(
             Err(e) => from_data_error(env, &e),
         },
         // ── questions (legacy, still emitted) ─────────────────────────
-        "question.asked" => match from_data::<v2::QuestionAskedData>(env) {
+        k::QUESTION_ASKED => match from_data::<v2::QuestionAskedData>(env) {
             Ok(d) => {
                 state.questions.push(QuestionRequest {
                     id: d.id,
@@ -667,7 +682,7 @@ pub fn dispatch_v2(
             }
             Err(e) => from_data_error(env, &e),
         },
-        "question.replied" | "question.rejected" => {
+        k::QUESTION_REPLIED | k::QUESTION_REJECTED => {
             match from_data::<v2::QuestionResolvedData>(env) {
                 Ok(d) => {
                     state.questions.pop(&d.requestID);
@@ -677,14 +692,14 @@ pub fn dispatch_v2(
             }
         }
         // ── forms (replace questions) ─────────────────────────────────
-        "form.created" => {
+        k::FORM_CREATED => {
             // The form panel is step 6 work; recognised here so the envelope is
             // not reported as an unknown type.
             false
         }
-        "form.replied" | "form.cancelled" => false,
+        k::FORM_REPLIED | k::FORM_CANCELLED => false,
         // ── notifications we do not render ────────────────────────────
-        "server.connected" => false,
+        k::SERVER_CONNECTED => false,
         // Everything else is a v2 event with no UI handling yet. Listed via the
         // fallback so a NEW upstream event is surfaced once (never dropped).
         _ => {
@@ -819,10 +834,11 @@ fn on_session_error_v2(stream: &mut StreamState<'_>, error: Option<&serde_json::
 
 /// Human-readable text from a v2 structured error (`{type, message, status?}`).
 fn human_session_error_value(error: Option<&serde_json::Value>) -> String {
+    use crate::types::v2::keys as k;
     let Some(e) = error else {
         return String::new();
     };
-    if let Some(m) = e.get("message").and_then(|v| v.as_str()) {
+    if let Some(m) = e.get(k::MESSAGE).and_then(|v| v.as_str()) {
         if !m.is_empty() {
             return m.to_string();
         }
@@ -869,9 +885,10 @@ fn on_tool_input_ended_v2(state: &mut DispatcherState, id: &str, text: &str) {
 }
 
 fn on_tool_called_v2(state: &mut DispatcherState, id: &str, data: &serde_json::Value) {
+    use crate::types::v2::keys as k;
     let name = state.tools.name_of(id).unwrap_or("").to_string();
     let input = data
-        .get("input")
+        .get(k::INPUT)
         .cloned()
         .unwrap_or(serde_json::Value::Null);
     // `name` is not in `tool.called`; keep the one learned at input.started.
@@ -890,12 +907,13 @@ fn on_tool_progress_v2(state: &mut DispatcherState, id: &str) {
 }
 
 fn on_tool_success_v2(state: &mut DispatcherState, id: &str, data: &serde_json::Value) {
+    use crate::types::v2::keys as k;
     let input = state.tools.input_of(id);
     let title = short_input(&input)
         .or_else(|| state.tools.name_of(id).map(str::to_string))
-        .unwrap_or_else(|| "tool".to_string());
+        .unwrap_or_else(|| k::DEFAULT_TOOL_TITLE.to_string());
     let output = data
-        .get("content")
+        .get(k::CONTENT)
         .map(content_to_string)
         .unwrap_or_default();
     state.tools.set_state(
@@ -909,9 +927,10 @@ fn on_tool_success_v2(state: &mut DispatcherState, id: &str, data: &serde_json::
 }
 
 fn on_tool_failed_v2(state: &mut DispatcherState, id: &str, data: &serde_json::Value) {
+    use crate::types::v2::keys as k;
     let input = state.tools.input_of(id);
     let error = data
-        .get("error")
+        .get(k::ERROR)
         .map(content_to_string)
         .unwrap_or_default();
     state.tools.set_state(id, ToolState::Error { input, error });
@@ -1137,7 +1156,7 @@ fn on_shell_started(state: &mut DispatcherState, props: &SessionNextShellStarted
         props.callID.clone(),
         SHELL_TOOL_NAME.to_string(),
         ToolState::Running {
-            input: serde_json::json!({ "command": props.command }),
+            input: serde_json::json!({ crate::types::keys::COMMAND: props.command }),
         },
     );
 }
@@ -1161,8 +1180,16 @@ fn on_shell_ended(state: &mut DispatcherState, props: &SessionNextShellEndedProp
 
 /// A short human label pulled from a tool-call input (command / path / …).
 fn short_input(input: &serde_json::Value) -> Option<String> {
+    use crate::types::keys as k;
     for key in [
-        "command", "filePath", "path", "pattern", "query", "url", "prompt", "description",
+        k::COMMAND,
+        k::FILE_PATH,
+        k::PATH,
+        k::PATTERN,
+        k::QUERY,
+        k::URL,
+        k::PROMPT,
+        k::DESCRIPTION,
     ] {
         if let Some(s) = input.get(key).and_then(|v| v.as_str()) {
             if !s.is_empty() {
@@ -1176,13 +1203,14 @@ fn short_input(input: &serde_json::Value) -> Option<String> {
 /// Render a tool `content`/`error` value: plain string as-is, an array of
 /// `{"text": …}` parts joined, anything else as compact JSON.
 fn content_to_string(v: &serde_json::Value) -> String {
+    use crate::types::keys as k;
     match v {
         serde_json::Value::String(s) => s.clone(),
         serde_json::Value::Null => String::new(),
         serde_json::Value::Array(items) => items
             .iter()
             .map(|it| {
-                it.get("text")
+                it.get(k::TEXT)
                     .and_then(|t| t.as_str())
                     .map(str::to_string)
                     .unwrap_or_else(|| it.to_string())
@@ -1508,5 +1536,45 @@ mod tests {
         assert!(assistant_messages.contains("msg_c"));
         assert!(!compaction_messages.contains("msg_n"));
         assert!(compaction_messages.contains("msg_c"));
+    }
+
+    #[test]
+    fn v2_event_constants_are_plain_session_names() {
+        // opencode 2.0.32 emits plain `session.*` event names (no `session.next.`
+        // bridge prefix). Guard the dispatch constants against a stray prefix or
+        // typo: each must be exactly the unprefixed wire spelling.
+        use crate::types::v2::keys as k;
+        for (const_name, value) in [
+            ("STEP_STARTED", k::STEP_STARTED),
+            ("STEP_ENDED", k::STEP_ENDED),
+            ("STEP_STREAMED", k::STEP_STREAMED),
+            ("STEP_FAILED", k::STEP_FAILED),
+            ("TEXT_STARTED", k::TEXT_STARTED),
+            ("TEXT_DELTA", k::TEXT_DELTA),
+            ("TEXT_ENDED", k::TEXT_ENDED),
+            ("REASONING_STARTED", k::REASONING_STARTED),
+            ("REASONING_DELTA", k::REASONING_DELTA),
+            ("REASONING_ENDED", k::REASONING_ENDED),
+            ("TOOL_INPUT_STARTED", k::TOOL_INPUT_STARTED),
+            ("TOOL_INPUT_DELTA", k::TOOL_INPUT_DELTA),
+            ("TOOL_INPUT_ENDED", k::TOOL_INPUT_ENDED),
+            ("TOOL_CALLED", k::TOOL_CALLED),
+            ("TOOL_PROGRESS", k::TOOL_PROGRESS),
+            ("TOOL_SUCCESS", k::TOOL_SUCCESS),
+            ("TOOL_FAILED", k::TOOL_FAILED),
+            ("COMPACTION_STARTED", k::COMPACTION_STARTED),
+            ("COMPACTION_DELTA", k::COMPACTION_DELTA),
+            ("COMPACTION_ENDED", k::COMPACTION_ENDED),
+            ("COMPACTION_FAILED", k::COMPACTION_FAILED),
+        ] {
+            assert!(
+                value.starts_with("session."),
+                "{const_name} = {value:?} must be a session.* event"
+            );
+            assert!(
+                !value.starts_with("session.next."),
+                "{const_name} = {value:?} must not carry the 1.19.0 bridge prefix"
+            );
+        }
     }
 }

@@ -7,6 +7,7 @@
 
 pub mod event;
 pub mod form;
+pub mod keys;
 pub mod message;
 pub mod permission;
 pub mod session;
