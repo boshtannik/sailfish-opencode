@@ -698,5 +698,30 @@ long press — remove</source>
         <source>+%1 more waiting</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml"/>
+        <source>Tool calls</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml"/>
+        <source>How tool calls are shown in the transcript</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml"/>
+        <source>Show (name + argument)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml"/>
+        <source>Minimal (name only)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml"/>
+        <source>Hide</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 </TS>

@@ -673,5 +673,30 @@ long press — remove</source>
         <source>+%1 more waiting</source>
         <translation>+%1 ще очікують</translation>
     </message>
+    <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml"/>
+        <source>Tool calls</source>
+        <translation>Виклики інструментів</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml"/>
+        <source>How tool calls are shown in the transcript</source>
+        <translation>Як показувати виклики інструментів у діалозі</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml"/>
+        <source>Show (name + argument)</source>
+        <translation>Показувати (ім'я + аргумент)</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml"/>
+        <source>Minimal (name only)</source>
+        <translation>Мінімально (лише ім'я)</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml"/>
+        <source>Hide</source>
+        <translation>Приховати</translation>
+    </message>
 </context>
 </TS>

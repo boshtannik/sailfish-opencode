@@ -673,5 +673,30 @@ lang drücken — entfernen</translation>
         <source>+%1 more waiting</source>
         <translation>+%1 warten noch</translation>
     </message>
+    <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml"/>
+        <source>Tool calls</source>
+        <translation>Werkzeugaufrufe</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml"/>
+        <source>How tool calls are shown in the transcript</source>
+        <translation>Wie Werkzeugaufrufe im Transkript angezeigt werden</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml"/>
+        <source>Show (name + argument)</source>
+        <translation>Anzeigen (Name + Argument)</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml"/>
+        <source>Minimal (name only)</source>
+        <translation>Minimal (nur Name)</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml"/>
+        <source>Hide</source>
+        <translation>Ausblenden</translation>
+    </message>
 </context>
 </TS>

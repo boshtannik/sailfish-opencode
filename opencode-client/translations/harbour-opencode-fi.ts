@@ -673,5 +673,30 @@ pitkä painallus — poista</translation>
         <source>+%1 more waiting</source>
         <translation>+%1 odottaa</translation>
     </message>
+    <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml"/>
+        <source>Tool calls</source>
+        <translation>Työkalukutsut</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml"/>
+        <source>How tool calls are shown in the transcript</source>
+        <translation>Miten työkalukutsut näytetään transkriptissa</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml"/>
+        <source>Show (name + argument)</source>
+        <translation>Näytä (nimi + argumentti)</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml"/>
+        <source>Minimal (name only)</source>
+        <translation>Minimaalinen (vain nimi)</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml"/>
+        <source>Hide</source>
+        <translation>Piilota</translation>
+    </message>
 </context>
 </TS>
