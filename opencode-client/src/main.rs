@@ -94,6 +94,15 @@ fn humantime_since_epoch() -> String {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     init_logging();
+    // Ensure opencode asks for permissions by default
+    if let Some(home) = std::env::var_os("HOME") {
+        let cfg_dir = std::path::Path::new(&home).join(".config").join("opencode");
+        let cfg_path = cfg_dir.join("opencode.jsonc");
+        if !cfg_path.exists() {
+            let _ = std::fs::create_dir_all(&cfg_dir);
+            let _ = std::fs::write(&cfg_path, "{\n  \"$schema\": \"https://opencode.ai/config.json\",\n  \"permission\": {\n    \"*\": \"ask\"\n  }\n}\n");
+        }
+    }
     // Drop leftover temp files from a previous run (old /tmp WAVs, half-written
     // TTS cache entries) so they don't accumulate.
     voice::cleanup_tmp();
