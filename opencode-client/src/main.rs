@@ -159,10 +159,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let worker_auth = env_auth.clone();
     let worker_stop_rx = stop_rx;
     let worker_settings = settings.clone();
-    // Woken by `Cmd::SetApiVersion`: tells the running stream to drop out so the
-    // worker re-reads the settings and rebuilds the adapter (hot v1↔v2 switch).
-    let settings_changed = Arc::new(tokio::sync::Notify::new());
-    let worker_settings_changed = settings_changed.clone();
     let worker = std::thread::Builder::new()
         .name("opencode-worker".into())
         .spawn(move || {
@@ -219,7 +215,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         worker_questions,
                         worker_settings,
                         console_login,
-                        worker_settings_changed,
                         worker_stop_rx,
                     )
                     .await
@@ -259,16 +254,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// Background worker: (1) SSE events → QML bridge, (2) prompts from QML → server.
-/// Why the SSE loop stopped. Drives the worker's decision: reconnect with the
-/// same adapter, or re-read the settings and pick the adapter again.
+/// Why the SSE loop stopped. Drives the worker's decision: reconnect.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StreamEnd {
-    /// The server closed the stream (or the session was dropped) — reconnect
-    /// with the same adapter.
+    /// The server closed the stream (or the session was dropped) — reconnect.
     Reconnect,
-    /// A setting changed while the stream was running (`api_version`) — the
-    /// adapter and the SSE subscription must be rebuilt.
-    Reconfigure,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -293,23 +283,16 @@ async fn run_worker(
     questions: Arc<std::sync::Mutex<String>>,
     settings: Arc<std::sync::Mutex<String>>,
     console_login: opencode_client::auth::ConsoleLogin,
-    settings_changed: Arc<tokio::sync::Notify>,
     mut stop_rx: tokio::sync::watch::Receiver<bool>,
 ) {
     loop {
-        // Re-read the setting on every (re)connect: the UI applies
-        // `api_version` hot (no app restart), and an external change on disk
-        // must also be picked up. One `Settings::load()` per connection is
-        // cheap compared to the SSE session itself.
-        let api_version = api::ApiVersion::from_setting(&Settings::load().api_version);
-        log::info!("stream adapter: {api_version:?}");
+        log::info!("stream adapter: v2");
         tokio::select! {
             _ = stop_rx.changed() => {
                 log::info!("stop signal received, exiting");
                 return;
             }
             r = run_stream_adapter(
-                api_version,
                 base.clone(),
                 auth.clone(),
                 dispatcher.clone(),
@@ -330,16 +313,9 @@ async fn run_worker(
                 questions.clone(),
                 settings.clone(),
                 console_login.clone(),
-                settings_changed.clone(),
             ) => {
                 match r {
                     Ok(StreamEnd::Reconnect) => log::warn!("SSE stream ended, reconnecting…"),
-                    Ok(StreamEnd::Reconfigure) => {
-                        log::info!("settings changed while streaming — rebuilding the adapter");
-                        // No backoff: this is not a failure, just a hot switch.
-                        set_status(&status, "connecting");
-                        continue;
-                    }
                     Err(e) => log::error!("SSE error: {e}, reconnecting…"),
                 }
                 set_status(&status, "connecting");
@@ -349,12 +325,9 @@ async fn run_worker(
     }
 }
 
-/// Build the adapter selected by `api_version` and run one SSE session with it.
-/// Static dispatch: each arm monomorphises `run_stream` for its concrete type,
-/// so the version choice costs nothing at runtime and no `dyn` is needed.
+/// Run one SSE session with the v2 adapter.
 #[allow(clippy::too_many_arguments)]
 async fn run_stream_adapter(
-    api_version: api::ApiVersion,
     base: String,
     auth: Option<(String, String)>,
     dispatcher: event::dispatcher::SharedState,
@@ -375,32 +348,18 @@ async fn run_stream_adapter(
     questions: Arc<std::sync::Mutex<String>>,
     settings: Arc<std::sync::Mutex<String>>,
     console_login: opencode_client::auth::ConsoleLogin,
-    settings_changed: Arc<tokio::sync::Notify>,
 ) -> Result<StreamEnd, String> {
-    match api_version {
-        api::ApiVersion::V1 => {
-            let client = api::OpenCodeClient::new(base.clone(), auth.clone());
-            run_stream(
-                client, dispatcher, worker_pending, worker_prompts, status, sessions,
-                commands, current_session, compacting, nav, todos, models, sounds, voice, tools,
-                permissions, questions, settings, console_login, settings_changed,
-            )
-            .await
-        }
-        api::ApiVersion::V2 => {
-            let client = api::V2Adapter::new(base.clone(), auth.clone());
-            run_stream(
-                client, dispatcher, worker_pending, worker_prompts, status, sessions,
-                commands, current_session, compacting, nav, todos, models, sounds, voice, tools,
-                permissions, questions, settings, console_login, settings_changed,
-            )
-            .await
-        }
-    }
+    let client = api::V2Adapter::new(base.clone(), auth.clone());
+    run_stream(
+        client, dispatcher, worker_pending, worker_prompts, status, sessions,
+        commands, current_session, compacting, nav, todos, models, sounds, voice, tools,
+        permissions, questions, settings, console_login,
+    )
+    .await
 }
 
-/// Normalised retry/busy/idle state, from v1 `session.status` or v2
-/// `session.status` — so the main loop formats the status banner once.
+/// Normalised retry/busy/idle state, from the v2 `session.status` event — so
+/// the main loop formats the status banner once.
 enum RetryStatus {
     Idle,
     Busy,
@@ -411,50 +370,28 @@ enum RetryStatus {
     },
 }
 
-/// Extract the retry/busy/idle state from an event of either protocol.
-fn retry_status(ce: &api::ClientEvent) -> Option<(String, RetryStatus)> {
-    use opencode_client::types::session::SessionStatus;
-    match ce {
-        api::ClientEvent::V1(ev) => match &ev.payload {
-            opencode_client::types::event::Event::SessionStatus { properties } => {
-                let st = match &properties.status {
-                    SessionStatus::Retry { attempt, message, next } => RetryStatus::Retry {
-                        attempt: *attempt,
-                        message: message.clone(),
-                        next: *next,
-                    },
-                    SessionStatus::Busy => RetryStatus::Busy,
-                    SessionStatus::Idle => RetryStatus::Idle,
-                };
-                Some((properties.sessionID.clone(), st))
-            }
-            _ => None,
-        },
-        api::ClientEvent::V2(env) => {
-            if env.kind != "session.status" {
-                return None;
-            }
-            let d: opencode_client::types::v2::event::SessionStatusData =
-                serde_json::from_value(env.data.clone()).ok()?;
-            use opencode_client::types::v2::event::SessionStatusValue;
-            let st = match d.status {
-                SessionStatusValue::Retry { attempt, message, next } => {
-                    RetryStatus::Retry { attempt, message, next }
-                }
-                SessionStatusValue::Busy => RetryStatus::Busy,
-                SessionStatusValue::Idle => RetryStatus::Idle,
-                SessionStatusValue::Unknown => return None,
-            };
-            Some((d.sessionID, st))
-        }
+/// Extract the retry/busy/idle state from a `session.status` event.
+fn retry_status(env: &opencode_client::types::v2::EventEnvelope) -> Option<(String, RetryStatus)> {
+    use opencode_client::types::v2::event::SessionStatusValue;
+    if env.kind != opencode_client::types::v2::keys::STATUS {
+        return None;
     }
+    let d: opencode_client::types::v2::event::SessionStatusData =
+        serde_json::from_value(env.data.clone()).ok()?;
+    let st = match d.status {
+        SessionStatusValue::Retry { attempt, message, next } => {
+            RetryStatus::Retry { attempt, message, next }
+        }
+        SessionStatusValue::Busy => RetryStatus::Busy,
+        SessionStatusValue::Idle => RetryStatus::Idle,
+        SessionStatusValue::Unknown => return None,
+    };
+    Some((d.sessionID, st))
 }
 
 /// Per-turn streaming accumulators plus the shared IO handles a terminal
 /// streaming event needs. Bundling them keeps the v2 terminal handlers
-/// (`on_v2_event`/`on_v2_idle`) signature small; the fields mirror the v1
-/// inline block one-to-one, so a v2 text/reasoning block behaves exactly like a
-/// v1 one.
+/// (`on_v2_event`/`on_v2_idle`) signature small.
 struct TurnState<'a> {
     parts: &'a mut std::collections::HashMap<String, String>,
     text_order: &'a mut Vec<String>,
@@ -551,6 +488,7 @@ impl<'a> TurnState<'a> {
         env: &opencode_client::types::v2::EventEnvelope,
         client: &impl api::OpenCodeApi,
         sessions: &Arc<std::sync::Mutex<String>>,
+        dispatcher: &event::dispatcher::SharedState,
     ) {
         use opencode_client::types::v2::event as v2;
         use opencode_client::types::v2::keys as k;
@@ -621,7 +559,7 @@ impl<'a> TurnState<'a> {
         self.live_reasoned_ids.clear();
         *self.last_reasoning_push = 0;
         *self.last_answer_push = 0;
-        refresh_sessions(client, sessions).await;
+        refresh_sessions(client, sessions, &dispatcher).await;
     }
 }
 
@@ -652,7 +590,6 @@ async fn run_stream<A: api::OpenCodeApi>(
     questions: Arc<std::sync::Mutex<String>>,
     settings: Arc<std::sync::Mutex<String>>,
     console_login: opencode_client::auth::ConsoleLogin,
-    settings_changed: Arc<tokio::sync::Notify>,
 ) -> Result<StreamEnd, String> {
     let mut stream = client.event_stream().await?;
     log::info!("SSE connected");
@@ -714,13 +651,19 @@ async fn run_stream<A: api::OpenCodeApi>(
     let mut spoken_parts: std::collections::HashSet<String> = Default::default();
     // Periodically refresh sessions list (tick every 200ms; query roughly every 3s).
     let mut ticks: u32 = 0;
-    // Set when a prompt has just been sent; the next `message.updated` (role=user)
-    // of the current session yields the user messageID, which QML attaches to the
-    // fresh user bubble (so revert/fork work on just-sent messages too).
-    let mut expect_user_id: bool = false;
-    // Session the server reported compacted (`session.compacted`). `dispatch`
-    // records it here; below, after the dispatch call, we reload that session's
-    // history so the summary replaces the old turns without re-entering the chat.
+    // Persistent ticker (NOT a fresh `sleep` per loop turn): a recreated timer
+    // never completes when the SSE stream keeps returning immediately (e.g. a
+    // reconnect storm against a missing server), which starved the command
+    // queue — QML never received settings.
+    let mut tick = tokio::time::interval(std::time::Duration::from_millis(200));
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    // The first `tick()` resolves immediately; consume it so the loop body runs
+    // on a steady 200ms cadence.
+    tick.tick().await;
+    // Session the server reported compacted (`session.compaction.ended`).
+    // `dispatch_v2` records it here; below, after the dispatch call, we reload
+    // that session's history so the summary replaces the old turns without
+    // re-entering the chat.
     let mut compacted_session: Option<String> = None;
     // Compaction part.id already announced with a "Compacting…" notice, so a
     // repeat `message.part.updated` for the same compaction does not stack a
@@ -732,32 +675,24 @@ async fn run_stream<A: api::OpenCodeApi>(
     let mut compaction_messages: std::collections::HashSet<String> = Default::default();
 
     // Show previously started sessions and available models immediately.
-    refresh_sessions(&client, &sessions).await;
+    refresh_sessions(&client, &sessions, &dispatcher).await;
     refresh_models(&client, &models).await;
     refresh_sounds(&sounds);
     // Resume the last session on startup — the chat shows its history.
-    resume_last_session(&client, &mut current_session, &current_session_shared, &worker_pending, &todos).await;
+    resume_last_session(&client, &mut current_session, &current_session_shared, &worker_pending, &todos, &dispatcher, &sessions).await;
 
     // Main loop: listen to SSE and poll the bridge for new prompts in parallel.
     loop {
         tokio::select! {
-            // A settings change (`api_version`) while streaming: stop this SSE
-            // session so `run_worker` re-reads the settings and rebuilds the
-            // adapter. No error banner — a clean reconnect.
-            _ = settings_changed.notified() => {
-                log::info!("settings changed: leaving the stream to rebuild the adapter");
-                return Ok(StreamEnd::Reconfigure);
-            }
             item = stream.next() => {
                 match item {
-                    Some(Ok(ce)) => {
+                    Some(Ok(env)) => {
                         // The server reports its own retry state (retryable model
                         // errors such as a failed URL call or an exhausted quota):
                         // `session.status` carries the human message, the attempt
                         // number and `next` — the ms timestamp of the next try.
                         // Mirror the TUI: show "message — retrying in N s (#attempt)".
-                        // v1 and v2 carry the same information under different tags.
-                        if let Some((sid, retry)) = retry_status(&ce) {
+                        if let Some((sid, retry)) = retry_status(&env) {
                             if current_session.as_deref() == Some(sid.as_str()) {
                                 match retry {
                                     RetryStatus::Retry { attempt, message, next } => {
@@ -796,17 +731,9 @@ async fn run_stream<A: api::OpenCodeApi>(
                                 compacted: &mut compacted_session,
                                 compaction_seen: &mut compaction_seen,
                                 compacting: &*compacting,
-                                expect_user_id: &mut expect_user_id,
                             };
                             let mut st = dispatcher.lock().await;
-                            match &ce {
-                                api::ClientEvent::V1(ev) => {
-                                    let _ = event::dispatcher::dispatch(&ev.payload, &mut st, &mut stream).await;
-                                }
-                                api::ClientEvent::V2(env) => {
-                                    let _ = event::dispatcher::dispatch_v2(env, &mut st, &mut stream);
-                                }
-                            }
+                            let _ = event::dispatcher::dispatch_v2(&env, &mut st, &mut stream);
                         }
                         // The server compacted the shown session: reload its
                         // history so the summary and the "Context compacted"
@@ -836,8 +763,8 @@ async fn run_stream<A: api::OpenCodeApi>(
                                 if let Ok(mut q) = worker_pending.lock() {
                                     q.push(CLEAR_FEED_TAG.to_string());
                                 }
-                                load_history(&client, &sid, &worker_pending).await;
-                                refresh_sessions(&client, &sessions).await;
+                                load_history(&client, &sid, &worker_pending, &dispatcher).await;
+                                refresh_sessions(&client, &sessions, &dispatcher).await;
                                 refresh_todo(&client, &sid, &todos).await;
                             } else {
                                 // Compaction ended in a session the user is not
@@ -845,206 +772,26 @@ async fn run_stream<A: api::OpenCodeApi>(
                                 log::info!("session {sid} compacted in background");
                             }
                         }
-                        if let api::ClientEvent::V1(ev) = &ce {
-                        if let Some((sid, mid, id, text)) = ev.payload.text_part() {
-                            if assistant_messages.contains(mid) {
-                                // The compaction summary renders as a normal
-                                // answer but must never be spoken: mark its part
-                                // as handled so both auto-TTS paths below (the
-                                // text-end one and the idle fallback) skip it.
-                                if compaction_messages.contains(mid) {
-                                    spoken_parts.insert(id.to_string());
-                                }
-                                let was_live = text_live.contains_key(id);
-                                if parts.insert(id.to_string(), text.clone()).is_none() {
-                                    text_order.push(id.to_string());
-                                }
-                                // The finished text block (`message.part.updated` at
-                                // text-end) replaces the live-grown concatenation of
-                                // deltas with the exact final text — the same way a
-                                // finished reasoning block replaces its [[thinklive]]
-                                // bubble below. Without this the live bubble could
-                                // keep a slightly stale/throttled tail. The part-id
-                                // rides along so QML edits the SAME bubble even if a
-                                // tool row landed in between.
-                                if was_live && !text.trim().is_empty() {
-                                    if let Ok(mut q) = worker_pending.lock() {
-                                        q.push(proto_live_line(
-                                            now_ms(),
-                                            ANSWER_LIVE_TAG,
-                                            text.trim_end(),
-                                            id,
-                                        ));
-                                    }
-                                    // Auto-TTS: the bubble is final — speak it NOW,
-                                    // no waiting for idle (a long turn with tool
-                                    // calls would otherwise hold all speech back).
-                                    // Only for the session on screen, and never
-                                    // while the user dictates. spoken_parts keeps
-                                    // the part from being spoken twice (the idle
-                                    // pass below is the fallback).
-                                    let tts_mode = voice
-                                        .tts_mode
-                                        .lock()
-                                        .map(|m| *m)
-                                        .unwrap_or_default();
-                                    if tts_mode == voice::TtsMode::Auto
-                                        && current_session.as_deref() == Some(sid)
-                                        && !voice.dictating()
-                                        && spoken_parts.insert(id.to_string())
-                                    {
-                                        log::info!(
-                                            "auto-TTS: part {id} is final, queuing speech"
-                                        );
-                                        voice::tts_from_call(
-                                            &voice,
-                                            text.trim_end(),
-                                            &worker_pending,
-                                        )
-                                        .await;
-                                    }
-                                }
-                            }
-                        }
-                        // Reasoning as a FULL part (message.part.updated): empty at
-                        // reasoning-start, complete at reasoning-end. Register the
-                        // part.id as reasoning (so deltas route here) and, if it was
-                        // already streamed live, re-send the final text once so the
-                        // bubble matches the server exactly.
-                        if let Some((mid, id, text)) = ev.payload.reasoning_part() {
-                            if assistant_messages.contains(mid) {
-                                reasoning_part_ids.insert(id.to_string());
-                                if reasonings.insert(id.to_string(), text.clone()).is_none() {
-                                    reasoning_order.push(id.to_string());
-                                }
-                                if live_reasoned_ids.contains(id) && !text.trim().is_empty() {
-                                    if let Ok(mut q) = worker_pending.lock() {
-                                        q.push(proto_live_line(
-                                            now_ms(),
-                                            THINK_LIVE_TAG,
-                                            text.trim_end(),
-                                            id,
-                                        ));
-                                    }
-                                }
-                            }
-                        }
-                        if let Some(session_id) = ev.payload.idle_session_id() {
-                            if current_session.as_deref() == Some(session_id) {
-                                // Collect accumulated answer and send to QML.
-                                // Parts are joined in ARRIVAL order (see text_order).
-                                let text: String = text_order
-                                    .iter()
-                                    .filter_map(|pid| parts.get(pid))
-                                    .map(|s| s.as_str())
-                                    .collect();
-                                if !text.trim().is_empty() {
-                                    log::debug!("push answer: {} chars", text.chars().count());
-                                    // Reasoning: each block is its OWN [[think]] bubble.
-                                    // Blocks streamed live already have their bubble in
-                                    // the feed (grown via [[thinklive]]), so only blocks
-                                    // that never produced a live delta are pushed here —
-                                    // in arrival order, so several blocks neither collapse
-                                    // into one nor get duplicated.
-                                    for rid in &reasoning_order {
-                                        if let Some(rea) = reasonings.get(rid) {
-                                            if !rea.trim().is_empty()
-                                                && !live_reasoned_ids.contains(rid)
-                                            {
-                                                log::info!(
-                                                    "push reasoning block: {} chars",
-                                                    rea.chars().count()
-                                                );
-                                                if let Ok(mut q) = worker_pending.lock() {
-                                                    let body =
-                                                        format!("{THINK_TAG}{}", rea.trim_end());
-                                                    q.push(proto_line(now_ms(), &body));
-                                                }
-                                            }
-                                        }
-                                    }
-                                    // Answer text: assembled from the parts above. Reasoning was
-                                    // already separated by PART TYPE (type:"reasoning"
-                                    // → its own bubble; text parts → answer), the
-                                    // same way opencode's TUI decides. Parts that
-                                    // streamed live were already finalized in place by
-                                    // their own `message.part.updated` (text-end),
-                                    // exactly like the live reasoning blocks above —
-                                    // re-pushing here would duplicate them. Parts that
-                                    // never streamed live are appended whole.
-                                    let answer_was_live = parts.keys().any(|k| text_live.contains_key(k));
-                                    if !answer_was_live {
-                                        if let Ok(mut q) = worker_pending.lock() {
-                                            q.push(proto_line(now_ms(), text.trim_end()));
-                                        }
-                                    }
-                                    // Auto-TTS: speak each text part as its OWN file so
-                                    // it binds to its own bubble (a turn can contain
-                                    // several text parts around tool calls). Reasoning
-                                    // lives in separate parts and is never TTS'd. Text
-                                    // is passed trimmed so it matches the bubble body.
-                                    let tts_mode = voice
-                                        .tts_mode
-                                        .lock()
-                                        .map(|m| *m)
-                                        .unwrap_or_default();
-                                    if tts_mode == voice::TtsMode::Auto {
-                                        for pid in &text_order {
-                                            // Parts already spoken at text-end
-                                            // (spoken_parts) must not repeat; the
-                                            // rest is the fallback for parts whose
-                                            // text-end landed while dictating.
-                                            if spoken_parts.contains(pid) || voice.dictating() {
-                                                continue;
-                                            }
-                                            if let Some(p) = parts.get(pid) {
-                                                let p = p.trim_end();
-                                                if !p.is_empty() {
-                                                    spoken_parts.insert(pid.clone());
-                                                    voice::tts_from_call(&voice, p, &worker_pending)
-                                                        .await;
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                set_status(&status, "idle");
-                                parts.clear();
-                                text_live.clear();
-                                text_order.clear();
-                                spoken_parts.clear();
-                                reasonings.clear();
-                                reasoning_order.clear();
-                                reasoning_part_ids.clear();
-                                live_reasoned_ids.clear();
-                                last_reasoning_push = 0;
-                                last_answer_push = 0;
-                                refresh_sessions(&client, &sessions).await;
-                            }
-                        }
-                        }
-                        if let api::ClientEvent::V2(env) = &ce {
-                            let mut turn = TurnState {
-                                parts: &mut parts,
-                                text_order: &mut text_order,
-                                text_live: &mut text_live,
-                                spoken_parts: &mut spoken_parts,
-                                assistant_messages: &assistant_messages,
-                                compaction_messages: &compaction_messages,
-                                reasonings: &mut reasonings,
-                                reasoning_order: &mut reasoning_order,
-                                reasoning_part_ids: &mut reasoning_part_ids,
-                                live_reasoned_ids: &mut live_reasoned_ids,
-                                last_reasoning_push: &mut last_reasoning_push,
-                                last_answer_push: &mut last_answer_push,
-                                current_session: current_session.as_deref(),
-                                pending: &worker_pending,
-                                status: &status,
-                                voice: &voice,
-                            };
-                            turn.on_v2_event(env, &client).await;
-                            turn.on_v2_idle(env, &client, &sessions).await;
-                        }
+                        let mut turn = TurnState {
+                            parts: &mut parts,
+                            text_order: &mut text_order,
+                            text_live: &mut text_live,
+                            spoken_parts: &mut spoken_parts,
+                            assistant_messages: &assistant_messages,
+                            compaction_messages: &compaction_messages,
+                            reasonings: &mut reasonings,
+                            reasoning_order: &mut reasoning_order,
+                            reasoning_part_ids: &mut reasoning_part_ids,
+                            live_reasoned_ids: &mut live_reasoned_ids,
+                            last_reasoning_push: &mut last_reasoning_push,
+                            last_answer_push: &mut last_answer_push,
+                            current_session: current_session.as_deref(),
+                            pending: &worker_pending,
+                            status: &status,
+                            voice: &voice,
+                        };
+                        turn.on_v2_event(&env, &client).await;
+                        turn.on_v2_idle(&env, &client, &sessions, &dispatcher).await;
                     }
                     Some(Err(e)) => log::error!("sse error: {e}"),
                     None => {
@@ -1054,7 +801,7 @@ async fn run_stream<A: api::OpenCodeApi>(
                     }
                 }
             }
-            _ = tokio::time::sleep(std::time::Duration::from_millis(200)) => {
+            _ = tick.tick() => {
                 ticks = ticks.wrapping_add(1);
 
                 // Commands from QML: new / open / rename / delete (JSON).
@@ -1089,7 +836,8 @@ async fn run_stream<A: api::OpenCodeApi>(
                                         *g = false;
                                     }
                                     clear_tools(&dispatcher, &tools).await;
-                                    refresh_sessions(&client, &sessions).await;
+                                    ensure_session_model(&client, id, &dispatcher).await;
+                                    refresh_sessions(&client, &sessions, &dispatcher).await;
                                     set_current_session(&current_session_shared, &current_session);
                                     if let Ok(mut g) = todos.lock() {
                                         *g = "[]".to_string();
@@ -1127,7 +875,9 @@ async fn run_stream<A: api::OpenCodeApi>(
                                 *g = false;
                             }
                             clear_tools(&dispatcher, &tools).await;
-                            load_history(&client, id, &worker_pending).await;
+                            load_history(&client, id, &worker_pending, &dispatcher).await;
+                            ensure_session_model(&client, id, &dispatcher).await;
+                            refresh_sessions(&client, &sessions, &dispatcher).await;
                             set_status(&status, "idle");
                             set_current_session(&current_session_shared, &current_session);
                             refresh_todo(&client, id, &todos).await;
@@ -1158,8 +908,9 @@ async fn run_stream<A: api::OpenCodeApi>(
                                             *g = false;
                                         }
                                         clear_tools(&dispatcher, &tools).await;
-                                        load_history(&client, new_id, &worker_pending).await;
-                                        refresh_sessions(&client, &sessions).await;
+                                        load_history(&client, new_id, &worker_pending, &dispatcher).await;
+                                        ensure_session_model(&client, new_id, &dispatcher).await;
+                                        refresh_sessions(&client, &sessions, &dispatcher).await;
                                         set_current_session(&current_session_shared, &current_session);
                                         refresh_todo(&client, new_id, &todos).await;
                                         request_nav(&nav, 2);
@@ -1190,7 +941,7 @@ async fn run_stream<A: api::OpenCodeApi>(
                                     spoken_parts.clear();
                                     last_answer_push = 0;
                                     clear_tools(&dispatcher, &tools).await;
-                                    load_history(&client, id, &worker_pending).await;
+                                    load_history(&client, id, &worker_pending, &dispatcher).await;
                                     set_status(&status, "idle");
                                     refresh_todo(&client, id, &todos).await;
                                 }
@@ -1218,7 +969,7 @@ async fn run_stream<A: api::OpenCodeApi>(
                                     spoken_parts.clear();
                                     last_answer_push = 0;
                                     clear_tools(&dispatcher, &tools).await;
-                                    load_history(&client, id, &worker_pending).await;
+                                    load_history(&client, id, &worker_pending, &dispatcher).await;
                                     set_status(&status, "idle");
                                 }
                                 Err(e) => log::error!("unrevert_session: {e}"),
@@ -1294,9 +1045,9 @@ async fn run_stream<A: api::OpenCodeApi>(
                             }
                             match client.share_session(id).await {
                                 Ok(sess) => {
-                                    let url = sess["share"]["url"].as_str().unwrap_or("");
+                                    let url = sess[keys::SHARE][keys::URL].as_str().unwrap_or("");
                                     log::info!("share {id} -> {url}");
-                                    refresh_sessions(&client, &sessions).await;
+                                    refresh_sessions(&client, &sessions, &dispatcher).await;
                                 }
                                 Err(e) => log::error!("share_session: {e}"),
                             }
@@ -1308,7 +1059,7 @@ async fn run_stream<A: api::OpenCodeApi>(
                             match client.unshare_session(id).await {
                                 Ok(()) => {
                                     log::info!("unshare {id}");
-                                    refresh_sessions(&client, &sessions).await;
+                                    refresh_sessions(&client, &sessions, &dispatcher).await;
                                 }
                                 Err(e) => log::error!("unshare_session: {e}"),
                             }
@@ -1324,38 +1075,42 @@ async fn run_stream<A: api::OpenCodeApi>(
                                     *g = true;
                                 }
                             }
-                            // `POST /summarize` on the server only returns once
-                            // the whole compaction is DONE (~20 s). Awaiting it
-                            // here would freeze this loop — the very loop that
-                            // reads the SSE stream — so every live event of the
-                            // compaction (the growing summary text) would only be
-                            // drained after the fact, and then immediately wiped
-                            // by the `session.compacted` reload: the summary
-                            // bubble would never grow live. Run the blocking POST
-                            // off-task so SSE keeps flowing while it is written.
+                            // `POST /summarize` (v1) / `POST /compact` (v2) on the
+                            // server only returns once the whole compaction is
+                            // DONE (~20 s). Awaiting it here would freeze this loop
+                            // — the very loop that reads the SSE stream — so every
+                            // live event of the compaction (the growing summary
+                            // text) would only be drained after the fact, and then
+                            // immediately wiped by the `session.compacted` reload:
+                            // the summary bubble would never grow live. Run the
+                            // blocking POST off-task so SSE keeps flowing while it
+                            // is written.
+                            //
+                            // The model gate was removed: the v2 server takes the
+                            // model from the session itself (its GET/list carry no
+                            // `model` field at all), and the v1 server accepts the
+                            // ids only as hints — requiring them here silently
+                            // blocked every compact on v2.
                             let task_client = client.clone();
                             let task_compacting = compacting.clone();
                             let task_id = id.clone();
                             tokio::spawn(async move {
-                                match task_client.get_session(&task_id).await {
-                                    Ok(s) => {
-                                        let provider = s["model"]["providerID"].as_str().unwrap_or("");
-                                        let model = s["model"]["id"].as_str().unwrap_or("");
-                                        if provider.is_empty() || model.is_empty() {
-                                            log::error!("summarize: у сессии нет модели: {s}");
-                                        } else {
-                                            match task_client
-                                                .summarize_session(&task_id, provider, model)
-                                                .await
-                                            {
-                                                Ok(()) => {
-                                                    log::info!("summarize {task_id} ({provider}/{model})")
-                                                }
-                                                Err(e) => log::error!("summarize_session: {e}"),
-                                            }
-                                        }
-                                    }
-                                    Err(e) => log::error!("get_session: {e}"),
+                                use opencode_client::types::v2::keys as k;
+                                let mut provider = String::new();
+                                let mut model = String::new();
+                                if let Ok(s) = task_client.get_session(&task_id).await {
+                                    provider = s[k::MODEL][k::PROVIDER_ID]
+                                        .as_str()
+                                        .unwrap_or("")
+                                        .to_string();
+                                    model = s[k::MODEL][k::ID].as_str().unwrap_or("").to_string();
+                                }
+                                match task_client
+                                    .summarize_session(&task_id, &provider, &model)
+                                    .await
+                                {
+                                    Ok(()) => log::info!("summarize {task_id} requested"),
+                                    Err(e) => log::error!("summarize_session: {e}"),
                                 }
                                 // The compaction is over (the buffered
                                 // `session.compacted` also clears this for the
@@ -1385,7 +1140,14 @@ async fn run_stream<A: api::OpenCodeApi>(
                             match client.set_model(id, provider, model).await {
                                 Ok(()) => {
                                     log::info!("set_model {id} -> {provider}/{model}");
-                                    refresh_sessions(&client, &sessions).await;
+                                    // Record it immediately so the picker/sessions
+                                    // list reflect the change even before the
+                                    // `session.model.selected` event arrives.
+                                    dispatcher.lock().await.session_models.insert(
+                                        id.clone(),
+                                        (provider.clone(), model.clone()),
+                                    );
+                                    refresh_sessions(&client, &sessions, &dispatcher).await;
                                 }
                                 Err(e) => log::error!("set_model: {e}"),
                             }
@@ -1409,7 +1171,7 @@ async fn run_stream<A: api::OpenCodeApi>(
                             match client.rename_session(id, title).await {
                                 Ok(()) => {
                                     log::info!("renamed {id} -> {title:?}");
-                                    refresh_sessions(&client, &sessions).await;
+                                    refresh_sessions(&client, &sessions, &dispatcher).await;
                                 }
                                 Err(e) => log::error!("rename_session: {e}"),
                             }
@@ -1429,7 +1191,7 @@ async fn run_stream<A: api::OpenCodeApi>(
                                             *g = "[]".to_string();
                                         }
                                     }
-                                    refresh_sessions(&client, &sessions).await;
+                                    refresh_sessions(&client, &sessions, &dispatcher).await;
                                 }
                                 Err(e) => log::error!("delete_session: {e}"),
                             }
@@ -1471,7 +1233,7 @@ async fn run_stream<A: api::OpenCodeApi>(
                                     *g = "[]".to_string();
                                 }
                             }
-                            refresh_sessions(&client, &sessions).await;
+                            refresh_sessions(&client, &sessions, &dispatcher).await;
                             // After deleting all sessions, immediately create a new one — the chat must not be empty.
                             match client.create_session(None).await {
                                 Ok(sess) => match sess["id"].as_str() {
@@ -1500,7 +1262,7 @@ async fn run_stream<A: api::OpenCodeApi>(
                                             *g = "[]".to_string();
                                         }
                                         // A new session must appear in the sessions list immediately.
-                                        refresh_sessions(&client, &sessions).await;
+                                        refresh_sessions(&client, &sessions, &dispatcher).await;
                                     }
                                     None => log::error!("delete_all: нет id при создании"),
                                 },
@@ -1546,18 +1308,6 @@ async fn run_stream<A: api::OpenCodeApi>(
                             if let Ok(mut g) = settings.lock() {
                                 *g = st.to_json();
                             }
-                        }
-                        Cmd::SetApiVersion { value } => {
-                            let mut st = Settings::load();
-                            st.api_version = value.clone();
-                            st.save();
-                            if let Ok(mut g) = settings.lock() {
-                                *g = st.to_json();
-                            }
-                            // Hot-switch: drop the current SSE/adapter so the
-                            // worker rebuilds it with the new version. No app
-                            // restart (Jack's requirement).
-                            settings_changed.notify_one();
                         }
                         Cmd::SetProviderKey { provider, key } => {
                             let key = key.trim().to_string();
@@ -1683,10 +1433,10 @@ async fn run_stream<A: api::OpenCodeApi>(
                                     q.push(format!("{SET_MSG_ID_TAG}{id}"));
                                 }
                             }
-                            // v1 does not: the user message arrives via
-                            // `message.updated` — grab its id there.
+                            // No id in the answer: a server anomaly on v2
+                            // (the id is part of a successful response).
                             Ok(None) => {
-                                expect_user_id = true;
+                                log::warn!("prompt_async не вернул id пользовательского сообщения");
                             }
                         }
                     }
@@ -1694,7 +1444,7 @@ async fn run_stream<A: api::OpenCodeApi>(
 
                 // Every ~3 seconds refresh sessions list and TODOs for current session.
                 if ticks % 15 == 0 {
-                    refresh_sessions(&client, &sessions).await;
+                    refresh_sessions(&client, &sessions, &dispatcher).await;
                     if let Some(sid) = current_session.clone() {
                         refresh_todo(&client, &sid, &todos).await;
                     }
@@ -1712,10 +1462,20 @@ async fn run_stream<A: api::OpenCodeApi>(
 }
 
 /// Load compact sessions list into shared buffer for QML.
+///
+/// `dispatcher` supplies the per-session current model tracked from v2
+/// `session.model.selected` / `session.step.started` / history. The v2 session
+/// list includes `model` only once the server has bound one, so this fills the
+/// gap for sessions whose model we learned another way.
 async fn refresh_sessions(
     client: &impl api::OpenCodeApi,
     sessions: &Arc<std::sync::Mutex<String>>,
+    dispatcher: &event::dispatcher::SharedState,
 ) {
+    let tracked_models: std::collections::HashMap<String, (String, String)> = {
+        let state = dispatcher.lock().await;
+        state.session_models.clone()
+    };
     match client.list_sessions().await {
         Ok(v) => {
             let compact: Vec<serde_json::Value> = v
@@ -1723,33 +1483,49 @@ async fn refresh_sessions(
                 .map(|a| {
                     a.iter()
                         .filter_map(|s| {
-                            let id = s.get("id")?.clone();
+                            let id = s.get(keys::ID)?.clone();
                             let title = s
-                                .get("title")
+                                .get(keys::TITLE)
                                 .cloned()
                                 .unwrap_or(serde_json::Value::String(String::new()));
                             let updated = s
-                                .get("time")
-                                .and_then(|t| t.get("updated"))
+                                .get(keys::TIME)
+                                .and_then(|t| t.get(keys::UPDATED))
                                 .cloned()
                                 .unwrap_or(serde_json::Value::Number(0.into()));
                             let share_url = s
-                                .get("share")
-                                .and_then(|sh| sh.get("url"))
+                                .get(keys::SHARE)
+                                .and_then(|sh| sh.get(keys::URL))
                                 .cloned()
                                 .unwrap_or(serde_json::Value::String(String::new()));
+                            // Prefer the server's `model` (v1); fall back to the
+                            // model we tracked from `session.model.selected`
+                            // (v2, whose list has no `model`).
+                            let id_str = id.as_str().unwrap_or("");
+                            let tracked = tracked_models.get(id_str);
                             let provider_id = s
-                                .get("model")
-                                .and_then(|m| m.get("providerID"))
+                                .get(keys::MODEL)
+                                .and_then(|m| m.get(keys::PROVIDER_ID))
                                 .cloned()
-                                .unwrap_or(serde_json::Value::String(String::new()));
+                                .unwrap_or_else(|| {
+                                    serde_json::Value::String(
+                                        tracked.map(|(p, _)| p.clone()).unwrap_or_default(),
+                                    )
+                                });
                             let model_id = s
-                                .get("model")
-                                .and_then(|m| m.get("id"))
+                                .get(keys::MODEL)
+                                .and_then(|m| m.get(keys::ID))
                                 .cloned()
-                                .unwrap_or(serde_json::Value::String(String::new()));
-                            let cost = s.get("cost").cloned().unwrap_or(serde_json::Value::Number(0.into()));
-                            let tokens = s.get("tokens").cloned().unwrap_or(serde_json::Value::Null);
+                                .unwrap_or_else(|| {
+                                    serde_json::Value::String(
+                                        tracked.map(|(_, m)| m.clone()).unwrap_or_default(),
+                                    )
+                                });
+                            let cost = s
+                                .get(keys::COST)
+                                .cloned()
+                                .unwrap_or(serde_json::Value::Number(0.into()));
+                            let tokens = s.get(keys::TOKENS).cloned().unwrap_or(serde_json::Value::Null);
                             Some(serde_json::json!({
                                 "id": id,
                                 "title": title,
@@ -1887,8 +1663,16 @@ fn refresh_sounds(sounds: &Arc<std::sync::Mutex<String>>) {
 /// the same feed lines the v1 `load_history` path emits: user bubbles, `[[think]]`
 /// reasoning bubbles, answer text, inline tool rows and compaction notices.
 /// `revert_id` hides the reverted tail (id >= boundary) exactly as in v1.
-fn history_lines_v2(arr: &[serde_json::Value], revert_id: Option<&str>) -> Vec<String> {
-    use opencode_client::types::v2::message::{Content, MessageBody, MessageInfo};
+///
+/// Returns the feed lines plus the *most recent* assistant model seen in the
+/// history (`(providerID, modelID)`), which the caller stores so the
+/// sessions/picker list can show a model for a session the server never told us
+/// about (v2 session GET/list carry no `model`).
+fn history_lines_v2(
+    arr: &[serde_json::Value],
+    revert_id: Option<&str>,
+) -> (Vec<String>, Option<(String, String)>) {
+    use opencode_client::types::v2::message::{CompactionStatus, Content, MessageBody, MessageInfo};
     let mut msgs: Vec<MessageInfo> = Vec::new();
     for raw in arr {
         match serde_json::from_value::<MessageInfo>(raw.clone()) {
@@ -1899,6 +1683,7 @@ fn history_lines_v2(arr: &[serde_json::Value], revert_id: Option<&str>) -> Vec<S
     msgs.sort_by_key(|m| m.time.created);
 
     let mut lines: Vec<String> = Vec::new();
+    let mut last_model: Option<(String, String)> = None;
     for m in &msgs {
         // Hide the reverted tail (mirror SessionRevert.cleanup boundaries).
         if let Some(r) = revert_id {
@@ -1914,6 +1699,9 @@ fn history_lines_v2(arr: &[serde_json::Value], revert_id: Option<&str>) -> Vec<S
                 }
             }
             MessageBody::Assistant(a) => {
+                if let Some(mdl) = &a.model {
+                    last_model = Some((mdl.providerID.clone(), mdl.id.clone()));
+                }
                 // Reasoning first (mirrors the live stream), then answer, then tool rows.
                 let reasoning_ts = created;
                 let mut reasoning = String::new();
@@ -1951,8 +1739,28 @@ fn history_lines_v2(arr: &[serde_json::Value], revert_id: Option<&str>) -> Vec<S
                 }
                 lines.extend(tool_lines);
             }
-            MessageBody::Compaction { .. } => {
-                lines.push(svc_line(created, i18n::K_COMPACTED, &[]));
+            MessageBody::Compaction { status, .. } => {
+                // The summary text is the compacted history itself — render it
+                // as a normal answer bubble (NOT just a generic "compacted"
+                // marker), so the bubble that grew live during the compaction
+                // does not vanish when this reload replaces the feed. `running`
+                // has the growing text; `completed` the final summary.
+                match status {
+                    CompactionStatus::Running { summary, .. }
+                    | CompactionStatus::Completed { summary, .. } => {
+                        if !summary.trim().is_empty() {
+                            lines.push(proto_line(created, summary.trim_end()));
+                        }
+                    }
+                    // A failed compaction is not a "context compacted" marker: a
+                    // benign "nothing to compact yet" carries only an error, so
+                    // do not render a misleading success line. (The live feed
+                    // already shows the informational notice when it happens.)
+                    CompactionStatus::Failed { .. } => {}
+                    CompactionStatus::Unknown => log::warn!(
+                        "history v2: compaction status is not implemented in the UI (skipped)"
+                    ),
+                }
             }
             // Switches, synthetic/system/skill/shell/idle messages and unknown
             // kinds do not render in the feed (mirrors the v1 path skipping
@@ -1960,7 +1768,7 @@ fn history_lines_v2(arr: &[serde_json::Value], revert_id: Option<&str>) -> Vec<S
             _ => {}
         }
     }
-    lines
+    (lines, last_model)
 }
 
 /// Load session history (info/parts pairs) and push strings to QML queue.
@@ -1968,6 +1776,7 @@ async fn load_history(
     client: &impl api::OpenCodeApi,
     session_id: &str,
     pending: &Arc<std::sync::Mutex<Vec<String>>>,
+    dispatcher: &event::dispatcher::SharedState,
 ) {
     // Revert boundary: messages with `id >= revert.messageID` are hidden. The
     // server does not flag them — it only records the boundary on the session
@@ -1998,8 +1807,18 @@ async fn load_history(
                 .map(|e| e.get(keys::INFO).is_none() && e.get(keys::TYPE).is_some())
                 .unwrap_or(false);
             if is_v2 {
-                let lines = history_lines_v2(&arr, revert_id.as_deref());
+                let (lines, model) = history_lines_v2(&arr, revert_id.as_deref());
                 log::info!("история сессии {session_id} (v2): {} строк", lines.len());
+                // Remember the model the history reveals (the source of truth on
+                // v2, where session GET/list carry none) so the picker checkmark
+                // works for a session whose model we never saw selected live.
+                if let Some(m) = model {
+                    dispatcher
+                        .lock()
+                        .await
+                        .session_models
+                        .insert(session_id.to_string(), m);
+                }
                 if let Ok(mut q) = pending.lock() {
                     q.extend(lines);
                 }
@@ -2176,6 +1995,8 @@ async fn resume_last_session(
     current_session_shared: &Arc<std::sync::Mutex<String>>,
     pending: &Arc<std::sync::Mutex<Vec<String>>>,
     todos: &Arc<std::sync::Mutex<String>>,
+    dispatcher: &event::dispatcher::SharedState,
+    sessions: &Arc<std::sync::Mutex<String>>,
 ) {
     let last: Option<String> = last_session_path()
         .and_then(|path| std::fs::read_to_string(&path).ok())
@@ -2230,8 +2051,53 @@ async fn resume_last_session(
     *current_session = Some(sid.clone());
     persist_last_session(Some(&sid));
     set_current_session(current_session_shared, &*current_session);
-    load_history(client, &sid, pending).await;
+    load_history(client, &sid, pending, dispatcher).await;
+    ensure_session_model(client, &sid, dispatcher).await;
+    // History may have revealed the session's model (v2): republish the list so
+    // the sessions/picker show it right away.
+    refresh_sessions(client, sessions, dispatcher).await;
     refresh_todo(client, &sid, todos).await;
+}
+
+/// Make sure `session_id` has a model bound, so the picker has something to
+/// check. On v2 a session may have no `model` (the server only includes one once
+/// a model is bound); when the history revealed none either, bind the server's
+/// default model (`GET /api/model/default`). No-op when a model is already
+/// known.
+async fn ensure_session_model(
+    client: &impl api::OpenCodeApi,
+    session_id: &str,
+    dispatcher: &event::dispatcher::SharedState,
+) {
+    if dispatcher
+        .lock()
+        .await
+        .session_models
+        .contains_key(session_id)
+    {
+        return;
+    }
+    let default = match client.default_model().await {
+        Ok(m) => m,
+        Err(e) => {
+            log::warn!("default_model: {e}");
+            None
+        }
+    };
+    let Some((provider, model)) = default else {
+        return;
+    };
+    match client.set_model(session_id, &provider, &model).await {
+        Ok(()) => {
+            log::info!("bound default model {provider}/{model} to {session_id}");
+            dispatcher
+                .lock()
+                .await
+                .session_models
+                .insert(session_id.to_string(), (provider, model));
+        }
+        Err(e) => log::warn!("bind default model: {e}"),
+    }
 }
 
 /// Reset tools snapshot (when switching sessions so old tools don't mix into new history).

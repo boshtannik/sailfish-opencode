@@ -8,7 +8,7 @@ use std::time::Duration;
 use log::{debug, error, info, warn};
 use tokio::time::sleep;
 
-use crate::api::OpenCodeClient;
+use crate::api::{OpenCodeApi, V2Adapter};
 
 /// HTTP Basic username opencode 2.0.32 requires on its v2 API (paired with the
 /// startup-printed password; see `parse_server_password`).
@@ -169,7 +169,7 @@ impl ServerGuard {
         });
 
         // Wait for health.
-        let client = OpenCodeClient::new(base.clone(), auth.clone());
+        let client = V2Adapter::new(base.clone(), auth.clone());
         let mut ready = false;
         for _ in 0..200 {
             if client.health().await.unwrap_or(false) {
@@ -207,7 +207,7 @@ impl ServerGuard {
     }
 
     pub async fn health(&self) -> Result<bool, String> {
-        let client = OpenCodeClient::new(self.base.clone(), self.auth.clone());
+        let client = V2Adapter::new(self.base.clone(), self.auth.clone());
         client.health().await
     }
 }

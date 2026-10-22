@@ -72,11 +72,6 @@ pub enum Cmd {
     SetWorkdir {
         workdir: String,
     },
-    /// Set the server protocol adapter (`"v1"`/`"v2"`). Takes effect after the
-    /// worker restarts (it picks the adapter once, from settings).
-    SetApiVersion {
-        value: String,
-    },
     /// Request current settings (the worker refreshes shared).
     GetSettings,
     /// Save the whole settings object (working directory etc.)

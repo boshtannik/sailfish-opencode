@@ -36,9 +36,6 @@ pub const STATE: &str = "state";
 // ---- Message role discriminator values ----
 pub const ROLE_USER: &str = "user";
 
-// ---- Message `mode` discriminator values ----
-pub const MODE_COMPACTION: &str = "compaction";
-
 // ---- Tool-call input fields (used for the short tool label) ----
 pub const COMMAND: &str = "command";
 pub const FILE_PATH: &str = "filePath";
@@ -48,3 +45,12 @@ pub const QUERY: &str = "query";
 pub const URL: &str = "url";
 pub const PROMPT: &str = "prompt";
 pub const DESCRIPTION: &str = "description";
+
+// ---- Session object fields (`GET /session[/{id}]`) ----
+pub const TITLE: &str = "title";
+pub const UPDATED: &str = "updated";
+pub const MODEL: &str = "model";
+pub const PROVIDER_ID: &str = "providerID";
+pub const SHARE: &str = "share";
+pub const COST: &str = "cost";
+pub const TOKENS: &str = "tokens";

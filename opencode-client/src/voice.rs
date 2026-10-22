@@ -32,7 +32,8 @@ pub const WHISPER_BIN: &str = "/usr/libexec/harbour-opencode/whisper-cli";
 /// Its directory holds espeak-ng-data and its own .so files (RUNPATH=$ORIGIN).
 pub const PIPER_HOME: &str = "/usr/libexec/harbour-opencode/piper";
 pub const PIPER_BIN: &str = "/usr/libexec/harbour-opencode/piper/piper";
-const MODELS_SUBDIR: &str = "harbour-opencode/models";
+/// Subdirectory of [`data_dir`] holding the downloaded voice models.
+const MODELS_SUBDIR: &str = "models";
 /// File that persists the STT/TTS/language choice (survives app restarts).
 const CONFIG_FILE: &str = "voice_state.json";
 const REC_RAW: &str = "/tmp/harbour-opencode-ptt.pcm";
@@ -317,7 +318,6 @@ impl VoiceState {
             .filter_map(|m| {
                 let id = m["model_id"].as_str()?;
                 let dir = model_dir(id);
-                let total: u64 = m["size"].as_str().and_then(|s| s.parse().ok()).unwrap_or(0);
                 // A model is "in place" when all catalog files are on disk
                 // (we don't trust the byte counter: `size` may describe more than
                 // we actually download — that caused a false "download failed").
@@ -436,7 +436,7 @@ pub async fn update_catalog() -> Result<(u64, usize), String> {
 }
 
 fn base_dir() -> PathBuf {
-    data_dir().join("models")
+    data_dir().join(MODELS_SUBDIR)
 }
 
 /// Application data directory (settings + models).
@@ -616,7 +616,7 @@ log::error!("models dir: {e}");
         let mut fail = false;
         let mut last_refresh = Instant::now();
         while let Some(chunk) = stream.next().await {
-            if let Ok(mut c) = voice.cancel_dl.lock() {
+            if let Ok(c) = voice.cancel_dl.lock() {
                 if c.contains(id) {
                     log::info!("скачивание {id} отменено пользователем");
                     fail = true;

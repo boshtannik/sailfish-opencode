@@ -5,21 +5,12 @@ use tokio::sync::Mutex;
 
 use crate::i18n::{err_line, now_ms, svc_line};
 use crate::markers::{
-    proto_live_line, proto_tool_line, ANSWER_LIVE_TAG, SET_MSG_ID_TAG, THINK_LIVE_TAG,
+    proto_live_line, ANSWER_LIVE_TAG, THINK_LIVE_TAG,
 };
 use crate::state::permission::PermissionQueue;
 use crate::state::question::QuestionQueue;
 use crate::state::session::SessionFsm;
 use crate::state::tool::ToolStore;
-use crate::types::event::{
-    human_session_error, Event, MessagePartDeltaProperties, MessageUpdatedProperties,
-    SessionErrorProperties, SessionNextShellEndedProperties, SessionNextShellStartedProperties,
-    SessionNextToolCalledProperties, SessionNextToolFailedProperties,
-    SessionNextToolInputDeltaProperties, SessionNextToolInputEndedProperties,
-    SessionNextToolInputStartedProperties, SessionNextToolProgressProperties,
-    SessionNextToolSuccessProperties,
-};
-use crate::types::message::Message;
 use crate::types::permission::Permission;
 use crate::types::tool::ToolState;
 use crate::types::v2::EventEnvelope;
@@ -30,10 +21,6 @@ use crate::types::QuestionRequest;
 /// long model turn so the QML queue is not flooded with tiny chunks. The final
 /// full text is always sent once at `message.part.updated`/idle.
 const REASONING_LIVE_MS: u64 = 150;
-
-/// Display name for the agent's persistent shell (`session.next.shell.*`),
-/// which carries a command but no tool name of its own.
-const SHELL_TOOL_NAME: &str = "bash";
 
 /// Handles the streaming accumulators need: the QML out-queue and the status
 /// string, plus the per-connection accumulators for the live chat rendering.
@@ -70,317 +57,21 @@ pub struct StreamState<'a> {
     /// Session currently shown in the UI (only its user messages are tracked
     /// for revert/fork — a user message of another session is ignored).
     pub current_session: Option<&'a str>,
-    /// Set by `dispatch` when the server reports a session was compacted
-    /// (`session.compacted`): the caller must re-load that session's history.
+    /// Set by `dispatch_v2` when the server reports a session was compacted
+    /// (`session.compaction.ended`): the caller must re-load that session's
+    /// history.
     /// The reload itself is HTTP IO and lives in the SSE loop — here we only
     /// record the intent, keeping "what the event means" in one place.
     pub compacted: &'a mut Option<String>,
-    /// Compaction part.id already announced with a "Compacting…" notice, so a
-    /// repeated `message.part.updated` for the same compaction does not stack
-    /// duplicate bubbles. Reset by the history reload on `session.compacted`.
+    /// Session already announced with a "Compacting…" notice, so a repeated
+    /// `session.compaction.started` does not stack duplicate bubbles. Reset by
+    /// the history reload on `session.compaction.ended`.
     pub compaction_seen: &'a mut Option<String>,
     /// Shared "compaction in progress" flag (polled by QML for the activity
-    /// banner). Set when a compaction part shows up for the shown session
+    /// banner). Set on `session.compaction.started` for the shown session
     /// (covers AUTO-compaction), cleared when the session is compacted or goes
     /// idle.
     pub compacting: &'a std::sync::Mutex<bool>,
-    /// Set when the worker has just sent a prompt and is waiting for the
-    /// user-message id from `message.updated`; cleared once captured (see
-    /// `on_message_updated`). Prevents attaching a replayed id to the wrong
-    /// bubble.
-    pub expect_user_id: &'a mut bool,
-}
-
-/// Applies an event to the state. Returns bool — "state changed" (redraw the UI).
-///
-/// This is the single hub for "what a server event does": every branch either
-/// mutates state or delegates to a handler that does. Branches listed after the
-/// explicit ones are not implemented in the UI yet — they warn (see
-/// `note_unimplemented`). Coverage of the server's event union is still
-/// incomplete; new handling is added *here* first.
-pub async fn dispatch(event: &Event, state: &mut DispatcherState, stream: &mut StreamState<'_>) -> bool {
-    match event {
-        Event::SessionStatus { properties } => {
-            let id = properties.sessionID.clone();
-            let fsm = state.sessions.entry(id.clone()).or_insert_with(SessionFsm::default);
-            fsm.apply(properties.status.clone());
-            let _ = id;
-            true
-        }
-        Event::SessionIdle { properties } => {
-            if let Some(fsm) = state.sessions.get_mut(&properties.sessionID) {
-                fsm.apply(crate::types::session::SessionStatus::Idle);
-            }
-            // Safety: a session that went idle is no longer compacting (covers
-            // an aborted/failed compaction that never emitted `session.compacted`).
-            if stream.current_session == Some(properties.sessionID.as_str()) {
-                if let Ok(mut g) = stream.compacting.lock() {
-                    *g = false;
-                }
-            }
-            true
-        }
-        Event::PermissionV2Asked { properties } => {
-            let perm = Permission {
-                id: properties.id.clone(),
-                sessionID: properties.sessionID.clone(),
-                action: properties.action.clone(),
-                resources: properties.resources.clone(),
-                save: properties.save.clone(),
-                metadata: properties.metadata.clone(),
-                source: properties.source.clone(),
-            };
-            state.permissions.push(perm);
-            true
-        }
-        Event::PermissionAsked { properties } => {
-            // Legacy permission.asked → the same Permission model.
-            let perm = Permission {
-                id: properties.id.clone(),
-                sessionID: properties.sessionID.clone(),
-                action: properties.permission.clone(),
-                resources: properties.patterns.clone(),
-                save: Some(properties.always.clone()),
-                metadata: Some(properties.metadata.clone()),
-                source: properties.tool.as_ref().map(|t| crate::types::event::PermissionV2Source {
-                    kind: "tool".to_string(),
-                    messageID: t.messageID.clone(),
-                    callID: t.callID.clone(),
-                }),
-            };
-            state.permissions.push(perm);
-            true
-        }
-        Event::PermissionV2Replied { properties: p } => {
-            state.permissions.pop(&p.requestID);
-            true
-        }
-        Event::PermissionReplied { properties: p } => {
-            state.permissions.pop(&p.requestID);
-            true
-        }
-        Event::MessagePartUpdated { properties } => {
-            if let crate::types::message::Part::Tool { callID, tool, state: ts, .. } = &properties.part
-            {
-                state.tools.upsert(callID.clone(), tool.clone(), ts.clone());
-                // Emit an inline tool row: one feed line per callID, re-sent on
-                // every state change so QML can replace it in place (TUI-style
-                // inline tool calls in the transcript).
-                if let Ok(mut q) = stream.pending.lock() {
-                    q.push(proto_tool_line(
-                        now_ms(),
-                        callID,
-                        tool,
-                        ts.ui_status(),
-                        &ts.description(),
-                    ));
-                }
-            }
-            // Compaction started: the server attaches a `type:"compaction"` part
-            // to a user message, then streams the summary as an assistant
-            // `summary:true` message, and finally reports `session.compacted`.
-            // Announce it ONCE per part so the chat shows that work is happening
-            // (the TUI renders a dedicated compaction row here). Driving this off
-            // the event — not the Compact button — means AUTO-compaction on
-            // context overflow is visible too. The `session.compacted` reload
-            // replaces the notice with the summary + marker.
-            if let crate::types::message::Part::Compaction { id, .. } = &properties.part {
-                if stream.current_session == Some(properties.sessionID.as_str()) {
-                    if let Ok(mut g) = stream.compacting.lock() {
-                        *g = true;
-                    }
-                    if stream.compaction_seen.as_deref() != Some(id.as_str()) {
-                        *stream.compaction_seen = Some(id.clone());
-                        if let Ok(mut q) = stream.pending.lock() {
-                            q.push(svc_line(now_ms(), crate::i18n::K_COMPACTING, &[]));
-                        }
-                    }
-                }
-            }
-            true
-        }
-        Event::QuestionAsked { properties } => {
-            state.questions.push(QuestionRequest {
-                id: properties.id.clone(),
-                sessionID: properties.sessionID.clone(),
-                questions: properties.questions.clone(),
-                tool: properties.tool.clone(),
-            });
-            true
-        }
-        Event::QuestionV2Asked { properties } => {
-            state.questions.push(QuestionRequest {
-                id: properties.id.clone(),
-                sessionID: properties.sessionID.clone(),
-                questions: properties.questions.clone(),
-                tool: properties.tool.clone(),
-            });
-            true
-        }
-        Event::QuestionReplied { properties: p } => {
-            state.questions.pop(&p.requestID);
-            true
-        }
-        Event::QuestionV2Replied { properties: p } => {
-            state.questions.pop(&p.requestID);
-            true
-        }
-        Event::QuestionRejected { properties: p } => {
-            state.questions.pop(&p.requestID);
-            true
-        }
-        Event::QuestionV2Rejected { properties: p } => {
-            state.questions.pop(&p.requestID);
-            true
-        }
-        Event::SessionCreated { properties } | Event::SessionUpdated { properties } => {
-            state.session_meta.insert(properties.info.id.clone(), properties.info.clone());
-            true
-        }
-        Event::SessionDeleted { properties } => {
-            state.session_meta.remove(&properties.info.id);
-            state.sessions.remove(&properties.info.id);
-            true
-        }
-        // Compaction finished: the transcript changed (old turns replaced by a
-        // summary). The caller re-loads the history — needs HTTP IO, so we only
-        // record which session here (see `StreamState::compacted`).
-        Event::SessionCompacted { properties } => {
-            *stream.compacted = Some(properties.sessionID.clone());
-            if stream.current_session == Some(properties.sessionID.as_str()) {
-                if let Ok(mut g) = stream.compacting.lock() {
-                    *g = false;
-                }
-            }
-            true
-        }
-        // Streaming / error events. Their handling used to live inline in the
-        // SSE loop (main.rs), which smeared the "event → what happens"
-        // responsibility across files. The roots grow here now; the handlers
-        // (`on_message_updated`/`on_message_part_delta`/`on_session_error`)
-        // mutate the accumulators carried in `StreamState`.
-        Event::MessageUpdated { properties } => {
-            on_message_updated(stream, properties);
-            true
-        }
-        Event::MessagePartDelta { properties } => {
-            on_message_part_delta(stream, properties);
-            true
-        }
-        Event::SessionError { properties } => {
-            on_session_error(stream, properties);
-            true
-        }
-        // Tool / shell activity of the agent (`session.next.tool.*` and
-        // `session.next.shell.*`). These feed `state.tools`, which the UI polls
-        // as a compact activity strip so bash / read / edit / webfetch are
-        // visible WHILE the agent works instead of the chat going silent.
-        Event::SessionNextToolInputStarted { properties } => {
-            on_tool_input_started(state, properties);
-            true
-        }
-        Event::SessionNextToolInputDelta { properties } => {
-            on_tool_input_delta(state, properties);
-            true
-        }
-        Event::SessionNextToolInputEnded { properties } => {
-            on_tool_input_ended(state, properties);
-            true
-        }
-        Event::SessionNextToolCalled { properties } => {
-            on_tool_called(state, properties);
-            true
-        }
-        Event::SessionNextToolProgress { properties } => {
-            on_tool_progress(state, properties);
-            true
-        }
-        Event::SessionNextToolSuccess { properties } => {
-            on_tool_success(state, properties);
-            true
-        }
-        Event::SessionNextToolFailed { properties } => {
-            on_tool_failed(state, properties);
-            true
-        }
-        Event::SessionNextShellStarted { properties } => {
-            on_shell_started(state, properties);
-            true
-        }
-        Event::SessionNextShellEnded { properties } => {
-            on_shell_ended(state, properties);
-            true
-        }
-        // Everything else is not yet implemented in the UI. These branches are
-        // listed exhaustively (no catch-all) so the compiler forces us to
-        // revisit them when the event union grows. Each one is logged so the
-        // logs make the degree of agreement between our UI and the native
-        // server visible. See AGENTS.md ("Принципы").
-        Event::ModelsDevRefreshed { .. }
-        | Event::IntegrationUpdated { .. }
-        | Event::IntegrationConnectionUpdated { .. }
-        | Event::CatalogUpdated { .. }
-        | Event::SessionDiff { .. }
-        | Event::MessageRemoved { .. }
-        | Event::MessagePartRemoved { .. }
-        | Event::SessionNextAgentSwitched { .. }
-        | Event::SessionNextModelSwitched { .. }
-        | Event::SessionNextMoved { .. }
-        | Event::SessionNextPrompted { .. }
-        | Event::SessionNextPromptAdmitted { .. }
-        | Event::SessionNextContextUpdated { .. }
-        | Event::SessionNextSynthetic { .. }
-        | Event::SessionNextStepStarted { .. }
-        | Event::SessionNextStepEnded { .. }
-        | Event::SessionNextStepFailed { .. }
-        | Event::SessionNextTextStarted { .. }
-        | Event::SessionNextTextDelta { .. }
-        | Event::SessionNextTextEnded { .. }
-        | Event::SessionNextReasoningStarted { .. }
-        | Event::SessionNextReasoningDelta { .. }
-        | Event::SessionNextReasoningEnded { .. }
-        | Event::SessionNextRetried { .. }
-        | Event::SessionNextCompactionStarted { .. }
-        | Event::SessionNextCompactionDelta { .. }
-        | Event::SessionNextCompactionEnded { .. }
-        | Event::SessionNextRevertStaged { .. }
-        | Event::SessionNextRevertCleared { .. }
-        | Event::SessionNextRevertCommitted { .. }
-        | Event::InstallationUpdated { .. }
-        | Event::InstallationUpdateAvailable { .. }
-        | Event::FileEdited { .. }
-        | Event::ReferenceUpdated { .. }
-        | Event::PluginAdded { .. }
-        | Event::ProjectDirectoriesUpdated { .. }
-        | Event::FileWatcherUpdated { .. }
-        | Event::PtyCreated { .. }
-        | Event::PtyUpdated { .. }
-        | Event::PtyExited { .. }
-        | Event::PtyDeleted { .. }
-        | Event::TodoUpdated { .. }
-        | Event::LspUpdated { .. }
-        | Event::TuiPromptAppend { .. }
-        | Event::TuiCommandExecute { .. }
-        | Event::TuiToastShow { .. }
-        | Event::TuiSessionSelect { .. }
-        | Event::McpToolsChanged { .. }
-        | Event::McpBrowserOpenFailed { .. }
-        | Event::CommandExecuted { .. }
-        | Event::ProjectUpdated { .. }
-        | Event::VcsBranchUpdated { .. }
-        | Event::WorkspaceReady { .. }
-        | Event::WorkspaceFailed { .. }
-        | Event::WorkspaceStatus { .. }
-        | Event::WorktreeReady { .. }
-        | Event::WorktreeFailed { .. }
-        | Event::ServerConnected { .. } | Event::ServerHeartbeat { .. }
-        | Event::GlobalDisposed { .. }
-        | Event::ServerInstanceDisposed { .. }
-        | Event::Sync { .. } => {
-            note_unimplemented(event);
-            false
-        }
-    }
 }
 
 // ── v2 event dispatch (`GET /api/event`) ─────────────────────────────────
@@ -388,9 +79,9 @@ pub async fn dispatch(event: &Event, state: &mut DispatcherState, stream: &mut S
 // v2 events arrive as flat envelopes (`{id, type, created, data}`) on
 // `/api/event`; their fields and identifiers differ from v1 (see
 // `vault/Разведка-v2.md` §2–§4). The handlers below normalise them onto the
-// SAME `DispatcherState`/`StreamState` accumulators the v1 path uses, so the
-// main loop's rendering (live text/reasoning, idle flush, tools strip) is
-// version-agnostic.
+// `DispatcherState`/`StreamState` accumulators the main loop renders, keeping
+// "what a server event does" (live text/reasoning, idle flush, tools strip)
+// here.
 //
 // Key mapping (v1 → v2):
 //   * text/reasoning part id → `(assistantMessageID, ordinal)`;
@@ -426,6 +117,12 @@ pub fn dispatch_v2(
                     // text parts feed the answer (v1 did this at
                     // `message.updated`).
                     stream.assistant_messages.insert(d.assistant_message_id);
+                    // The step carries the model in use — a source of the
+                    // session's current model on v2 (whose session GET/list have
+                    // no `model`), alongside `session.model.selected`.
+                    if let Some(m) = record_step_model(d.model.as_ref()) {
+                        state.session_models.insert(d.session_id.clone(), m);
+                    }
                     true
                 }
                 Err(e) => from_data_error(env, &e),
@@ -551,32 +248,41 @@ pub fn dispatch_v2(
             }
             Err(e) => from_data_error(env, &e),
         },
-        k::COMPACTION_DELTA => {
-            // The growing compaction summary is not rendered live yet; the
-            // final text arrives with `compaction.ended`, which reloads history.
-            false
-        }
+        k::COMPACTION_DELTA => match from_data::<v2::CompactionDeltaData>(env) {
+            Ok(d) => {
+                on_compaction_delta_v2(stream, &d);
+                true
+            }
+            Err(e) => from_data_error(env, &e),
+        },
         k::COMPACTION_ENDED => match from_data::<v2::CompactionEndedData>(env) {
             Ok(d) => {
-                on_compaction_ended_v2(stream, &d.session_id);
+                on_compaction_ended_v2(stream, &d);
                 true
             }
             Err(e) => from_data_error(env, &e),
         },
         k::COMPACTION_FAILED => match from_data::<v2::CompactionFailedData>(env) {
             Ok(d) => {
-                if stream.current_session == Some(d.session_id.as_str()) {
-                    if let Ok(mut g) = stream.compacting.lock() {
-                        *g = false;
-                    }
-                }
-                on_session_error_v2(stream, Some(&d.error));
+                on_compaction_failed_v2(stream, &d);
                 true
             }
             Err(e) => from_data_error(env, &e),
         },
         // ── session lifecycle ─────────────────────────────────────────
-        k::RENAMED | k::MOVED | k::AGENT_SELECTED | k::MODEL_SELECTED => {
+        // The v2 session GET/list does not return the model, so record it from
+        // the dedicated event; the worker merges it into the sessions JSON.
+        k::MODEL_SELECTED => match from_data::<v2::ModelSelectedData>(env) {
+            Ok(d) => {
+                state.session_models.insert(
+                    d.session_id.clone(),
+                    (d.model.providerID.clone(), d.model.id.clone()),
+                );
+                true
+            }
+            Err(e) => from_data_error(env, &e),
+        },
+        k::RENAMED | k::MOVED | k::AGENT_SELECTED => {
             // Session metadata changes are re-read from the sessions list on the
             // next poll; no live-accumulator effect.
             true
@@ -607,7 +313,6 @@ pub fn dispatch_v2(
         k::DELETED => {
             if let Some(sid) = env.data.get(k::SESSION_ID).and_then(|v| v.as_str()) {
                 state.sessions.remove(sid);
-                state.session_meta.remove(sid);
             }
             true
         }
@@ -830,15 +535,95 @@ fn on_compaction_started_v2(stream: &mut StreamState<'_>, session_id: &str) {
     }
 }
 
-/// v2 `session.compaction.ended` — the transcript changed: record the session
-/// for the caller to reload (mirrors v1 `session.compacted`).
-fn on_compaction_ended_v2(stream: &mut StreamState<'_>, session_id: &str) {
-    *stream.compacted = Some(session_id.to_string());
-    if stream.current_session == Some(session_id) {
+/// Stable bubble key for the growing v2 compaction summary. Reuses the live
+/// answer mechanism (`[[answerlive]]` + `[[p:<key>]]`) so the summary bubble
+/// grows in place exactly like a normal answer and, like v1, can be replaced by
+/// the final text in the same bubble.
+fn v2_compaction_key(session_id: &str) -> String {
+    format!("compact:{session_id}")
+}
+
+/// v2 `session.compaction.delta` — the growing summary. Mirror it to QML as a
+/// live answer bubble (throttled), keyed so the text replace-in-place works.
+fn on_compaction_delta_v2(stream: &mut StreamState<'_>, d: &crate::types::v2::event::CompactionDeltaData) {
+    if stream.current_session != Some(d.session_id.as_str()) {
+        return;
+    }
+    let key = v2_compaction_key(&d.session_id);
+    let entry = stream.text_live.entry(key.clone()).or_default();
+    entry.push_str(&d.text);
+    if entry.trim().is_empty() {
+        return;
+    }
+    let now = now_ms();
+    if now.saturating_sub(*stream.last_answer_push) < REASONING_LIVE_MS {
+        return;
+    }
+    *stream.last_answer_push = now;
+    if let Ok(mut q) = stream.pending.lock() {
+        q.push(proto_live_line(now, ANSWER_LIVE_TAG, entry.trim_end(), &key));
+    }
+}
+
+/// v2 `session.compaction.ended` — push the exact final summary text into the
+/// live bubble (so it matches even if trailing deltas were throttled) and record
+/// the session for the caller to reload (mirrors v1 `session.compacted`).
+fn on_compaction_ended_v2(stream: &mut StreamState<'_>, d: &crate::types::v2::event::CompactionEndedData) {
+    if stream.current_session == Some(d.session_id.as_str()) && !d.text.trim().is_empty() {
+        let key = v2_compaction_key(&d.session_id);
+        stream.text_live.insert(key.clone(), d.text.clone());
+        if let Ok(mut q) = stream.pending.lock() {
+            q.push(proto_live_line(now_ms(), ANSWER_LIVE_TAG, d.text.trim_end(), &key));
+        }
+    }
+    *stream.compacted = Some(d.session_id.clone());
+    if stream.current_session == Some(d.session_id.as_str()) {
         if let Ok(mut g) = stream.compacting.lock() {
             *g = false;
         }
     }
+}
+
+/// v2 `session.compaction.failed`. A `compaction.unavailable` ("Nothing to
+/// compact yet") is a benign no-op, not a failure: show it as a plain
+/// informational feed line and leave the status alone (v1 parity — the message
+/// is informative, the red error banner is not). Any other error is surfaced.
+fn on_compaction_failed_v2(stream: &mut StreamState<'_>, d: &crate::types::v2::event::CompactionFailedData) {
+    if stream.current_session == Some(d.session_id.as_str()) {
+        if let Ok(mut g) = stream.compacting.lock() {
+            *g = false;
+        }
+    }
+    if is_compaction_unavailable(&d.error) {
+        let msg = human_session_error_value(Some(&d.error));
+        if !msg.is_empty() {
+            if let Ok(mut q) = stream.pending.lock() {
+                q.push(svc_line(now_ms(), crate::i18n::K_COMPACTION_UNAVAILABLE, &[msg]));
+            }
+        }
+        return;
+    }
+    on_session_error_v2(stream, Some(&d.error));
+}
+
+/// True when a v2 structured error is the benign "nothing to compact yet"
+/// (`{type:"compaction.unavailable", …}`).
+fn is_compaction_unavailable(error: &serde_json::Value) -> bool {
+    use crate::types::v2::keys as k;
+    error.get(k::TYPE).and_then(|v| v.as_str()) == Some(k::ERR_COMPACTION_UNAVAILABLE)
+}
+
+/// Extract `(providerID, id)` from a `session.step.started` `model` value
+/// (`Model.Ref`), if present and complete. Returns `None` when absent/blank.
+fn record_step_model(model: Option<&serde_json::Value>) -> Option<(String, String)> {
+    use crate::types::v2::keys as k;
+    let m = model?;
+    let provider = m.get(k::PROVIDER_ID)?.as_str()?.to_string();
+    let id = m.get(k::ID)?.as_str()?.to_string();
+    if provider.is_empty() || id.is_empty() {
+        return None;
+    }
+    Some((provider, id))
 }
 
 /// v2 `session.error`-equivalent: surface a structured error as a feed line.
@@ -864,7 +649,7 @@ fn is_aborted_error(error: Option<&serde_json::Value>) -> bool {
     error
         .and_then(|e| e.get(k::TYPE))
         .and_then(|v| v.as_str())
-        == Some("aborted")
+        == Some(k::ERR_ABORTED)
 }
 
 /// Human-readable text from a v2 structured error (`{type, message, status?}`).
@@ -1185,230 +970,6 @@ fn note_unimplemented_v2(kind: &str) {
     }
 }
 
-/// `message.updated` — register assistant message ids, so that only the text
-/// parts of assistant messages feed the answer (user/echo parts are ignored).
-/// A user message of the *shown* session, arriving right after we sent a prompt,
-/// yields its `messageID` to QML (control line `[[msgid]]<id>`), so the freshly
-/// created user bubble can offer revert/fork like the ones loaded from history.
-fn on_message_updated(stream: &mut StreamState<'_>, props: &MessageUpdatedProperties) {
-    match &props.info {
-        // Every assistant message feeds the answer accumulator — including the
-        // `mode:"compaction"` summary of the compressed history, which thus
-        // grows as an ordinary bubble while it is written (exactly what the TUI
-        // does). `session.compacted` later reloads the history and replaces the
-        // live bubble with the final marker + summary. The summary is recorded
-        // in `compaction_messages` too, so the caller never reads it aloud.
-        Message::Assistant { id, mode, .. } => {
-            stream.assistant_messages.insert(id.clone());
-            if mode == crate::types::keys::MODE_COMPACTION {
-                stream.compaction_messages.insert(id.clone());
-            }
-        }
-        Message::User { id, sessionID, .. } => {
-            if *stream.expect_user_id && stream.current_session == Some(sessionID.as_str()) {
-                *stream.expect_user_id = false;
-                if let Ok(mut q) = stream.pending.lock() {
-                    q.push(format!("{SET_MSG_ID_TAG}{id}"));
-                }
-            }
-        }
-    }
-}
-
-/// `message.part.delta` — append an on-the-fly text/reasoning chunk to its
-/// accumulator and (throttled) stream it to QML so the bubble grows WHILE the
-/// model works. `partID` is routed to the reasoning accumulator if the part was
-/// confirmed `type:"reasoning"` via `message.part.updated`, otherwise to the
-/// answer accumulator. Unknown-message and non-`text` deltas are ignored.
-fn on_message_part_delta(stream: &mut StreamState<'_>, props: &MessagePartDeltaProperties) {
-    if props.field != "text" || !stream.assistant_messages.contains(&props.messageID) {
-        return;
-    }
-    let id = &props.partID;
-    if stream.reasoning_part_ids.contains(id) {
-        let entry = stream.reasonings.entry(id.clone()).or_default();
-        entry.push_str(&props.delta);
-        if entry.trim().is_empty() {
-            return;
-        }
-        let now = now_ms();
-        if now.saturating_sub(*stream.last_reasoning_push) < REASONING_LIVE_MS {
-            return;
-        }
-        *stream.last_reasoning_push = now;
-        stream.live_reasoned_ids.insert(id.clone());
-        if let Ok(mut q) = stream.pending.lock() {
-            q.push(proto_live_line(now, THINK_LIVE_TAG, entry.trim_end(), id));
-        }
-    } else {
-        let entry = stream.text_live.entry(id.clone()).or_default();
-        entry.push_str(&props.delta);
-        if entry.trim().is_empty() {
-            return;
-        }
-        let now = now_ms();
-        if now.saturating_sub(*stream.last_answer_push) < REASONING_LIVE_MS {
-            return;
-        }
-        *stream.last_answer_push = now;
-        if let Ok(mut q) = stream.pending.lock() {
-            q.push(proto_live_line(now, ANSWER_LIVE_TAG, entry.trim_end(), id));
-        }
-    }
-}
-
-/// `session.error` — classify the server error into a human-readable message
-/// (`human_session_error`) and surface it as an error line in the chat feed,
-/// switching the status to `error`. An event without an `error` field (e.g.
-/// empty sessionID) is skipped.
-fn on_session_error(stream: &mut StreamState<'_>, props: &SessionErrorProperties) {
-    let msg = human_session_error(props.error.as_ref());
-    if msg.is_empty() {
-        log::debug!("session.error without error field, skipping");
-        return;
-    }
-    log::error!("session.error: {msg}");
-    if let Ok(mut q) = stream.pending.lock() {
-        q.push(err_line(now_ms(), crate::i18n::K_SERVER_ERROR, &[msg]));
-    }
-    if let Ok(mut s) = stream.status.lock() {
-        *s = "error".to_string();
-    }
-}
-
-// ── Tool / shell activity ────────────────────────────────────────────────
-//
-// The agent's tool calls are tracked in `state.tools` (callID -> name+state).
-// The UI polls a JSON snapshot of it every second and renders a compact strip,
-// so bash / read / edit / webfetch stay visible WHILE the turn runs instead of
-// the chat going silent.
-
-/// `session.next.tool.input.started` — the model begins streaming a tool call;
-/// we know the tool name, not yet its arguments.
-fn on_tool_input_started(
-    state: &mut DispatcherState,
-    props: &SessionNextToolInputStartedProperties,
-) {
-    state.tools.upsert(
-        props.callID.clone(),
-        props.name.clone(),
-        ToolState::Pending {
-            input: serde_json::Value::Null,
-        },
-    );
-}
-
-/// `session.next.tool.input.delta` — a fragment of the tool-call arguments
-/// (JSON being streamed). Accumulate it into the pending entry's description.
-fn on_tool_input_delta(state: &mut DispatcherState, props: &SessionNextToolInputDeltaProperties) {
-    let call = props.callID.as_str();
-    if state.tools.name_of(call).is_none() {
-        state.tools.ensure(call, "");
-    }
-    let prev = state.tools.input_of(call);
-    let mut s = prev.as_str().unwrap_or("").to_string();
-    s.push_str(&props.delta);
-    state.tools.set_state(
-        call,
-        ToolState::Pending {
-            input: serde_json::Value::String(s),
-        },
-    );
-}
-
-/// `session.next.tool.input.ended` — the arguments are complete as a raw JSON
-/// string; parse them so the description can pick `command`/`filePath`/…
-fn on_tool_input_ended(state: &mut DispatcherState, props: &SessionNextToolInputEndedProperties) {
-    let call = props.callID.as_str();
-    if state.tools.name_of(call).is_none() {
-        state.tools.ensure(call, "");
-    }
-    let input = serde_json::from_str(&props.text)
-        .unwrap_or_else(|_| serde_json::Value::String(props.text.clone()));
-    state.tools.set_state(call, ToolState::Pending { input });
-}
-
-/// `session.next.tool.called` — the tool is invoked with parsed `input`; it is
-/// now running.
-fn on_tool_called(state: &mut DispatcherState, props: &SessionNextToolCalledProperties) {
-    state.tools.upsert(
-        props.callID.clone(),
-        props.tool.clone(),
-        ToolState::Running {
-            input: props.input.clone(),
-        },
-    );
-}
-
-/// `session.next.tool.progress` — intermediate progress; keep it running.
-fn on_tool_progress(state: &mut DispatcherState, props: &SessionNextToolProgressProperties) {
-    let call = props.callID.as_str();
-    if state.tools.name_of(call).is_none() {
-        return;
-    }
-    let input = state.tools.input_of(call);
-    state.tools.set_state(call, ToolState::Running { input });
-}
-
-/// `session.next.tool.success` — the tool finished; store a short title (from
-/// the input) plus its output.
-fn on_tool_success(state: &mut DispatcherState, props: &SessionNextToolSuccessProperties) {
-    let call = props.callID.as_str();
-    let input = state.tools.input_of(call);
-    let title = short_input(&input)
-        .or_else(|| state.tools.name_of(call).map(str::to_string))
-        .unwrap_or_else(|| "tool".to_string());
-    state.tools.set_state(
-        call,
-        ToolState::Completed {
-            input,
-            output: content_to_string(&props.content),
-            title,
-        },
-    );
-}
-
-/// `session.next.tool.failed` — the tool errored.
-fn on_tool_failed(state: &mut DispatcherState, props: &SessionNextToolFailedProperties) {
-    let call = props.callID.as_str();
-    let input = state.tools.input_of(call);
-    state.tools.set_state(
-        call,
-        ToolState::Error {
-            input,
-            error: content_to_string(&props.error),
-        },
-    );
-}
-
-/// `session.next.shell.started` — the agent's persistent shell starts a command.
-fn on_shell_started(state: &mut DispatcherState, props: &SessionNextShellStartedProperties) {
-    state.tools.upsert(
-        props.callID.clone(),
-        SHELL_TOOL_NAME.to_string(),
-        ToolState::Running {
-            input: serde_json::json!({ crate::types::keys::COMMAND: props.command }),
-        },
-    );
-}
-
-/// `session.next.shell.ended` — the shell command finished.
-fn on_shell_ended(state: &mut DispatcherState, props: &SessionNextShellEndedProperties) {
-    let call = props.callID.as_str();
-    let input = state.tools.input_of(call);
-    let title = short_input(&input)
-        .or_else(|| state.tools.name_of(call).map(str::to_string))
-        .unwrap_or_else(|| SHELL_TOOL_NAME.to_string());
-    state.tools.set_state(
-        call,
-        ToolState::Completed {
-            input,
-            output: props.output.clone(),
-            title,
-        },
-    );
-}
-
 /// A short human label pulled from a tool-call input (command / path / …).
 fn short_input(input: &serde_json::Value) -> Option<String> {
     use crate::types::keys as k;
@@ -1452,28 +1013,17 @@ fn content_to_string(v: &serde_json::Value) -> String {
     }
 }
 
-/// Logs (once per event type) that a dispatched event is not yet implemented in
-/// the UI. Warning on the first occurrence keeps the "not implemented" surface
-/// visible in the logs without flooding them on high-frequency events.
-fn note_unimplemented(event: &Event) {
-    use std::collections::HashSet;
-    use std::sync::{Mutex, OnceLock};
-
-    static SEEN: OnceLock<Mutex<HashSet<&'static str>>> = OnceLock::new();
-    let seen = SEEN.get_or_init(|| Mutex::new(HashSet::new()));
-    let name = event.type_name();
-    let first_time = seen.lock().map(|mut set| set.insert(name)).unwrap_or(true);
-    if first_time {
-        log::warn!("event '{name}' is not implemented in the UI yet — dispatch branch ignores it");
-    } else {
-        log::debug!("event '{name}' (not implemented) ignored again");
-    }
-}
-
 #[derive(Default)]
 pub struct DispatcherState {
     pub sessions: std::collections::HashMap<String, SessionFsm>,
-    pub session_meta: std::collections::HashMap<String, crate::types::session::Session>,
+    /// Current model per session — `(providerID, modelID)`.
+    ///
+    /// `GET /api/session[/{id}]` includes `model` only once a model is bound to
+    /// the session; a fresh/unset session has none. We record the model from the
+    /// events that carry it (`session.model.selected`, `session.step.started`)
+    /// and the worker also seeds it from history, so the sessions list / picker
+    /// can show a current model even before the server list would.
+    pub session_models: std::collections::HashMap<String, (String, String)>,
     pub tools: ToolStore,
     pub permissions: PermissionQueue,
     pub questions: QuestionQueue,
@@ -1486,287 +1036,193 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
 
-    /// Build a `StreamState` over fresh test accumulators, run `f`, and return
-    /// the lines pushed to QML. `assistant` is the set of assistant message ids
-    /// (a delta of an unknown message is ignored); `reasoning_ids` marks parts
-    /// already confirmed as `type:"reasoning"`.
-    fn pushed(
-        assistant: &[&str],
-        reasoning_ids: &[&str],
-        props: &MessagePartDeltaProperties,
-    ) -> Vec<String> {
-        let pending = Mutex::new(Vec::new());
-        let status = Mutex::new(String::new());
-        let mut assistant_messages: HashSet<String> =
-            assistant.iter().map(|s| s.to_string()).collect();
-        let mut compaction_messages = HashSet::new();
-        let mut reasonings = HashMap::new();
-        let reasoning_part_ids: HashSet<String> =
-            reasoning_ids.iter().map(|s| s.to_string()).collect();
-        let mut live_reasoned_ids = HashSet::new();
-        let mut last_reasoning_push = 0u64;
-        let mut text_live = HashMap::new();
-        let mut last_answer_push = 0u64;
-        let mut expect_user_id = false;
-        let mut compacted = None;
-        let mut compaction_seen = None;
-        let compacting = Mutex::new(false);
-        {
-            let mut stream = StreamState {
-                pending: &pending,
-                status: &status,
-                assistant_messages: &mut assistant_messages,
-                compaction_messages: &mut compaction_messages,
-                reasonings: &mut reasonings,
-                reasoning_part_ids: &reasoning_part_ids,
-                live_reasoned_ids: &mut live_reasoned_ids,
-                last_reasoning_push: &mut last_reasoning_push,
-                text_live: &mut text_live,
-                last_answer_push: &mut last_answer_push,
-                current_session: None,
-                compacted: &mut compacted,
-                compaction_seen: &mut compaction_seen,
-                compacting: &compacting,
-                expect_user_id: &mut expect_user_id,
-            };
-            on_message_part_delta(&mut stream, props);
-        }
-        pending.lock().map(|q| q.clone()).unwrap_or_default()
+    /// Owns the accumulators a `StreamState` borrows, so tests do not repeat
+    /// the full field list. `stream()` borrows the fixture mutably; the borrow
+    /// ends with the returned value, so the test can read the accumulators
+    /// afterwards.
+    struct Fixture {
+        pending: Mutex<Vec<String>>,
+        status: Mutex<String>,
+        assistant_messages: HashSet<String>,
+        compaction_messages: HashSet<String>,
+        reasonings: HashMap<String, String>,
+        reasoning_part_ids: HashSet<String>,
+        live_reasoned_ids: HashSet<String>,
+        last_reasoning_push: u64,
+        text_live: HashMap<String, String>,
+        last_answer_push: u64,
+        compacted: Option<String>,
+        compaction_seen: Option<String>,
+        compacting: Mutex<bool>,
     }
 
-    fn delta(message_id: &str, part_id: &str, text: &str) -> MessagePartDeltaProperties {
-        MessagePartDeltaProperties {
-            sessionID: "ses".to_string(),
-            messageID: message_id.to_string(),
-            partID: part_id.to_string(),
-            field: "text".to_string(),
+    impl Fixture {
+        fn new() -> Self {
+            Self {
+                pending: Mutex::new(Vec::new()),
+                status: Mutex::new(String::new()),
+                assistant_messages: HashSet::new(),
+                compaction_messages: HashSet::new(),
+                reasonings: HashMap::new(),
+                reasoning_part_ids: HashSet::new(),
+                live_reasoned_ids: HashSet::new(),
+                last_reasoning_push: 0,
+                text_live: HashMap::new(),
+                last_answer_push: 0,
+                compacted: None,
+                compaction_seen: None,
+                compacting: Mutex::new(false),
+            }
+        }
+
+        /// A `StreamState` over this fixture's accumulators. The shown session
+        /// (if any) must outlive the borrow, hence the shared lifetime.
+        fn stream<'a>(&'a mut self, current_session: Option<&'a str>) -> StreamState<'a> {
+            StreamState {
+                pending: &self.pending,
+                status: &self.status,
+                assistant_messages: &mut self.assistant_messages,
+                compaction_messages: &mut self.compaction_messages,
+                reasonings: &mut self.reasonings,
+                reasoning_part_ids: &self.reasoning_part_ids,
+                live_reasoned_ids: &mut self.live_reasoned_ids,
+                last_reasoning_push: &mut self.last_reasoning_push,
+                text_live: &mut self.text_live,
+                last_answer_push: &mut self.last_answer_push,
+                current_session,
+                compacted: &mut self.compacted,
+                compaction_seen: &mut self.compaction_seen,
+                compacting: &self.compacting,
+            }
+        }
+    }
+
+    /// A v2 envelope carrying `data` as the body of a `kind` event.
+    fn envelope(kind: &str, data: serde_json::Value) -> EventEnvelope {
+        EventEnvelope {
+            id: "evt".to_string(),
+            kind: kind.to_string(),
+            created: 0,
+            data,
+            location: None,
+            metadata: None,
+            durable: None,
+        }
+    }
+
+    /// A v2 text/reasoning delta body. v2 has no part id: the QML bubble is
+    /// keyed by `(assistantMessageID, ordinal)`.
+    fn text_delta(
+        message: &str,
+        ordinal: i64,
+        text: &str,
+    ) -> crate::types::v2::event::TextDeltaData {
+        crate::types::v2::event::TextDeltaData {
+            session_id: "ses".to_string(),
+            assistant_message_id: message.to_string(),
+            ordinal,
             delta: text.to_string(),
         }
     }
 
-    /// The live answer line MUST carry the part-id so QML can edit the exact
+    /// The live answer line MUST carry the block key so QML can edit the exact
     /// bubble in place, position-independently (the duplicate-bubble fix).
     #[test]
-    fn answer_delta_line_carries_part_id() {
-        let out = pushed(&["msg1"], &[], &delta("msg1", "prt_1", "hello"));
-        assert_eq!(out.len(), 1);
-        assert!(out[0].ends_with("[[answerlive]]hello[[p:prt_1]]"), "{}", out[0]);
-    }
-
-    /// Reasoning deltas route to the think-live tag, same part-id shape.
-    #[test]
-    fn reasoning_delta_line_carries_part_id() {
-        let out = pushed(&["msg1"], &["prt_r"], &delta("msg1", "prt_r", "why"));
-        assert_eq!(out.len(), 1);
-        assert!(out[0].ends_with("[[thinklive]]why[[p:prt_r]]"), "{}", out[0]);
-    }
-
-    /// A delta of a non-assistant message is ignored (no line pushed).
-    #[test]
-    fn unknown_message_delta_is_ignored() {
-        let out = pushed(&[], &[], &delta("msgX", "prt_1", "hello"));
-        assert!(out.is_empty());
-    }
-
-    /// `session.compacted` records the session to reload, so the SSE loop can
-    /// rebuild the transcript (summary replaces the old turns) without the user
-    /// leaving and re-entering the chat.
-    #[tokio::test]
-    async fn session_compacted_records_the_session_to_reload() {
-        let pending = Mutex::new(Vec::new());
-        let status = Mutex::new(String::new());
-        let mut assistant_messages = HashSet::new();
-        let mut compaction_messages = HashSet::new();
-        let mut reasonings = HashMap::new();
-        let reasoning_part_ids = HashSet::new();
-        let mut live_reasoned_ids = HashSet::new();
-        let mut last_reasoning_push = 0u64;
-        let mut text_live = HashMap::new();
-        let mut last_answer_push = 0u64;
-        let mut expect_user_id = false;
-        let mut compacted = None;
-        let mut compaction_seen = None;
-        let compacting = Mutex::new(false);
+    fn answer_delta_line_carries_block_key() {
+        let mut fx = Fixture::new();
+        fx.assistant_messages.insert("msg1".to_string());
         {
-            let mut stream = StreamState {
-                pending: &pending,
-                status: &status,
-                assistant_messages: &mut assistant_messages,
-                compaction_messages: &mut compaction_messages,
-                reasonings: &mut reasonings,
-                reasoning_part_ids: &reasoning_part_ids,
-                live_reasoned_ids: &mut live_reasoned_ids,
-                last_reasoning_push: &mut last_reasoning_push,
-                text_live: &mut text_live,
-                last_answer_push: &mut last_answer_push,
-                current_session: None,
-                compacted: &mut compacted,
-                compaction_seen: &mut compaction_seen,
-                compacting: &compacting,
-                expect_user_id: &mut expect_user_id,
-            };
-            let event = Event::SessionCompacted {
-                properties: crate::types::event::SessionIdProperties {
-                    sessionID: "ses_compact".to_string(),
-                },
-            };
-            let mut state = DispatcherState::default();
-            assert!(dispatch(&event, &mut state, &mut stream).await);
+            let mut stream = fx.stream(None);
+            on_v2_text_delta(&mut stream, &text_delta("msg1", 0, "hello"));
         }
-        assert_eq!(compacted.as_deref(), Some("ses_compact"));
+        let q = fx.pending.lock().unwrap();
+        assert_eq!(q.len(), 1, "{q:?}");
+        assert!(q[0].ends_with("[[answerlive]]hello[[p:msg1:0]]"), "{}", q[0]);
     }
 
-    /// A `type:"compaction"` part of the SHOWN session pushes a single
-    /// "Compacting…" notice; a repeat of the same part.id does not stack a
-    /// second bubble, and another session's compaction is ignored. This is what
+    /// Reasoning deltas route to the think-live tag, same block-key shape. No
+    /// membership check: the reasoning kind already identifies the block.
+    #[test]
+    fn reasoning_delta_line_carries_block_key() {
+        let mut fx = Fixture::new();
+        {
+            let mut stream = fx.stream(None);
+            on_v2_reasoning_delta(&mut stream, &text_delta("msg1", 3, "why"));
+        }
+        let q = fx.pending.lock().unwrap();
+        assert_eq!(q.len(), 1, "{q:?}");
+        assert!(q[0].ends_with("[[thinklive]]why[[p:msg1:3]]"), "{}", q[0]);
+    }
+
+    /// A text delta of a message that never registered (not in
+    /// `assistant_messages`) is ignored — no line pushed.
+    #[test]
+    fn text_delta_of_unregistered_message_is_ignored() {
+        let mut fx = Fixture::new();
+        {
+            let mut stream = fx.stream(None);
+            on_v2_text_delta(&mut stream, &text_delta("msgX", 0, "hello"));
+        }
+        let q = fx.pending.lock().unwrap();
+        assert!(q.is_empty(), "{q:?}");
+    }
+
+    /// `session.compaction.ended` records the session to reload, so the SSE
+    /// loop can rebuild the transcript (summary replaces the old turns)
+    /// without the user leaving and re-entering the chat.
+    #[test]
+    fn compaction_ended_records_the_session_to_reload() {
+        use crate::types::v2::keys as k;
+        let mut fx = Fixture::new();
+        let env = envelope(
+            k::COMPACTION_ENDED,
+            serde_json::json!({ "sessionID": "ses_compact", "reason": "auto", "text": "" }),
+        );
+        let mut state = DispatcherState::default();
+        {
+            let mut stream = fx.stream(None);
+            assert!(dispatch_v2(&env, &mut state, &mut stream));
+        }
+        assert_eq!(fx.compacted.as_deref(), Some("ses_compact"));
+    }
+
+    /// `session.compaction.started` pushes ONE "Compacting…" notice for the
+    /// shown session (a repeat does not stack a second bubble) and raises the
+    /// banner; another session's compaction is ignored; `session.compaction.ended`
+    /// lowers the banner again (the reload replaces the feed). This is what
     /// makes AUTO-compaction (context overflow) visible, not just the button.
-    #[tokio::test]
-    async fn compaction_part_announces_once_for_the_shown_session() {
-        use crate::types::event::MessagePartUpdatedProperties;
-        use crate::types::message::Part;
-
-        let pending = Mutex::new(Vec::new());
-        let status = Mutex::new(String::new());
-        let mut assistant_messages = HashSet::new();
-        let mut compaction_messages = HashSet::new();
-        let mut reasonings = HashMap::new();
-        let reasoning_part_ids = HashSet::new();
-        let mut live_reasoned_ids = HashSet::new();
-        let mut last_reasoning_push = 0u64;
-        let mut text_live = HashMap::new();
-        let mut last_answer_push = 0u64;
-        let mut compacted = None;
-        let mut compaction_seen = None;
-        let mut expect_user_id = false;
-        let compacting = Mutex::new(false);
+    #[test]
+    fn compaction_started_announces_once_for_the_shown_session() {
+        use crate::types::v2::keys as k;
+        let mut fx = Fixture::new();
+        let mut state = DispatcherState::default();
+        let start = |session: &str| {
+            envelope(
+                k::COMPACTION_STARTED,
+                serde_json::json!({ "sessionID": session, "reason": "auto" }),
+            )
+        };
         {
-            let mut stream = StreamState {
-                pending: &pending,
-                status: &status,
-                assistant_messages: &mut assistant_messages,
-                compaction_messages: &mut compaction_messages,
-                reasonings: &mut reasonings,
-                reasoning_part_ids: &reasoning_part_ids,
-                live_reasoned_ids: &mut live_reasoned_ids,
-                last_reasoning_push: &mut last_reasoning_push,
-                text_live: &mut text_live,
-                last_answer_push: &mut last_answer_push,
-                current_session: Some("ses1"),
-                compacted: &mut compacted,
-                compaction_seen: &mut compaction_seen,
-                compacting: &compacting,
-                expect_user_id: &mut expect_user_id,
-            };
-            let mut state = DispatcherState::default();
-            let part = |session: &str| Event::MessagePartUpdated {
-                properties: MessagePartUpdatedProperties {
-                    sessionID: session.to_string(),
-                    part: Part::Compaction {
-                        id: "prt_c1".to_string(),
-                        auto: true,
-                    },
-                    time: 0.0,
-                },
-            };
+            let mut stream = fx.stream(Some("ses1"));
             // Another session's compaction: no notice, flag stays down.
-            assert!(dispatch(&part("other"), &mut state, &mut stream).await);
-            assert!(!*compacting.lock().unwrap());
-            // Shown session, twice with the same part id: ONE notice.
-            assert!(dispatch(&part("ses1"), &mut state, &mut stream).await);
-            assert!(dispatch(&part("ses1"), &mut state, &mut stream).await);
+            assert!(dispatch_v2(&start("other"), &mut state, &mut stream));
+            assert!(!*stream.compacting.lock().unwrap());
+            // Shown session, twice: ONE notice.
+            assert!(dispatch_v2(&start("ses1"), &mut state, &mut stream));
+            assert!(dispatch_v2(&start("ses1"), &mut state, &mut stream));
             // The banner flag is up while the compaction runs.
-            assert!(*compacting.lock().unwrap());
-            // `session.compacted` clears it (the reload replaces the feed).
-            let done = Event::SessionCompacted {
-                properties: crate::types::event::SessionIdProperties {
-                    sessionID: "ses1".to_string(),
-                },
-            };
-            assert!(dispatch(&done, &mut state, &mut stream).await);
-            assert!(!*compacting.lock().unwrap());
+            assert!(*stream.compacting.lock().unwrap());
+            // Empty summary text: the notice itself is the only line pushed.
+            let done = envelope(
+                k::COMPACTION_ENDED,
+                serde_json::json!({ "sessionID": "ses1", "reason": "auto", "text": "" }),
+            );
+            assert!(dispatch_v2(&done, &mut state, &mut stream));
+            assert!(!*stream.compacting.lock().unwrap());
         }
-        let q = pending.lock().unwrap();
+        let q = fx.pending.lock().unwrap();
         assert_eq!(q.len(), 1, "expected exactly one notice, got {q:?}");
         assert!(q[0].contains("[[s:Compacting history"), "{}", q[0]);
-    }
-
-    /// A `mode:"compaction"` assistant message is registered in BOTH sets:
-    /// `assistant_messages` (its text streams into the transcript like any
-    /// answer — the summary grows live, mirroring the TUI) and
-    /// `compaction_messages` (so the caller never reads it aloud). A normal
-    /// assistant message lands only in the former.
-    #[test]
-    fn compaction_message_streams_and_is_flagged() {
-        use crate::types::message::{AssistantPath, CacheUsage, MessageTime, MessageTokens};
-        let props = |id: &str, mode: &str| -> MessageUpdatedProperties {
-            MessageUpdatedProperties {
-                sessionID: "ses".to_string(),
-                info: Message::Assistant {
-                    id: id.to_string(),
-                    sessionID: "ses".to_string(),
-                    time: MessageTime {
-                        created: 1,
-                        completed: None,
-                    },
-                    error: None,
-                    parentID: "msg_u".to_string(),
-                    modelID: "m".to_string(),
-                    providerID: "p".to_string(),
-                    mode: mode.to_string(),
-                    path: AssistantPath {
-                        cwd: "/x".to_string(),
-                        root: "/x".to_string(),
-                    },
-                    cost: 0.0,
-                    tokens: MessageTokens {
-                        input: 0,
-                        output: 0,
-                        reasoning: 0,
-                        cache: CacheUsage { read: 0, write: 0 },
-                    },
-                    finish: None,
-                },
-            }
-        };
-        let pending = Mutex::new(Vec::new());
-        let status = Mutex::new(String::new());
-        let mut assistant_messages = HashSet::new();
-        let mut compaction_messages = HashSet::new();
-        let mut reasonings = HashMap::new();
-        let reasoning_part_ids = HashSet::new();
-        let mut live_reasoned_ids = HashSet::new();
-        let mut last_reasoning_push = 0u64;
-        let mut text_live = HashMap::new();
-        let mut last_answer_push = 0u64;
-        let mut expect_user_id = false;
-        let mut compacted = None;
-        let mut compaction_seen = None;
-        let compacting = Mutex::new(false);
-        {
-            let mut stream = StreamState {
-                pending: &pending,
-                status: &status,
-                assistant_messages: &mut assistant_messages,
-                compaction_messages: &mut compaction_messages,
-                reasonings: &mut reasonings,
-                reasoning_part_ids: &reasoning_part_ids,
-                live_reasoned_ids: &mut live_reasoned_ids,
-                last_reasoning_push: &mut last_reasoning_push,
-                text_live: &mut text_live,
-                last_answer_push: &mut last_answer_push,
-                current_session: None,
-                compacted: &mut compacted,
-                compaction_seen: &mut compaction_seen,
-                compacting: &compacting,
-                expect_user_id: &mut expect_user_id,
-            };
-            on_message_updated(&mut stream, &props("msg_n", "build"));
-            on_message_updated(&mut stream, &props("msg_c", crate::types::keys::MODE_COMPACTION));
-        }
-        assert!(assistant_messages.contains("msg_n"));
-        assert!(assistant_messages.contains("msg_c"));
-        assert!(!compaction_messages.contains("msg_n"));
-        assert!(compaction_messages.contains("msg_c"));
     }
 
     #[test]
@@ -1807,5 +1263,55 @@ mod tests {
                 "{const_name} = {value:?} must not carry the 1.19.0 bridge prefix"
             );
         }
+    }
+
+    /// `session.model.selected` records the session's current model. The v2
+    /// session GET/list do not carry `model`, so this map is the only source the
+    /// sessions/picker list can use on v2.
+    #[test]
+    fn v2_model_selected_records_the_session_model() {
+        use crate::types::v2::keys as k;
+        let mut fx = Fixture::new();
+        let env = envelope(
+            k::MODEL_SELECTED,
+            serde_json::json!({
+                "sessionID": "ses_x",
+                "model": { "id": "claude-sonnet-4", "providerID": "anthropic" },
+            }),
+        );
+        let mut state = DispatcherState::default();
+        {
+            let mut stream = fx.stream(None);
+            assert!(dispatch_v2(&env, &mut state, &mut stream));
+        }
+        assert_eq!(
+            state.session_models.get("ses_x"),
+            Some(&("anthropic".to_string(), "claude-sonnet-4".to_string()))
+        );
+    }
+
+    /// `session.step.started` also records the model in use — a second source of
+    /// the session's current model on v2 (alongside `session.model.selected`).
+    #[test]
+    fn v2_step_started_records_the_model() {
+        use crate::types::v2::keys as k;
+        let mut fx = Fixture::new();
+        let env = envelope(
+            k::STEP_STARTED,
+            serde_json::json!({
+                "sessionID": "ses_y",
+                "assistantMessageID": "msg_a",
+                "model": { "id": "gpt-5", "providerID": "openai" },
+            }),
+        );
+        let mut state = DispatcherState::default();
+        {
+            let mut stream = fx.stream(None);
+            assert!(dispatch_v2(&env, &mut state, &mut stream));
+        }
+        assert_eq!(
+            state.session_models.get("ses_y"),
+            Some(&("openai".to_string(), "gpt-5".to_string()))
+        );
     }
 }

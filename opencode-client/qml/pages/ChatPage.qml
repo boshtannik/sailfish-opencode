@@ -400,9 +400,10 @@ Item {
             // hides/shows already rendered [[think]] lines at once, without
             // reopening the session (new ones are not accumulated when the setting is off —
             // poll() in the root QML filters them out).
-            // Inline tool rows obey the "Show tool calls" switch the same way.
+            // Inline tool rows obey the "Tool calls" setting the same way
+            // (hide mode drops them immediately).
             visible: (appWindow.showReasoning || !line.isThink)
-                     && (appWindow.showTools || !line.isTool)
+                     && (appWindow.toolCalls !== "hide" || !line.isTool)
             // The long-press menu is pinned to the item's bottom; Silica clips
             // it to the item's height (layer sourceRect, see private/ViewItem.qml).
             // Grow the item by the menu height while it is open so every menu
@@ -448,7 +449,7 @@ Item {
             // Bold tool name + its argument, both HTML-escaped (RichText).
             property string toolHtml: {
                 var h = "<b>" + chatPage.htmlEsc(line.toolName) + "</b>"
-                if (line.toolText !== "")
+                if (appWindow.toolCalls !== "minimal" && line.toolText !== "")
                     h += " " + chatPage.htmlEsc(line.toolText)
                 return h
             }

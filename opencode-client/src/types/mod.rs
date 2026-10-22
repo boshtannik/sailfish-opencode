@@ -1,7 +1,6 @@
 pub mod config;
 pub mod event;
 pub mod keys;
-pub mod message;
 pub mod permission;
 pub mod question;
 pub mod session;
@@ -9,15 +8,10 @@ pub mod tool;
 pub mod v2;
 
 pub use config::Config;
-pub use event::GlobalEvent;
-pub use message::Message;
 pub use permission::Permission;
 pub use question::QuestionRequest;
-pub use session::Session;
 pub use tool::ToolState;
 
-/// Meta-entity "event" — separate so it doesn't conflict with event::Event.
-pub use event::Event as ServerEvent;
 
 use serde::Deserialize;
 

@@ -43,6 +43,13 @@ pub const INPUT: &str = "input";
 pub const CONTENT: &str = "content";
 pub const AGENTS: &str = "agents";
 
+// ── structured-error `type` discriminator values ─────────────────────────
+/// `error.type` of a user-initiated abort (`step.failed`); a clean stop, not a
+/// failure, so it must not paint the error banner (v1 parity).
+pub const ERR_ABORTED: &str = "aborted";
+/// `error.type` of the benign "nothing to compact yet" compaction failure.
+pub const ERR_COMPACTION_UNAVAILABLE: &str = "compaction.unavailable";
+
 // ── request-body fields ──────────────────────────────────────────────────
 pub const TITLE: &str = "title";
 pub const AGENT: &str = "agent";

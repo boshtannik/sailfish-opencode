@@ -1,8 +1,8 @@
 //! v2 protocol adapter (opencode 2.x).
 //!
-//! Skeleton for step 3 of the migration (see `vault/План-v2.md` §8): session
-//! CRUD, prompt, history and the event-stream boundary live behind the same
-//! [`OpenCodeApi`] trait as v1, so the worker picks one by a settings flag.
+//! The client's server protocol: session CRUD, prompt, history and the
+//! event-stream boundary (see `vault/План-v2.md` §8), all behind the
+//! [`OpenCodeApi`] trait the worker stack is generic over.
 //!
 //! Endpoints follow `vault/Разведка-v2.md` §5. The v2 HTTP surface differs in
 //! three ways this module already accounts for:
@@ -12,21 +12,21 @@
 //!
 //! Type shape migration (message `type` union, `content[]`, compaction message,
 //! forms) is step 4; until then read methods return the unwrapped `data` as
-//! [`serde_json::Value`] — the same currency the v1 methods use, so callers in
-//! `main.rs` compile unchanged.
+//! [`serde_json::Value`], so callers in `main.rs` compile unchanged.
 
 use std::future::Future;
 
+use futures_util::Stream;
 use reqwest::Client;
 
 use crate::types::event::PermissionReplyKind;
+use crate::types::v2::EventEnvelope;
 use crate::types::v2::keys as k;
 
 use super::api::OpenCodeApi;
-use super::api::ClientEvent;
 
-/// v2 protocol adapter. Cheap to clone (shared `reqwest` pool), like the v1
-/// client, so a background task can hold a copy.
+/// v2 protocol adapter. Cheap to clone (shared `reqwest` pool), so a
+/// background task can hold a copy.
 #[derive(Clone)]
 pub struct V2Adapter {
     pub http: Client,
@@ -373,6 +373,33 @@ impl OpenCodeApi for V2Adapter {
         }
     }
 
+    /// GET /api/model/default → `{location, data: Model.Info}`; the model a
+    /// fresh session uses. Used to bind a session that has no model yet so the
+    /// picker has something to check.
+    fn default_model(
+        &self,
+    ) -> impl Future<Output = Result<Option<(String, String)>, String>> + Send {
+        async move {
+            let url = format!("{}/api/model/default", self.base);
+            let resp = self
+                .authed(self.http.get(&url))
+                .send()
+                .await
+                .map_err(|e| e.to_string())?;
+            if !resp.status().is_success() {
+                return Err(format!("HTTP {}", resp.status()));
+            }
+            let v: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+            let d = &v["data"];
+            let provider = d[k::PROVIDER_ID].as_str().unwrap_or("");
+            let id = d[k::ID].as_str().unwrap_or("");
+            if provider.is_empty() || id.is_empty() {
+                return Ok(None);
+            }
+            Ok(Some((provider.to_string(), id.to_string())))
+        }
+    }
+
     /// POST /api/session/{id}/agent `{agent}` → 204.
     fn set_session_agent(
         &self,
@@ -540,25 +567,20 @@ impl OpenCodeApi for V2Adapter {
         }
     }
 
-    /// v2: subscribe to `/api/event`, yielding [`EventEnvelope`] frames.
+    /// Subscribe to `/api/event`, yielding [`EventEnvelope`] frames.
     fn event_stream(
         &self,
     ) -> impl Future<
         Output = Result<
             std::pin::Pin<
-                Box<dyn futures_util::Stream<Item = Result<ClientEvent, String>> + Send>,
+                Box<dyn Stream<Item = Result<EventEnvelope, String>> + Send>,
             >,
             String,
         >,
     > + Send {
         async move {
             let sse = crate::event::sse::SseClient::new(self.base.clone(), self.auth.clone());
-            let stream = sse.stream_v2().await?;
-            let mapped = futures_util::StreamExt::map(stream, |r| r.map(ClientEvent::V2));
-            Ok(Box::pin(mapped)
-                as std::pin::Pin<
-                    Box<dyn futures_util::Stream<Item = Result<ClientEvent, String>> + Send>,
-                >)
+            sse.stream().await
         }
     }
 }

@@ -1,10 +1,11 @@
-use std::collections::HashMap;
+use std::collections::HashSet;
 use std::time::Duration;
 
 use futures_util::StreamExt;
-use opencode_client::api::OpenCodeClient;
+use opencode_client::api::{OpenCodeApi, V2Adapter};
 use opencode_client::event::sse::SseClient;
 use opencode_client::server::{ServerConfig, ServerGuard};
+use opencode_client::types::v2::keys as k;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -15,48 +16,67 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let base = guard.base_url().to_string();
     println!("PASS: сервер {base}");
 
-    // 2. Клиент.
-    let client = OpenCodeClient::new(base.clone(), None);
+    // 2. Клиент (v2 — единственный протокол сервера opencode 2.x).
+    let client = V2Adapter::new(base.clone(), None);
     assert!(client.health().await?);
     println!("PASS: health ok");
 
-    // 3. SSE.
+    // 3. SSE: /api/event отдаёт конверты {type, data}.
     let sse = SseClient::new(base, None);
     let mut stream = sse.stream().await?;
     println!("PASS: SSE подключён");
 
     // 4. Сессия.
-    let sess = client.create_session().await?;
+    let sess = client.create_session(None).await?;
     let session_id = sess["id"].as_str().unwrap().to_string();
     println!("PASS: сессия {session_id}");
 
     // 5. Промпт.
     client
-        .prompt_async(&session_id, "Ответь одним числом: 2+2=?")
+        .prompt_async(&session_id, "Ответь одним числом: 2+2=?", None)
         .await?;
     println!("PASS: промпт отправлен");
 
-    // 6. Копим текст по part.id только из ассистентских сообщений.
-    let mut parts: HashMap<String, String> = HashMap::new();
-    let mut assistant_messages: std::collections::HashSet<String> = Default::default();
+    // 6. Копим текст блоками: v2 не даёт part.id — блок текста это пара
+    // (assistantMessageID, ordinal), дельты приходят в порядке следования.
+    let mut assistant_messages: HashSet<String> = HashSet::new();
+    let mut chunks: Vec<String> = Vec::new();
     let deadline = std::time::Instant::now() + Duration::from_secs(25);
     let mut idle_for_this = false;
 
     while std::time::Instant::now() < deadline {
         match stream.next().await {
-            Some(Ok(ev)) => {
-                if let Some(mid) = ev.payload.assistant_message_id() {
-                    assistant_messages.insert(mid.to_string());
-                }
-                if let Some((mid, id, text)) = ev.payload.text_part() {
-                    if assistant_messages.contains(mid) {
-                        parts.insert(id.to_string(), text);
+            Some(Ok(env)) => {
+                let data = &env.data;
+                let str_field = |name: &str| {
+                    data.get(name).and_then(|v| v.as_str()).map(str::to_string)
+                };
+                match env.kind.as_str() {
+                    // Шаг открывает ассистентское сообщение: только его текст
+                    // попадает в ответ (как в v1 регистрация по message.updated).
+                    k::STEP_STARTED | k::TEXT_STARTED => {
+                        if let Some(mid) = str_field("assistantMessageID") {
+                            assistant_messages.insert(mid);
+                        }
                     }
-                } else if let Some(sid) = ev.payload.idle_session_id() {
-                    if sid == session_id {
-                        idle_for_this = true;
-                        break;
+                    k::TEXT_DELTA => {
+                        let registered = str_field("assistantMessageID")
+                            .is_some_and(|mid| assistant_messages.contains(&mid));
+                        if registered {
+                            if let Some(delta) = str_field("delta") {
+                                chunks.push(delta);
+                            }
+                        }
                     }
+                    // Конец хода: успех/прерывание/успокоение (см. TurnState::on_v2_idle).
+                    k::IDLE | k::EXECUTION_SUCCEEDED | k::EXECUTION_INTERRUPTED => {
+                        if data.get("sessionID").and_then(|v| v.as_str()) == Some(session_id.as_str())
+                        {
+                            idle_for_this = true;
+                            break;
+                        }
+                    }
+                    other => log::debug!("пример игнорирует событие {other}"),
                 }
             }
             Some(Err(err)) => {
@@ -66,9 +86,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    let mut answer: Vec<&String> = parts.values().collect();
-    answer.sort();
-    let text: String = answer.iter().map(|s| s.as_str()).collect();
+    let text: String = chunks.concat();
 
     if idle_for_this && !text.trim().is_empty() {
         println!("PASS: ответ получен:");

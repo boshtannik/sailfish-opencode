@@ -5,13 +5,9 @@ use futures_util::{stream::unfold, Stream, StreamExt};
 use reqwest::Client;
 
 use crate::types::v2::EventEnvelope;
-use crate::types::GlobalEvent;
 
-/// SSE client. v1 reads `/global/event` into a stream of [`GlobalEvent`]; v2
-/// reads `/api/event` into a stream of [`EventEnvelope`] (see
-/// `vault/Разведка-v2.md` §3). Both endpoints send the same framing
-/// (`data: <json>` lines plus `: heartbeat` comments), so only the URL and the
-/// parsed type differ.
+/// SSE client for the server's event stream (`GET /api/event`): the framing is
+/// `data: <json>` lines plus `: heartbeat` comments.
 pub struct SseClient {
     http: Client,
     base: String,
@@ -28,9 +24,8 @@ impl SseClient {
         }
     }
 
-    /// Open the GET stream for `path` (e.g. `/global/event`), returning the
-    /// chunk stream. Shared by the v1/v2 readers so the auth/status handling
-    /// lives in one place.
+    /// Open the GET stream for `path` (e.g. `/api/event`), returning the
+    /// chunk stream. Auth/status handling lives here, in one place.
     async fn open(
         &self,
         path: &str,
@@ -47,16 +42,9 @@ impl SseClient {
         Ok(resp.bytes_stream())
     }
 
-    pub async fn stream(
-        &self,
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<GlobalEvent, String>> + Send>>, String> {
-        let chunks = self.open("/global/event").await?;
-        Ok(Box::pin(framed_stream(chunks)))
-    }
-
-    /// v2: `GET /api/event` → a stream of [`EventEnvelope`] (see
+    /// `GET /api/event` → a stream of [`EventEnvelope`] (see
     /// `vault/Разведка-v2.md` §2–§3).
-    pub async fn stream_v2(
+    pub async fn stream(
         &self,
     ) -> Result<Pin<Box<dyn Stream<Item = Result<EventEnvelope, String>> + Send>>, String> {
         let chunks = self.open("/api/event").await?;
@@ -65,7 +53,6 @@ impl SseClient {
 }
 
 /// Turn the raw byte stream into a stream of `data:` frames parsed as `T`.
-/// Both v1 and v2 share the framing; only `T` changes.
 fn framed_stream<T>(
     chunks: impl Stream<Item = Result<bytes::Bytes, reqwest::Error>> + Send + 'static,
 ) -> impl Stream<Item = Result<T, String>> + Send

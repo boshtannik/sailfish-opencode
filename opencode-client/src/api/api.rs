@@ -1,10 +1,9 @@
 //! Protocol adapter boundary.
 //!
 //! `OpenCodeApi` is the single interface the worker stack (worker loop, SSE
-//! dispatcher, history loader) talks to. Keeping the concrete protocol behind
-//! this trait lets us introduce a v2 adapter next to the current v1
-//! implementation without rewiring the rest of the client (see
-//! `vault/План-v2.md`).
+//! dispatcher, history loader) talks to: the only server protocol is opencode
+//! 2.x (`V2Adapter`, see `vault/План-v2.md`), and this trait keeps the HTTP
+//! surface out of the worker loop.
 //!
 //! Method set is deliberately limited to what consumers actually call — it is
 //! not a 1:1 mirror of the HTTP surface.
@@ -23,33 +22,22 @@ use futures_util::Stream;
 
 use crate::types::event::PermissionReplyKind;
 use crate::types::v2::EventEnvelope;
-use crate::types::GlobalEvent;
 
-/// One SSE frame from the server, tagged by protocol version. The worker loop
-/// matches on this so the v1 (`/global/event`) and v2 (`/api/event`) paths share
-/// one event pump (see `vault/План-v2.md` §8 step 5).
-#[derive(Debug, Clone)]
-pub enum ClientEvent {
-    V1(GlobalEvent),
-    V2(EventEnvelope),
-}
-
-/// Server protocol adapter (v1 and v2 implementations).
+/// Server protocol adapter (opencode 2.x).
 pub trait OpenCodeApi: Clone + Send + Sync + 'static {
-    /// Open the server's event stream. v1 reads `/global/event`
-    /// ([`GlobalEvent`]); v2 reads `/api/event` ([`EventEnvelope`]). Each adapter
-    /// picks its own endpoint, so the worker never hard-codes a version.
+    /// Open the server's event stream: `GET /api/event`, yielding
+    /// [`EventEnvelope`] frames.
     fn event_stream(
         &self,
     ) -> impl Future<
-        Output = Result<Pin<Box<dyn Stream<Item = Result<ClientEvent, String>> + Send>>, String>,
+        Output = Result<Pin<Box<dyn Stream<Item = Result<EventEnvelope, String>> + Send>>, String>,
     > + Send;
 
-    /// GET /global/health — is the server up?
+    /// GET /api/info — is the server up?
     fn health(&self) -> impl Future<Output = Result<bool, String>> + Send;
 
-    /// POST /global/dispose — drop all instances, releasing resources so the
-    /// next request reloads config (e.g. a freshly written credential).
+    /// POST /api/location/reload — reload the location, releasing resources so
+    /// the next request reloads config (e.g. a freshly written credential).
     fn global_dispose(&self) -> impl Future<Output = Result<(), String>> + Send;
 
     /// POST /session — create a session. Empty/absent title → server names it.
@@ -139,19 +127,25 @@ pub trait OpenCodeApi: Clone + Send + Sync + 'static {
         agent: &str,
     ) -> impl Future<Output = Result<(), String>> + Send;
 
+    /// The server's default model `(providerID, modelID)`, if the protocol
+    /// exposes one (`GET /api/model/default`). Returns `None` when the answer
+    /// carries no complete pair (the caller keeps whatever the session says).
+    fn default_model(&self) -> impl Future<Output = Result<Option<(String, String)>, String>> + Send {
+        async { Ok(None) }
+    }
+
     /// GET /session/{id}/message — full history as `[{info, parts}]`.
     fn session_messages(
         &self,
         session_id: &str,
     ) -> impl Future<Output = Result<serde_json::Value, String>> + Send;
 
-    /// POST /session/{id}/prompt_async — send a prompt without waiting.
+    /// POST /session/{id}/prompt — send a prompt without waiting.
     ///
-    /// Returns the ID the server assigned to the user message, when the protocol
-    /// reports it. v1 does not (the id arrives later via the `message.updated`
-    /// SSE event, so this returns `None` and the caller waits); v2 returns it in
-    /// the `POST .../prompt` response (`{data: SessionInboxUser.id}`), so the
-    /// caller never has to guess via SSE.
+    /// Returns the ID the server assigned to the user message when the response
+    /// reports one (`POST .../prompt` answers `{data: SessionInboxUser.id}`), so
+    /// the caller never has to guess it via SSE; `None` means the answer carried
+    /// no id (a server anomaly worth logging at the call site).
     fn prompt_async(
         &self,
         session_id: &str,

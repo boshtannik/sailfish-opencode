@@ -254,6 +254,17 @@ pub struct SessionIdleData {
     pub sessionID: String,
 }
 
+/// `session.model.selected` `data` — the session's current model.
+/// The v2 server emits this only when the model is (re)selected; `GET
+/// /api/session[/{id}]` does not carry the model, so this is how the UI learns
+/// the active model for a session.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ModelSelectedData {
+    #[serde(rename = "sessionID")]
+    pub session_id: String,
+    pub model: super::message::ModelRef,
+}
+
 /// `session.status` `data` (`status` is a tagged union `idle|busy|retry`).
 #[derive(Debug, Clone, Deserialize)]
 pub struct SessionStatusData {

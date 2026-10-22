@@ -19,6 +19,10 @@ Item {
     property var session: currentSession()
     property string sessionId: session ? session.id : appWindow.currentSessionId
     property string shareUrl: (session && session.shareUrl) ? session.shareUrl : ""
+    // The share/unshare route exists only in the v1 HTTP API; opencode 2 (v2),
+    // which this client targets exclusively, has none. The row stays visible but
+    // disabled with an explanatory note.
+    property bool shareSupported: false
     property string modelLabel: (session && session.modelID)
                                 ? (session.providerID + " / " + session.modelID)
                                 : qsTr("no data")
@@ -134,17 +138,34 @@ Item {
             BackgroundItem {
                 width: parent.width
                 contentHeight: Theme.itemSizeSmall
+                // opencode v2 has no share/unshare route at all (only v1 does),
+                // so the row stays visible but inert there — with a hint instead
+                // of a button that silently does nothing.
+                enabled: sessionSettingsPage.shareSupported
                 Label {
                     x: Theme.horizontalPageMargin
+                    width: parent.width - 2 * Theme.horizontalPageMargin
                     anchors.verticalCenter: parent.verticalCenter
                     text: sessionSettingsPage.shareUrl.length > 0
                           ? qsTr("Refresh link")
                           : qsTr("Share")
-                    color: parent.highlighted ? Theme.highlightColor : Theme.primaryColor
+                    color: !sessionSettingsPage.shareSupported
+                           ? Theme.secondaryColor
+                           : (parent.highlighted ? Theme.highlightColor : Theme.primaryColor)
                 }
                 onClicked: sessionSettingsPage.runAction(function() {
                     appWindow.shareSession(sessionSettingsPage.sessionId)
                 })
+            }
+
+            Label {
+                x: Theme.horizontalPageMargin
+                width: parent.width - 2 * Theme.horizontalPageMargin
+                visible: !sessionSettingsPage.shareSupported
+                text: qsTr("Not supported by opencode 2 (no share API)")
+                wrapMode: Text.Wrap
+                color: Theme.secondaryColor
+                font.pixelSize: Theme.fontSizeExtraSmall
             }
 
             BackgroundItem {
@@ -296,10 +317,29 @@ Item {
 
             SectionHeader { text: qsTr("Misc") }
 
-            TextSwitch {
-                text: qsTr("Show tool calls")
-                checked: appWindow.showTools
-                onCheckedChanged: appWindow.showTools = checked
+            // Mirrors the official TUI: Settings → Session → Tool calls
+            // (show / minimal / hide). Stored globally, applied to all sessions.
+            ComboBox {
+                id: toolCallsCombo
+                label: qsTr("Tool calls")
+                description: qsTr("How tool calls are shown in the transcript")
+                currentIndex: appWindow.toolCalls === "minimal" ? 1
+                              : (appWindow.toolCalls === "hide" ? 2 : 0)
+                menu: ContextMenu {
+                    MenuItem { text: qsTr("Show (name + argument)") }
+                    MenuItem { text: qsTr("Minimal (name only)") }
+                    MenuItem { text: qsTr("Hide") }
+                }
+                // Only write on a real user pick: compare against the current
+                // value, so the programmatic `currentIndex` assignment (binding
+                // + first init) is a no-op and never pins a stale value.
+                onCurrentIndexChanged: {
+                    var v = currentIndex === 1 ? "minimal"
+                            : (currentIndex === 2 ? "hide" : "show")
+                    if (typeof appWindow !== "undefined" && appWindow
+                        && appWindow.toolCalls !== v)
+                        appWindow.toolCalls = v
+                }
             }
         }
 

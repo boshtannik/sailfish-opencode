@@ -61,8 +61,11 @@ ApplicationWindow {
     // True while the session tail is reverted (worker control line [[reverted]]1):
     // shows the "Restore reverted messages" banner above the input.
     property bool reverted: false
-    property bool showTools: showToolsSetting.value !== undefined
-                            ? showToolsSetting.value : true
+    // How tool calls are shown in the transcript. Mirrors the official TUI
+    // (Settings → Session → Tool calls): "show" (name + argument), "minimal"
+    // (name only) or "hide" (no tool rows). Stored globally, like the TUI key.
+    property string toolCalls: toolCallsSetting.value !== undefined
+                               ? toolCallsSetting.value : "show"
     // True only in a debug build: enables the mock buttons (errors/permissions).
     readonly property bool devTools: bridge !== undefined
                                      && bridge.dev_tools()
@@ -286,9 +289,6 @@ ApplicationWindow {
     property bool sttModelReady: false
     // opencode working directory (setting). Loaded from bridge.settings_json().
     property string workdir: ""
-    // Server protocol adapter ("v1"/"v2", default v2). Loaded from
-    // bridge.settings_json(); changing it takes effect after the app (worker) restarts.
-    property string apiVersion: "v2"
     property bool ttsModelReady: chosenTts !== ""
 
     // For detecting the "agent busy → free" transition.
@@ -367,8 +367,8 @@ ApplicationWindow {
         key: "/apps/harbour-opencode/inputMode"
     }
     ConfigurationValue {
-        id: showToolsSetting
-        key: "/apps/harbour-opencode/showTools"
+        id: toolCallsSetting
+        key: "/apps/harbour-opencode/toolCalls"
     }
     ConfigurationValue {
         id: pttPositionSetting
@@ -752,7 +752,7 @@ ApplicationWindow {
                     // in place as the call moves running → completed/error
                     // (TUI-style inline tools in the transcript).
                     if (app.lineIs(bodyTmp, app.kToolTag)) {
-                        if (!app.showTools)
+                        if (app.toolCalls === "hide")
                             continue
                         var toolId = app.toolCallId(line)
                         if (toolId !== "") {
@@ -912,8 +912,6 @@ ApplicationWindow {
                 var sjson = JSON.parse(sj)
                 if (sjson.workdir !== undefined && sjson.workdir !== "")
                     app.workdir = sjson.workdir
-                if (sjson.api_version !== undefined && sjson.api_version !== "")
-                    app.apiVersion = sjson.api_version
             } catch (e) {
                 console.log("settings parse error: " + e)
             }
@@ -1176,10 +1174,6 @@ ApplicationWindow {
     // The `bridge` object is a dynamic property of this root window, visible only
     // as a bare identifier in THIS file. Pages must go through these wrappers.
     function setWorkdir(path) { bridge.set_workdir(path) }
-    function setApiVersion(v) {
-        app.apiVersion = v
-        bridge.set_api_version(v)
-    }
     function authUrl() { return bridge.auth_url() }
     function providerKeySet() { return bridge.provider_key_set() }
     function saveProviderKey(key) { bridge.save_provider_key(key) }
@@ -1193,7 +1187,7 @@ ApplicationWindow {
     }
 
     onInputModeChanged: { inputModeSetting.value = app.inputMode; inputModeSetting.sync() }
-    onShowToolsChanged: { showToolsSetting.value = app.showTools; showToolsSetting.sync() }
+    onToolCallsChanged: { toolCallsSetting.value = app.toolCalls; toolCallsSetting.sync() }
     onPttPositionChanged: { pttPositionSetting.value = app.pttPosition; pttPositionSetting.sync() }
     onTtsModeChanged: {
         ttsModeSetting.value = app.ttsMode; ttsModeSetting.sync()
@@ -1209,11 +1203,11 @@ ApplicationWindow {
     // At startup we sync the saved TTS mode (auto/button/off)
     // with the Rust side — otherwise `onTtsModeChanged` will not fire for the initial value.
     Component.onCompleted: {
-        // Pull the persisted settings (api_version/workdir) once at start: the
-        // worker republishes them only when a settings command runs, so without
-        // this the UI would keep the QML defaults even though the saved value
-        // differs (visually "the setting does not survive a restart"). poll()
-        // reads settings_json() and applies it to app.apiVersion/app.workdir.
+        // Pull the persisted settings (workdir) once at start: the worker
+        // republishes them only when a settings command runs, so without this
+        // the UI would keep the QML defaults even though the saved value differs
+        // (visually "the setting does not survive a restart"). poll() reads
+        // settings_json() and applies it to app.workdir.
         bridge.get_settings()
         app.voiceCmd(app.cmdTtsMode, app.ttsMode)
     }

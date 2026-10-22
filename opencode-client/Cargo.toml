@@ -32,5 +32,15 @@ hound = { version = "3", optional = true }
 default = []
 voice = ["dep:cpal", "dep:hound"]
 
+# Примеры со звуком требуют голосовой стек (модуль `audio` собирается только
+# под фичей `voice`) — без этого `cargo check --all-targets` падает на них.
+[[example]]
+name = "audio_record_play"
+required-features = ["voice"]
+
+[[example]]
+name = "voice_roundtrip"
+required-features = ["voice"]
+
 [profile.release]
 opt-level = "s"
