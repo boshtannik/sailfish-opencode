@@ -21,6 +21,7 @@ use std::pin::Pin;
 use futures_util::Stream;
 
 use crate::types::event::PermissionReplyKind;
+use crate::types::v2::form::FormInfo;
 use crate::types::v2::EventEnvelope;
 
 /// Server protocol adapter (opencode 2.x).
@@ -154,16 +155,37 @@ pub trait OpenCodeApi: Clone + Send + Sync + 'static {
         response: &PermissionReplyKind,
     ) -> impl Future<Output = Result<bool, String>> + Send;
 
-    /// POST /question/{id}/reply — answer a question from the model.
-    fn answer_question(
+    /// POST /api/session/{sessionID}/form/{formID}/reply — answer a form from
+    /// the model. `answer` is the `{fieldKey: value}` map (see `Form.Answer`).
+    ///
+    /// The route is session-scoped: the form id alone is not enough.
+    fn reply_form(
         &self,
-        request_id: &str,
-        answers: Vec<Vec<String>>,
+        session_id: &str,
+        form_id: &str,
+        answer: serde_json::Value,
     ) -> impl Future<Output = Result<bool, String>> + Send;
 
-    /// POST /question/{id}/reject — decline a question from the model.
-    fn reject_question(&self, request_id: &str)
-        -> impl Future<Output = Result<bool, String>> + Send;
+    /// DELETE /api/session/{sessionID}/form/{formID} — cancel a form (the
+    /// model gets `message` as the reason, if any).
+    fn cancel_form(
+        &self,
+        session_id: &str,
+        form_id: &str,
+        message: Option<&str>,
+    ) -> impl Future<Output = Result<bool, String>> + Send;
+
+    /// GET /api/form — the pending forms of the server's location (all
+    /// sessions). Used to reconcile the form queue with the server (the poll);
+    /// `None` means "the server did not tell" (keep the queue as it is).
+    fn list_forms(&self) -> impl Future<Output = Result<Option<Vec<FormInfo>>, String>> + Send;
+
+    /// GET /api/session/{sessionID}/form — the pending forms of one session.
+    /// A fallback for `list_forms` (a server without the global route).
+    fn list_session_forms(
+        &self,
+        session_id: &str,
+    ) -> impl Future<Output = Result<Option<Vec<FormInfo>>, String>> + Send;
 
     /// PUT /auth/{provider_id} — store an API-key credential for a provider.
     fn set_api_key(
@@ -172,3 +194,4 @@ pub trait OpenCodeApi: Clone + Send + Sync + 'static {
         key: &str,
     ) -> impl Future<Output = Result<(), String>> + Send;
 }
+

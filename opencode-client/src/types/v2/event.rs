@@ -315,24 +315,6 @@ pub struct PermissionRepliedData {
     pub requestID: String,
 }
 
-/// `question.asked` `data` (legacy question model, still emitted).
-#[derive(Debug, Clone, Deserialize)]
-pub struct QuestionAskedData {
-    pub id: String,
-    #[serde(rename = "sessionID")]
-    pub session_id: String,
-    #[serde(default)]
-    pub questions: Vec<crate::types::event::QuestionInfo>,
-    #[serde(default)]
-    pub tool: Option<crate::types::event::QuestionTool>,
-}
-
-/// `question.replied` / `question.rejected` `data`.
-#[derive(Debug, Clone, Deserialize)]
-pub struct QuestionResolvedData {
-    pub requestID: String,
-}
-
 /// `form.created` `data` (`{form: Form.Info}`).
 #[derive(Debug, Clone, Deserialize)]
 pub struct FormCreatedData {
@@ -340,9 +322,17 @@ pub struct FormCreatedData {
 }
 
 /// `form.replied` / `form.cancelled` `data`.
+///
+/// The server sends the settled form's `id` (and, for `form.replied`, the
+/// answer that was stored). `sessionID` is optional: the official TUI only
+/// reads `data.id`, and a global form carries no session.
 #[derive(Debug, Clone, Deserialize)]
 pub struct FormResolvedData {
     pub id: String,
+    #[serde(default, rename = "sessionID")]
+    pub session_id: Option<String>,
+    #[serde(default)]
+    pub answer: Option<serde_json::Value>,
 }
 
 #[cfg(test)]

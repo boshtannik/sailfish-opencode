@@ -20,6 +20,7 @@ use opencode_client::settings::Settings;
 use opencode_client::types::event::PermissionReplyKind;
 use opencode_client::types::keys;
 use opencode_client::types::tool::ToolState;
+use opencode_client::types::v2::keys as v2keys;
 use opencode_client::voice;
 
 /// The only QML file of the application (located in /usr/share/harbour-opencode/qml).
@@ -122,7 +123,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let voice = voice::VoiceState::with_status(bridge_pinned.borrow().voice_status_handle());
     let tools = bridge_pinned.borrow().tools_handle();
     let permissions = bridge_pinned.borrow().permissions_handle();
-    let questions = bridge_pinned.borrow().questions_handle();
+    let forms = bridge_pinned.borrow().forms_handle();
     let settings = bridge_pinned.borrow().settings_handle();
     let console_login = bridge_pinned.borrow().console_login_handle();
     bridge_pinned.borrow().set_status_shared("connecting");
@@ -152,7 +153,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let worker_voice = voice.clone();
     let worker_tools = tools.clone();
     let worker_permissions = permissions.clone();
-    let worker_questions = questions.clone();
+    let worker_forms = forms.clone();
     let worker_url_tx = url_tx.clone();
     let worker_dispatcher = dispatcher.clone();
     let worker_base = env_base.clone();
@@ -212,7 +213,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             worker_voice,
                             worker_tools,
                         worker_permissions,
-                        worker_questions,
+                        worker_forms,
                         worker_settings,
                         console_login,
                         worker_stop_rx,
@@ -280,7 +281,7 @@ async fn run_worker(
     voice: Arc<voice::VoiceState>,
     tools: Arc<std::sync::Mutex<String>>,
     permissions: Arc<std::sync::Mutex<String>>,
-    questions: Arc<std::sync::Mutex<String>>,
+    forms: Arc<std::sync::Mutex<String>>,
     settings: Arc<std::sync::Mutex<String>>,
     console_login: opencode_client::auth::ConsoleLogin,
     mut stop_rx: tokio::sync::watch::Receiver<bool>,
@@ -310,7 +311,7 @@ async fn run_worker(
                 voice.clone(),
                 tools.clone(),
                 permissions.clone(),
-                questions.clone(),
+                forms.clone(),
                 settings.clone(),
                 console_login.clone(),
             ) => {
@@ -345,7 +346,7 @@ async fn run_stream_adapter(
     voice: Arc<voice::VoiceState>,
     tools: Arc<std::sync::Mutex<String>>,
     permissions: Arc<std::sync::Mutex<String>>,
-    questions: Arc<std::sync::Mutex<String>>,
+    forms: Arc<std::sync::Mutex<String>>,
     settings: Arc<std::sync::Mutex<String>>,
     console_login: opencode_client::auth::ConsoleLogin,
 ) -> Result<StreamEnd, String> {
@@ -353,7 +354,7 @@ async fn run_stream_adapter(
     run_stream(
         client, dispatcher, worker_pending, worker_prompts, status, sessions,
         commands, current_session, compacting, nav, todos, models, sounds, voice, tools,
-        permissions, questions, settings, console_login,
+        permissions, forms, settings, console_login,
     )
     .await
 }
@@ -599,7 +600,7 @@ async fn run_stream<A: api::OpenCodeApi>(
     voice: Arc<voice::VoiceState>,
     tools: Arc<std::sync::Mutex<String>>,
     permissions: Arc<std::sync::Mutex<String>>,
-    questions: Arc<std::sync::Mutex<String>>,
+    forms: Arc<std::sync::Mutex<String>>,
     settings: Arc<std::sync::Mutex<String>>,
     console_login: opencode_client::auth::ConsoleLogin,
 ) -> Result<StreamEnd, String> {
@@ -692,6 +693,10 @@ async fn run_stream<A: api::OpenCodeApi>(
     refresh_sounds(&sounds);
     // Resume the last session on startup — the chat shows its history.
     resume_last_session(&client, &mut current_session, &current_session_shared, &worker_pending, &todos, &dispatcher, &sessions).await;
+    // The server may already be waiting for an answer (the client started
+    // late, or the `form.created` frame was missed): ask for the pending
+    // forms once, up front.
+    refresh_forms(&client, &dispatcher, &forms, current_session.as_deref()).await;
 
     // Main loop: listen to SSE and poll the bridge for new prompts in parallel.
     loop {
@@ -746,6 +751,15 @@ async fn run_stream<A: api::OpenCodeApi>(
                             };
                             let mut st = dispatcher.lock().await;
                             let _ = event::dispatcher::dispatch_v2(&env, &mut st, &mut stream);
+                        }
+                        // A form arrived (or was settled): hand the new queue
+                        // to QML right away — waiting for the 1 s tick would
+                        // delay the form dialog by a whole tick.
+                        if matches!(
+                            env.kind.as_str(),
+                            v2keys::FORM_CREATED | v2keys::FORM_REPLIED | v2keys::FORM_CANCELLED
+                        ) {
+                            refresh_forms_json(&dispatcher, &forms).await;
                         }
                         // The server compacted the shown session: reload its
                         // history so the summary and the "Context compacted"
@@ -1025,30 +1039,32 @@ async fn run_stream<A: api::OpenCodeApi>(
                                 Err(e) => log::error!("answer_permission: {e}"),
                             }
                         }
-                        Cmd::Question { id, answers, reject } => {
-                            if id.is_empty() {
+                        Cmd::Form { session, id, answer } => {
+                            if session.is_empty() || id.is_empty() {
                                 continue;
                             }
-                            let result = if *reject {
-                                client.reject_question(id).await
-                            } else {
-                                client.answer_question(id, answers.clone()).await
+                            // No answer → the user dismissed the form: cancel it.
+                            let result = match answer {
+                                Some(a) => client.reply_form(session, id, a.clone()).await,
+                                None => client.cancel_form(session, id, None).await,
                             };
                             match result {
                                 Ok(accepted) => {
                                     if accepted {
-                                        log::info!("question {id} answered");
+                                        log::info!("form {session}/{id} settled");
                                     } else {
-                                        log::warn!("question {id}: сервер не принял ответ");
+                                        log::warn!("form {session}/{id}: сервер не принял ответ");
                                     }
                                     // Drop it from the queue right away; the
-                                    // question.replied/rejected event also does this.
-                                    let mut st = dispatcher.lock().await;
-                                    st.questions.pop(id);
-                                    drop(st);
-                                    refresh_questions_json(&dispatcher, &questions).await;
+                                    // `form.replied`/`form.cancelled` event does
+                                    // the same.
+                                    {
+                                        let mut st = dispatcher.lock().await;
+                                        st.forms.pop(id);
+                                    }
+                                    refresh_forms_json(&dispatcher, &forms).await;
                                 }
-                                Err(e) => log::error!("question {id}: {e}"),
+                                Err(e) => log::error!("form {session}/{id}: {e}"),
                             }
                         }
                         Cmd::Summarize { id } => {
@@ -1435,13 +1451,16 @@ async fn run_stream<A: api::OpenCodeApi>(
                     if let Some(sid) = current_session.clone() {
                         refresh_todo(&client, &sid, &todos).await;
                     }
+                    // Reconcile the form queue with the server (the SSE event is
+                    // the fast path; this poll is the safety net).
+                    refresh_forms(&client, &dispatcher, &forms, current_session.as_deref()).await;
                 }
 
                 // Every ~1 second — snapshot of tools and permission requests for QML.
                 if ticks % 5 == 0 {
                     refresh_tools_json(&dispatcher, &tools).await;
                     refresh_permissions_json(&dispatcher, &permissions).await;
-                    refresh_questions_json(&dispatcher, &questions).await;
+                    refresh_forms_json(&dispatcher, &forms).await;
                 }
             }
         }
@@ -2157,42 +2176,67 @@ async fn refresh_permissions_json(
     }
 }
 
-/// Snapshot of pending questions from the model for the dialog.
-async fn refresh_questions_json(
+/// Snapshot of the pending forms (opencode v2) for the form dialog.
+///
+/// The forms go to QML in the server's own shape (`Form.Info`), so the QML
+/// side reads the field list as it arrived (no re-mapping, no lost fields).
+async fn refresh_forms_json(
     dispatcher: &event::dispatcher::SharedState,
-    questions: &Arc<std::sync::Mutex<String>>,
+    forms: &Arc<std::sync::Mutex<String>>,
 ) {
     let st = dispatcher.lock().await;
-    let pending = &st.questions.pending;
-    let arr: Vec<serde_json::Value> = pending
+    let arr: Vec<serde_json::Value> = st
+        .forms
+        .pending
         .iter()
-        .map(|q| {
-            serde_json::json!({
-                "id": q.id,
-                "sessionID": q.sessionID,
-                "questions": q
-                    .questions
-                    .iter()
-                    .map(|qi| {
-                        serde_json::json!({
-                            "header": qi.header,
-                            "question": qi.question,
-                            "multiple": qi.multiple.unwrap_or(false),
-                            "custom": qi.custom.unwrap_or(true),
-                            "options": qi.options.iter().map(|o| serde_json::json!({
-                                "label": o.label,
-                                "description": o.description,
-                            })).collect::<Vec<_>>(),
-                        })
-                    })
-                    .collect::<Vec<_>>(),
-            })
-        })
+        .filter_map(|f| serde_json::to_value(f).ok())
         .collect();
     drop(st);
-    let qj = serde_json::Value::Array(arr).to_string();
-    if let Ok(mut g) = questions.lock() {
-        *g = qj;
+    let fj = serde_json::Value::Array(arr).to_string();
+    if let Ok(mut g) = forms.lock() {
+        *g = fj;
     }
+}
+
+/// Reconcile the form queue with the server.
+///
+/// The SSE `form.created` event is the fast path; this poll is the safety
+/// net (a form created while the client was offline, or a form settled
+/// elsewhere). The server's list is authoritative: the queue is replaced with
+/// it, the current session's form first.
+async fn refresh_forms(
+    client: &impl api::OpenCodeApi,
+    dispatcher: &event::dispatcher::SharedState,
+    forms: &Arc<std::sync::Mutex<String>>,
+    current_session: Option<&str>,
+) {
+    let mut list = match client.list_forms().await {
+        Ok(Some(l)) => l,
+        Ok(None) => return,
+        Err(e) => {
+            log::warn!("list_forms: {e}");
+            // A server without the global route: ask the current session.
+            let sid = match current_session {
+                Some(s) => s,
+                None => return,
+            };
+            match client.list_session_forms(sid).await {
+                Ok(Some(l)) => l,
+                _ => return,
+            }
+        }
+    };
+    // The form of the session the user is looking at comes first.
+    if let Some(sid) = current_session {
+        if let Some(idx) = list.iter().position(|f| f.session_id == sid) {
+            let f = list.remove(idx);
+            list.insert(0, f);
+        }
+    }
+    {
+        let mut st = dispatcher.lock().await;
+        st.forms.replace(list);
+    }
+    refresh_forms_json(dispatcher, forms).await;
 }
 

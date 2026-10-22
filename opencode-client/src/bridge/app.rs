@@ -76,9 +76,9 @@ pub struct AppBridge {
     /// Queue of permission requests for the dialog (JSON), written by the worker.
     #[allow(dead_code)]
     permissions_shared: Arc<Mutex<String>>,
-    /// Pending model questions for the dialog (JSON), written by the worker.
+    /// Pending forms from the model (JSON), written by the worker.
     #[allow(dead_code)]
-    questions_shared: Arc<Mutex<String>>,
+    forms_shared: Arc<Mutex<String>>,
     /// JSON settings status (directory handling, etc.), written by the worker/backend.
     #[allow(dead_code)]
     settings_shared: Arc<Mutex<String>>,
@@ -301,26 +301,40 @@ pub struct AppBridge {
         let v = self.permissions_shared.lock().map(|s| s.clone()).unwrap_or_default();
         QString::from(v)
     }),
-    /// QML: pending questions from the model as JSON (read-only).
-    questions_json: qt_method!(fn questions_json(&self) -> QString {
-        let v = self.questions_shared.lock().map(|s| s.clone()).unwrap_or_default();
+    /// QML: pending forms from the model as JSON (read-only).
+    ///
+    /// The list holds the forms the server still waits an answer for (the
+    /// worker reconciles it with the server on every poll), each one in the
+    /// server's own shape: `{id, sessionID, title, fields:[…]}`.
+    forms_json: qt_method!(fn forms_json(&self) -> QString {
+        let v = self.forms_shared.lock().map(|s| s.clone()).unwrap_or_default();
         QString::from(v)
     }),
-    /// QML: answer a question (`id` = requestID). `answers` is JSON
-    /// `[[label,…],…]` in question order; empty string means "reject".
-    answer_question: qt_method!(fn answer_question(&self, id: QString, answers: QString) {
+
+    /// QML: answer a form. `session` is the session the form belongs to (the
+    /// v2 route is session-scoped), `id` the form id and `answer` the JSON
+    /// object `{fieldKey: value}`. An empty `answer` cancels the form.
+    answer_form: qt_method!(fn answer_form(&self, session: QString, id: QString, answer: QString) {
+        let session = session.to_string();
         let id = id.to_string();
-        let answers = answers.to_string();
-        log::info!("QML answer_question {id:?}");
-        if id.is_empty() {
+        let answer = answer.to_string();
+        log::info!("QML answer_form {session:?}/{id:?}");
+        if session.is_empty() || id.is_empty() {
             return;
         }
-        if answers.is_empty() {
-            self.push_command(Cmd::Question { id, answers: Vec::new(), reject: true }.to_value());
+        // An empty answer means "cancel" — the user dismissed the form.
+        let parsed = if answer.trim().is_empty() {
+            None
         } else {
-            let parsed: Vec<Vec<String>> = serde_json::from_str(&answers).unwrap_or_default();
-            self.push_command(Cmd::Question { id, answers: parsed, reject: false }.to_value());
-        }
+            match serde_json::from_str::<serde_json::Value>(&answer) {
+                Ok(v) => Some(v),
+                Err(e) => {
+                    log::warn!("QML answer_form: неверный JSON ответа: {e}");
+                    return;
+                }
+            }
+        };
+        self.push_command(Cmd::Form { session, id, answer: parsed }.to_value());
     }),
     /// QML: app settings as JSON `{"workdir":"...","..."}`.
     settings_json: qt_method!(fn settings_json(&self) -> QString {
@@ -559,9 +573,9 @@ impl AppBridge {
         self.permissions_shared.clone()
     }
 
-    /// Question queue handle for the worker.
-    pub fn questions_handle(&self) -> Arc<Mutex<String>> {
-        self.questions_shared.clone()
+    /// Form queue handle for the worker.
+    pub fn forms_handle(&self) -> Arc<Mutex<String>> {
+        self.forms_shared.clone()
     }
 
     /// Settings handle for the worker.

@@ -8,14 +8,13 @@ use crate::markers::{
     proto_live_line, ANSWER_LIVE_TAG, THINK_LIVE_TAG,
 };
 use crate::state::permission::PermissionQueue;
-use crate::state::question::QuestionQueue;
+use crate::state::form::FormQueue;
 use crate::state::session::SessionFsm;
 use crate::state::tool::ToolStore;
 use crate::types::permission::Permission;
 use crate::types::tool::ToolState;
 use crate::types::v2::EventEnvelope;
 use crate::types::v2::keys as k;
-use crate::types::QuestionRequest;
 
 /// Minimum interval between two live pushes (reasoning or answer) — throttles a
 /// long model turn so the QML queue is not flooded with tiny chunks. The final
@@ -420,35 +419,25 @@ pub fn dispatch_v2(
             }
             Err(e) => from_data_error(env, &e),
         },
-        // ── questions (legacy, still emitted) ─────────────────────────
-        k::QUESTION_ASKED => match from_data::<v2::QuestionAskedData>(env) {
+        // ── forms (opencode v2 replaces the v1 question model) ───────
+        //
+        // `form.created` carries the whole form (`{form: Form.Info}`), the
+        // settled events carry only the form id. The queue is the UI's source
+        // of truth — the worker snapshots it into the shared buffer for QML.
+        k::FORM_CREATED => match from_data::<v2::FormCreatedData>(env) {
             Ok(d) => {
-                state.questions.push(QuestionRequest {
-                    id: d.id,
-                    sessionID: d.session_id,
-                    questions: d.questions,
-                    tool: d.tool,
-                });
+                state.forms.push(d.form);
                 true
             }
             Err(e) => from_data_error(env, &e),
         },
-        k::QUESTION_REPLIED | k::QUESTION_REJECTED => {
-            match from_data::<v2::QuestionResolvedData>(env) {
-                Ok(d) => {
-                    state.questions.pop(&d.requestID);
-                    true
-                }
-                Err(e) => from_data_error(env, &e),
+        k::FORM_REPLIED | k::FORM_CANCELLED => match from_data::<v2::FormResolvedData>(env) {
+            Ok(d) => {
+                state.forms.pop(&d.id);
+                true
             }
-        }
-        // ── forms (replace questions) ─────────────────────────────────
-        k::FORM_CREATED => {
-            // The form panel is step 6 work; recognised here so the envelope is
-            // not reported as an unknown type.
-            false
-        }
-        k::FORM_REPLIED | k::FORM_CANCELLED => false,
+            Err(e) => from_data_error(env, &e),
+        },
         // ── notifications we do not render ────────────────────────────
         k::SERVER_CONNECTED => false,
         // Everything else is a v2 event with no UI handling. Recognised types
@@ -969,9 +958,8 @@ pub const RECOGNISED_V2: &[&str] = &[
     k::PERSISTENT_PTY_ADDED,
     k::PERSISTENT_PTY_REMOVED,
     // Permissions / forms / server
-    // NOTE: v1 `question.*` arms still exist in `dispatch_v2` for protocol
-    // compatibility, but questions are NOT in the 2.0.32 event registry (v2
-    // uses forms), so they are intentionally absent from this list.
+    // NOTE: the v1 question model (`question.asked` & co) is NOT in the 2.0.32
+    // event registry — opencode v2 asks with forms — so it is gone entirely.
     k::PERMISSION_ASKED,
     k::PERMISSION_REPLIED,
     k::PERMISSION_REJECTED,
@@ -1099,7 +1087,7 @@ pub struct DispatcherState {
     pub session_models: std::collections::HashMap<String, (String, String)>,
     pub tools: ToolStore,
     pub permissions: PermissionQueue,
-    pub questions: QuestionQueue,
+    pub forms: FormQueue,
 }
 
 pub type SharedState = Arc<Mutex<DispatcherState>>;

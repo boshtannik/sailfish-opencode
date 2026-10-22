@@ -20,6 +20,7 @@ use futures_util::Stream;
 use reqwest::Client;
 
 use crate::types::event::PermissionReplyKind;
+use crate::types::v2::form::FormInfo;
 use crate::types::v2::EventEnvelope;
 use crate::types::v2::keys as k;
 
@@ -82,6 +83,19 @@ impl V2Adapter {
         let url = format!("{}/api/model", self.base);
         let resp = self
             .authed(self.http.get(&url))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        if !resp.status().is_success() {
+            return Err(format!("HTTP {}", resp.status()));
+        }
+        resp.json().await.map_err(|e| e.to_string())
+    }
+
+    /// GET a JSON endpoint (the envelope is unwrapped by the caller).
+    async fn get_json(&self, url: &str) -> Result<serde_json::Value, String> {
+        let resp = self
+            .authed(self.http.get(url))
             .send()
             .await
             .map_err(|e| e.to_string())?;
@@ -513,25 +527,83 @@ impl OpenCodeApi for V2Adapter {
         }
     }
 
-    /// Forms replace questions in v2 (see `vault/Разведка-v2.md` §5). The form
-    /// model is step 4/6 work; until then answering is unimplemented.
-    fn answer_question(
+    /// POST /api/session/{sessionID}/form/{formID}/reply `{answer: {…}}` → 204.
+    ///
+    /// The route is session-scoped in opencode 2.0.32 (the form id alone is not
+    /// enough): `GET /api/session/{sessionID}/form/{formID}/reply`.
+    fn reply_form(
         &self,
-        _request_id: &str,
-        _answers: Vec<Vec<String>>,
+        session_id: &str,
+        form_id: &str,
+        answer: serde_json::Value,
     ) -> impl Future<Output = Result<bool, String>> + Send {
         async move {
-            Err("questions are replaced by forms in opencode v2 — not implemented yet".to_string())
+            let url = format!(
+                "{}/api/session/{}/form/{}/reply",
+                self.base, session_id, form_id
+            );
+            let body = serde_json::json!({ k::ANSWER: answer });
+            let resp = self
+                .authed(self.http.post(&url).json(&body))
+                .send()
+                .await
+                .map_err(|e| e.to_string())?;
+            if resp.status().is_success() {
+                Ok(true)
+            } else {
+                Err(format!("HTTP {}", resp.status()))
+            }
         }
     }
 
-    /// See `answer_question`.
-    fn reject_question(
+    /// DELETE /api/session/{sessionID}/form/{formID}[?message=…] → 204.
+    fn cancel_form(
         &self,
-        _request_id: &str,
+        session_id: &str,
+        form_id: &str,
+        message: Option<&str>,
     ) -> impl Future<Output = Result<bool, String>> + Send {
         async move {
-            Err("questions are replaced by forms in opencode v2 — not implemented yet".to_string())
+            let mut url = format!("{}/api/session/{}/form/{}", self.base, session_id, form_id);
+            if let Some(m) = message {
+                url.push_str(&format!("?message={}", urlencode(m)));
+            }
+            let resp = self
+                .authed(self.http.delete(&url))
+                .send()
+                .await
+                .map_err(|e| e.to_string())?;
+            if resp.status().is_success() {
+                Ok(true)
+            } else {
+                Err(format!("HTTP {}", resp.status()))
+            }
+        }
+    }
+
+    /// GET /api/form → `{location, data:[Form.Info]}` — the pending forms of
+    /// the server's location (all sessions).
+    fn list_forms(&self) -> impl Future<Output = Result<Option<Vec<FormInfo>>, String>> + Send {
+        async move {
+            let url = format!("{}/api/form", self.base);
+            match self.get_json(&url).await {
+                Ok(v) => Ok(parse_form_list(v)),
+                Err(e) => Err(e),
+            }
+        }
+    }
+
+    /// GET /api/session/{sessionID}/form → `{data:[Form.Info]}`.
+    fn list_session_forms(
+        &self,
+        session_id: &str,
+    ) -> impl Future<Output = Result<Option<Vec<FormInfo>>, String>> + Send {
+        async move {
+            let url = format!("{}/api/session/{}/form", self.base, session_id);
+            match self.get_json(&url).await {
+                Ok(v) => Ok(parse_form_list(v)),
+                Err(e) => Err(e),
+            }
         }
     }
 
@@ -566,6 +638,38 @@ impl OpenCodeApi for V2Adapter {
             sse.stream().await
         }
     }
+}
+
+/// Parse a form list payload (`{data:[Form.Info]}`) into typed forms.
+///
+/// A malformed entry is skipped: one bad form must not hide the others.
+/// `None` means the payload was not a list at all (the caller keeps the queue
+/// as it is).
+fn parse_form_list(v: serde_json::Value) -> Option<Vec<FormInfo>> {
+    let data = V2Adapter::unwrap_data(v);
+    let arr = data.as_array()?;
+    let mut out = Vec::with_capacity(arr.len());
+    for item in arr {
+        match serde_json::from_value::<FormInfo>(item.clone()) {
+            Ok(f) => out.push(f),
+            Err(e) => log::warn!("form: не удалось разобрать форму: {e}"),
+        }
+    }
+    Some(out)
+}
+
+/// Percent-encode a query-parameter value (the form cancel reason).
+fn urlencode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.as_bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(*b as char)
+            }
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
 }
 
 /// Build the v1-shaped provider catalog (`{providers:[{id, name, models}]}`)

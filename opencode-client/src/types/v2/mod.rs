@@ -13,7 +13,7 @@ pub mod permission;
 pub mod session;
 
 pub use event::EventEnvelope;
-pub use form::{Field, FormInfo, FormState};
+pub use form::{Choice, Condition, Field, FormInfo};
 pub use message::{
     AssistantFields, CompactionReason, CompactionStatus, Content, FileAttachment, IdleOutcome,
     MessageBody, MessageInfo, MessageTime, ModelRef, SessionError, ShellStatus, ToolContent,
@@ -130,19 +130,22 @@ mod tests {
         assert!(matches!(p.source, Some(PermissionSource::Tool { .. })));
     }
 
+    /// A form of opencode 2.0.32: the fields are keyed by `key` and labelled
+    /// by `title` (NOT `id`/`label` — that was the v1 question model).
     #[test]
-    fn form_parses_fields_union() {
+    fn form_parses_the_2_0_32_field_union() {
         let f: FormInfo = serde_json::from_value(json!({
             "id": "frm_1", "sessionID": "ses_1", "title": "Ask",
             "fields": [
-                {"type": "string", "id": "a", "label": "A"},
-                {"type": "boolean", "id": "b", "label": "B"}
+                {"type": "string", "key": "a", "title": "A"},
+                {"type": "boolean", "key": "b", "title": "B"}
             ]
         }))
         .expect("form deserialises");
         assert_eq!(f.fields.len(), 2);
-        assert!(matches!(f.fields[0], Field::String { .. }));
-        assert!(matches!(f.fields[1], Field::Boolean { .. }));
+        assert!(f.fields[0].is_text());
+        assert!(f.fields[1].is_boolean());
+        assert_eq!(f.fields[0].key, "a");
     }
 
     /// Strict coverage gate for the v2 event surface.

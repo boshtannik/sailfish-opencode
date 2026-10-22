@@ -57,16 +57,16 @@ pub enum Cmd {
         id: String,
         response: PermissionReplyKind,
     },
-    /// Answer (or reject) a question from the model.
-    Question {
-        /// requestID of the `question.asked` event.
+    /// Answer (or cancel) a form from the model (opencode v2).
+    Form {
+        /// The session the form belongs to — the v2 routes are session-scoped
+        /// (`POST /api/session/{sessionID}/form/{formID}/reply`).
+        session: String,
+        /// The form id (`frm_…`).
         id: String,
-        /// Chosen option labels per question, in question order.
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        answers: Vec<Vec<String>>,
-        /// Reject the request instead of answering.
-        #[serde(default, skip_serializing_if = "is_false")]
-        reject: bool,
+        /// The answer map `{fieldKey: value}`; absent — cancel the form.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        answer: Option<serde_json::Value>,
     },
     /// Set the working directory for opencode serve (cwd).
     SetWorkdir {
@@ -141,10 +141,6 @@ pub enum Cmd {
         id: String,
     },
     VoiceCatalogUpdate,
-}
-
-fn is_false(b: &bool) -> bool {
-    !*b
 }
 
 impl Cmd {

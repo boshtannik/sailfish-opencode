@@ -143,23 +143,3 @@ impl PermissionReplyKind {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct QuestionTool {
-    pub messageID: String,
-    pub callID: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct QuestionOption {
-    pub label: String,
-    pub description: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct QuestionInfo {
-    pub question: String,
-    pub header: String,
-    pub options: Vec<QuestionOption>,
-    pub multiple: Option<bool>,
-    pub custom: Option<bool>,
-}

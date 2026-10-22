@@ -283,12 +283,24 @@ ApplicationWindow {
     // Granting "Allow once": true if the request is really new
     // (so the sound fires only for newly appeared ones).
     property var knownPermissionIds: []
-    // Pending questions from the model (`[{id,sessionID,questions:[…]}]`).
-    property var pendingQuestions: []
-    property var knownQuestionIds: []
-    property bool questionOverlayVisible: false
-    // Per-question answer state for the CURRENT request (`[{selected:[…],custom:""}]`).
-    property var qAnswers: []
+    // Pending forms from the model (`[{id,sessionID,title,fields:[…]}]`).
+    // The worker reconciles the list with the server, so it is the source of
+    // truth: a form is shown while the server still waits for its answer.
+    property var pendingForms: []
+    // The id of the form shown right now (a new id = a new form arrived).
+    property string currentFormId: ""
+    property bool formOverlayVisible: false
+    // The fields of the current form (kept apart from `pendingForms`: the poll
+    // replaces the list every second, and that must not rebuild the form).
+    property var formFieldsCache: []
+    // The answers of the current form: `{fieldKey: value}` — the value is a
+    // string, a number, a boolean or an array of strings (as the server wants).
+    property var formAnswers: ({})
+    // The own answers typed by the user: `{fieldKey: text}` (for the fields
+    // that allow a custom value).
+    property var formCustom: ({})
+    // The last validation error (shown above the buttons).
+    property string formError: ""
     property bool sttModelReady: false
     // opencode working directory (setting). Loaded from bridge.settings_json().
     property string workdir: ""
@@ -885,27 +897,29 @@ ApplicationWindow {
                 console.log("permissions parse error: " + e)
             }
         }
-        bridge.gui_mark("questions")
-        var qj = bridge.questions_json()
-        if (qj !== "" && qj !== undefined) {
+        bridge.gui_mark("forms")
+        var fj = bridge.forms_json()
+        if (fj !== "" && fj !== undefined) {
             try {
-                var qparsed = JSON.parse(qj)
-                app.pendingQuestions = qparsed
-                if (qparsed.length === 0) {
-                    app.questionOverlayVisible = false
+                var fparsed = JSON.parse(fj)
+                app.pendingForms = fparsed
+                if (fparsed.length === 0) {
+                    // The server has no form waiting any more.
+                    app.currentFormId = ""
+                    app.formOverlayVisible = false
                 } else {
-                    // New request (id not seen yet) — signal the user and
-                    // pre-build the answer state for its questions.
-                    var qid = qparsed[0].id
-                    if (app.knownQuestionIds.indexOf(qid) < 0) {
-                        app.knownQuestionIds = app.knownQuestionIds.concat(qid)
-                        app.qAnswers = app.initAnswers(qparsed[0])
-                        app.notifyQuestion()
-                        app.questionOverlayVisible = true
+                    var fid = fparsed[0].id
+                    if (fid !== app.currentFormId) {
+                        // A new form — build the answer state and show it.
+                        app.currentFormId = fid
+                        app.initFormAnswers(fparsed[0])
+                        app.formFieldsCache = app.formFieldList(fparsed[0])
+                        app.notifyForm()
+                        app.formOverlayVisible = true
                     }
                 }
             } catch (e) {
-                console.log("questions parse error: " + e)
+                console.log("forms parse error: " + e)
             }
         }
         bridge.gui_mark("settings")
@@ -1315,7 +1329,7 @@ ApplicationWindow {
         }
     }
 
-    function notifyQuestion() {
+    function notifyForm() {
         if (!app.soundOnFinish)
             return
         if (Qt.application.state === Qt.ApplicationActive) {
@@ -1340,65 +1354,349 @@ ApplicationWindow {
         app.permissionOverlayVisible = app.pendingPermissions.length > 0
     }
 
-    // ── Model questions ───────────────────────────────────────────────────────
-    // Fresh answer state for a question request: one {selected:[],custom:""} per
-    // question, in order.
-    function initAnswers(req) {
-        var arr = []
-        for (var i = 0; i < req.questions.length; i++)
-            arr.push({ selected: [], custom: "" })
-        return arr
-    }
-    // Toggle an option label for question qi (single choice unless `multiple`).
-    function toggleOption(qi, label) {
-        var a = app.qAnswers
-        if (qi < 0 || qi >= a.length)
-            return
-        var req = app.pendingQuestions[0]
-        var multiple = req && req.questions[qi] && req.questions[qi].multiple === true
-        var sel = a[qi].selected.slice(0)
-        var idx = sel.indexOf(label)
-        if (idx >= 0) {
-            sel.splice(idx, 1)
-        } else if (multiple) {
-            sel.push(label)
-        } else {
-            sel = [label]
+    // ── Model forms (opencode v2) ───────────────────────────────────────────
+    // The fields to show: the hidden ones are skipped (they are answered with
+    // their default). The `when` conditions are checked while rendering.
+    function formFieldList(req) {
+        var out = []
+        var fields = req && req.fields ? req.fields : []
+        for (var i = 0; i < fields.length; i++) {
+            if (fields[i].hidden === true)
+                continue
+            out.push(fields[i])
         }
-        a[qi].selected = sel
-        app.qAnswers = a.slice(0)
+        return out
     }
-    function isSelected(qi, label) {
-        if (qi < 0 || qi >= app.qAnswers.length)
-            return false
-        return app.qAnswers[qi].selected.indexOf(label) >= 0
+    // The field the `when` conditions refer to.
+    function fieldByKey(key) {
+        var fields = app.pendingForms.length > 0 && app.pendingForms[0].fields
+                        ? app.pendingForms[0].fields : []
+        for (var i = 0; i < fields.length; i++) {
+            if (fields[i].key === key)
+                return fields[i]
+        }
+        return undefined
     }
-    function setCustom(qi, text) {
-        var a = app.qAnswers
-        if (qi < 0 || qi >= a.length)
+    // Is the field visible? All the `when` conditions must hold; a field whose
+    // condition refers to an unanswered field stays hidden (as the server does).
+    function fieldActive(field) {
+        if (!field || !field.when || field.when.length === 0)
+            return true
+        for (var i = 0; i < field.when.length; i++) {
+            var c = field.when[i]
+            var ref = app.fieldByKey(c.key)
+            var cur = ref ? app.effectiveAnswer(ref) : undefined
+            if (cur === undefined)
+                return false
+            var eq = cur instanceof Array ? cur.indexOf(c.value) >= 0 : cur === c.value
+            if (c.op === "eq" ? !eq : eq)
+                return false
+        }
+        return true
+    }
+    // The options of a field: a boolean is a Yes/No choice, the others carry
+    // their own options.
+    function fieldOptions(field) {
+        if (!field)
+            return []
+        if (field.type === "boolean")
+            return [{ value: true, label: qsTr("Yes") }, { value: false, label: qsTr("No") }]
+        if (field.options && field.options.length > 0)
+            return field.options
+        return []
+    }
+    // Does the field offer a list of options?
+    function fieldHasOptions(field) {
+        return field.type === "string" || field.type === "multiselect"
+    }
+    // Is the external step confirmed?
+    function fieldAcknowledged(field) {
+        return app.formAnswers[field.key] === true
+    }
+    // Fresh answer state for a form: the defaults of the fields (the hidden
+    // ones included) and nothing else.
+    function initFormAnswers(req) {
+        var answers = {}
+        var custom = {}
+        var fields = req && req.fields ? req.fields : []
+        for (var i = 0; i < fields.length; i++) {
+            var f = fields[i]
+            if (f.type === "external" || f.default === undefined)
+                continue
+            if (f.type === "multiselect" && f.default instanceof Array) {
+                answers[f.key] = f.default.slice(0)
+            } else if (f.type === "string" && f.options && f.options.length > 0
+                       && typeof f.default === "string") {
+                var known = false
+                for (var j = 0; j < f.options.length; j++) {
+                    if (f.options[j].value === f.default) {
+                        known = true
+                        break
+                    }
+                }
+                if (known) {
+                    answers[f.key] = f.default
+                } else {
+                    // A default that is not one of the options is an own answer.
+                    custom[f.key] = f.default
+                }
+            } else {
+                answers[f.key] = f.default
+            }
+        }
+        app.formAnswers = answers
+        app.formCustom = custom
+        app.formError = ""
+    }
+    // The answer of a field as the server wants it (undefined = not answered).
+    function effectiveAnswer(field) {
+        if (!field)
+            return undefined
+        var a = app.formAnswers[field.key]
+        var c = app.formCustom[field.key]
+        if (field.type === "multiselect") {
+            var arr = a instanceof Array ? a.slice(0) : []
+            if (c !== undefined && c !== "" && arr.indexOf(c) < 0)
+                arr.push(c)
+            return arr.length > 0 ? arr : undefined
+        }
+        if (field.type === "string" && field.options && field.options.length > 0) {
+            // The own answer wins over the picked option.
+            if (c !== undefined && c !== "")
+                return c
+            return a === undefined ? undefined : a
+        }
+        if (field.type === "number" || field.type === "integer") {
+            if (a === undefined || a === null || a === "")
+                return undefined
+            var n = Number(a)
+            return isNaN(n) ? "" + a : n
+        }
+        return a
+    }
+    // Toggle an option of a field (a multiselect keeps several values).
+    function toggleOption(field, value) {
+        var answers = app.formAnswers
+        var copy = {}
+        for (var k in answers)
+            copy[k] = answers[k]
+        if (field.type === "multiselect") {
+            var arr = answers[field.key] instanceof Array ? answers[field.key].slice(0) : []
+            var idx = arr.indexOf(value)
+            if (idx >= 0)
+                arr.splice(idx, 1)
+            else
+                arr.push(value)
+            copy[field.key] = arr
+        } else {
+            copy[field.key] = value
+        }
+        app.formAnswers = copy
+        app.formError = ""
+    }
+    function isOptionSelected(field, value) {
+        var a = app.formAnswers[field.key]
+        if (field.type === "multiselect")
+            return a instanceof Array && a.indexOf(value) >= 0
+        return a === value
+    }
+    // The typed value of a text/number field.
+    function setFieldText(field, text) {
+        var answers = app.formAnswers
+        var copy = {}
+        for (var k in answers)
+            copy[k] = answers[k]
+        copy[field.key] = text
+        app.formAnswers = copy
+    }
+    // The own answer typed by the user.
+    function setFieldCustom(field, text) {
+        var custom = app.formCustom
+        var copy = {}
+        for (var k in custom)
+            copy[k] = custom[k]
+        copy[field.key] = text
+        app.formCustom = copy
+    }
+    function fieldTextValue(field) {
+        var a = app.formAnswers[field.key]
+        if (a === undefined || a === null)
+            return ""
+        return "" + a
+    }
+    function fieldCustomValue(field) {
+        var c = app.formCustom[field.key]
+        return c === undefined ? "" : c
+    }
+    // Open the link of an external step (the user confirms it separately).
+    function openFieldUrl(field) {
+        if (!field.url || field.url === "")
             return
-        a[qi].custom = text
-        app.qAnswers = a.slice(0)
+        Qt.openUrlExternally(field.url)
     }
-    // Build answers (in question order) and send them.
-    function submitQuestion() {
-        var req = app.pendingQuestions[0]
+    // Confirm (or unconfirm) an external step.
+    function acknowledgeField(field) {
+        var answers = app.formAnswers
+        var copy = {}
+        for (var k in answers)
+            copy[k] = answers[k]
+        copy[field.key] = answers[field.key] === true ? false : true
+        app.formAnswers = copy
+        app.formError = ""
+    }
+    // Validate one field; returns an error message or an empty string.
+    function fieldError(field, value) {
+        if (field.type === "external")
+            return value === true ? "" : qsTr("Confirm the opened link to continue")
+        if (value === undefined)
+            return field.required === true ? qsTr("Answer required") : ""
+        if (field.required === true
+                && (value === "" || (value instanceof Array && value.length === 0)))
+            return field.type === "multiselect"
+                    ? qsTr("Select at least one option") : qsTr("Answer required")
+        if (field.type === "string") {
+            if (typeof value !== "string")
+                return qsTr("Expected text")
+            if (field.minLength !== undefined && value.length < field.minLength)
+                return qsTr("Must be at least %1 characters").arg(field.minLength)
+            if (field.maxLength !== undefined && value.length > field.maxLength)
+                return qsTr("Must be at most %1 characters").arg(field.maxLength)
+            if (field.pattern !== undefined && field.pattern !== "") {
+                var re = null
+                try {
+                    re = new RegExp(field.pattern)
+                } catch (e) {
+                    re = null
+                }
+                if (re !== null && !re.test(value))
+                    return qsTr("Invalid format")
+            }
+            if (field.format === "email"
+                    && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value))
+                return qsTr("Expected an email address")
+            if (field.format === "uri" && !app.isUrl(value))
+                return qsTr("Expected a URL")
+            if (field.format === "date" && !app.isDate(value))
+                return qsTr("Expected a date (YYYY-MM-DD)")
+            if (field.format === "date-time" && isNaN(Date.parse(value)))
+                return qsTr("Expected a date and time")
+            if (field.options && field.options.length > 0 && field.custom !== true) {
+                var found = false
+                for (var i = 0; i < field.options.length; i++) {
+                    if (field.options[i].value === value) {
+                        found = true
+                        break
+                    }
+                }
+                if (!found)
+                    return qsTr("Select an available option")
+            }
+            return ""
+        }
+        if (field.type === "number" || field.type === "integer") {
+            if (typeof value !== "number" || !isFinite(value))
+                return qsTr("Expected a number")
+            if (field.type === "integer" && Math.floor(value) !== value)
+                return qsTr("Expected an integer")
+            if (typeof field.minimum === "number" && value < field.minimum)
+                return qsTr("Must be at least %1").arg(field.minimum)
+            if (typeof field.maximum === "number" && value > field.maximum)
+                return qsTr("Must be at most %1").arg(field.maximum)
+            return ""
+        }
+        if (field.type === "boolean")
+            return typeof value === "boolean" ? "" : qsTr("Expected yes or no")
+        if (field.type === "multiselect") {
+            if (!(value instanceof Array))
+                return qsTr("Expected selections")
+            if (field.minItems !== undefined && value.length < field.minItems)
+                return qsTr("Select at least %1").arg(field.minItems)
+            if (field.maxItems !== undefined && value.length > field.maxItems)
+                return qsTr("Select at most %1").arg(field.maxItems)
+            if (field.custom !== true && field.options) {
+                for (var j = 0; j < value.length; j++) {
+                    var ok = false
+                    for (var m = 0; m < field.options.length; m++) {
+                        if (field.options[m].value === value[j]) {
+                            ok = true
+                            break
+                        }
+                    }
+                    if (!ok)
+                        return qsTr("Select only available options")
+                }
+            }
+        }
+        return ""
+    }
+    function isUrl(s) {
+        return /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\/.+/.test(s)
+    }
+    function isDate(s) {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(s))
+            return false
+        var d = new Date(s + "T00:00:00.000Z")
+        if (isNaN(d.getTime()))
+            return false
+        return d.toISOString().slice(0, 10) === s
+    }
+    // Check the whole form; returns the first error or an empty string.
+    function validateForm() {
+        var req = app.pendingForms.length > 0 ? app.pendingForms[0] : null
+        if (!req)
+            return qsTr("The form is no longer available")
+        var fields = req.fields || []
+        for (var i = 0; i < fields.length; i++) {
+            var f = fields[i]
+            if (f.hidden === true)
+                continue
+            if (!app.fieldActive(f))
+                continue
+            var e = app.fieldError(f, app.effectiveAnswer(f))
+            if (e !== "")
+                return e
+        }
+        return ""
+    }
+    // Send the answers to the server (`{fieldKey: value}`).
+    function submitForm() {
+        var req = app.pendingForms.length > 0 ? app.pendingForms[0] : null
         if (!req)
             return
-        var answers = []
-        for (var i = 0; i < req.questions.length; i++) {
-            var one = (app.qAnswers[i] ? app.qAnswers[i].selected.slice(0) : [])
-            var c = (app.qAnswers[i] ? "" + app.qAnswers[i].custom : "").trim()
-            if (c !== "")
-                one.push(c)
-            answers.push(one)
+        var err = app.validateForm()
+        if (err !== "") {
+            app.formError = err
+            return
         }
-        bridge.answer_question(req.id, JSON.stringify(answers))
-        app.questionOverlayVisible = false
+        var answer = {}
+        var fields = req.fields || []
+        for (var i = 0; i < fields.length; i++) {
+            var f = fields[i]
+            if (f.hidden === true) {
+                // A hidden field is answered with its default.
+                if (f.default !== undefined)
+                    answer[f.key] = f.default
+                continue
+            }
+            if (!app.fieldActive(f))
+                continue
+            var v = app.effectiveAnswer(f)
+            if (v !== undefined)
+                answer[f.key] = v
+        }
+        bridge.answer_form(req.sessionID, req.id, JSON.stringify(answer))
+        app.formOverlayVisible = false
+        app.formError = ""
     }
-    function rejectQuestion(id) {
-        // Empty answers => reject.
-        bridge.answer_question(id, "")
+    // Dismiss the form (the server cancels it).
+    function cancelForm() {
+        var req = app.pendingForms.length > 0 ? app.pendingForms[0] : null
+        if (!req)
+            return
+        // An empty answer means "cancel".
+        bridge.answer_form(req.sessionID, req.id, "")
+        app.formOverlayVisible = false
+        app.formError = ""
     }
 
     initialPage: Component {
@@ -1552,21 +1850,20 @@ ApplicationWindow {
                 }
             }
 
-            // Model question overlay (higher z than the permission card).
+            // Model form overlay (higher z than the permission card).
             Rectangle {
-                id: questionOverlay
-                visible: app.questionOverlayVisible && app.pendingQuestions.length > 0
-                         && app.pendingQuestions[0] !== undefined
-                         && app.pendingQuestions[0].questions !== undefined
+                id: formOverlay
+                visible: app.formOverlayVisible && app.pendingForms.length > 0
+                         && app.pendingForms[0] !== undefined
                 anchors.fill: parent
                 color: Qt.rgba(0, 0, 0, 0.7)
                 z: 25
 
                 Rectangle {
-                    id: questionCard
+                    id: formCard
                     anchors.centerIn: parent
                     width: parent.width - 2 * Theme.horizontalPageMargin
-                    height: Math.min(questionColumn.height + 2 * Theme.paddingMedium,
+                    height: Math.min(formColumn.height + 2 * Theme.paddingMedium,
                                      parent.height - 2 * Theme.paddingLarge)
                     color: Qt.rgba(0.05, 0.05, 0.08, 0.97)
                     radius: Theme.paddingMedium
@@ -1577,17 +1874,21 @@ ApplicationWindow {
                         anchors.fill: parent
                         anchors.margins: Theme.paddingMedium
                         contentWidth: width
-                        contentHeight: questionColumn.height
+                        contentHeight: formColumn.height
                         flickableDirection: Flickable.VerticalFlick
 
                         Column {
-                            id: questionColumn
+                            id: formColumn
                             width: parent.width
                             spacing: Theme.paddingMedium
 
                             Label {
                                 width: parent.width
-                                text: qsTr("Model asks a question")
+                                text: app.pendingForms.length > 0
+                                      && app.pendingForms[0].title !== undefined
+                                      && app.pendingForms[0].title !== ""
+                                      ? app.pendingForms[0].title
+                                      : qsTr("Model asks a question")
                                 color: Theme.primaryColor
                                 font.pixelSize: Theme.fontSizeLarge
                                 font.bold: true
@@ -1595,17 +1896,24 @@ ApplicationWindow {
                             }
 
                             Repeater {
-                                model: app.pendingQuestions[0].questions
+                                model: app.formFieldsCache
 
-                                Column {
-                                    property int qIndex: index
+                                delegate: Column {
+                                    id: fieldCol
+                                    property var field: modelData
                                     width: parent.width
                                     spacing: Theme.paddingSmall
+                                    // A field whose `when` condition does not
+                                    // hold is hidden (and not answered).
+                                    visible: app.fieldActive(fieldCol.field)
 
                                     Label {
                                         width: parent.width
                                         visible: text !== ""
-                                        text: modelData.header
+                                        text: (fieldCol.field.title !== undefined
+                                               && fieldCol.field.title !== ""
+                                               ? fieldCol.field.title : fieldCol.field.key)
+                                              + (fieldCol.field.required === true ? " *" : "")
                                         color: Theme.primaryColor
                                         font.pixelSize: Theme.fontSizeMedium
                                         font.bold: true
@@ -1613,17 +1921,24 @@ ApplicationWindow {
                                     }
                                     Label {
                                         width: parent.width
-                                        text: modelData.question
-                                        color: Theme.highlightColor
+                                        visible: fieldCol.field.description !== undefined
+                                                 && fieldCol.field.description !== ""
+                                        text: fieldCol.field.description !== undefined
+                                              ? fieldCol.field.description : ""
+                                        font.pixelSize: Theme.fontSizeSmall
+                                        color: Theme.secondaryColor
                                         wrapMode: Text.Wrap
                                     }
+
+                                    // The options of the field (a boolean is a
+                                    // Yes/No choice, a multiselect keeps several).
                                     Repeater {
-                                        model: modelData.options
+                                        model: app.fieldOptions(fieldCol.field)
 
                                         BackgroundItem {
                                             width: parent.width
                                             height: optCol.height + Theme.paddingSmall
-                                            onClicked: app.toggleOption(qIndex, modelData.label)
+                                            onClicked: app.toggleOption(fieldCol.field, modelData.value)
 
                                             Column {
                                                 id: optCol
@@ -1631,18 +1946,20 @@ ApplicationWindow {
                                                 anchors.verticalCenter: parent.verticalCenter
                                                 Label {
                                                     width: parent.width
-                                                    text: (app.isSelected(qIndex, modelData.label)
+                                                    text: (app.isOptionSelected(fieldCol.field, modelData.value)
                                                            ? "\u2713  " : "") + modelData.label
-                                                    color: app.isSelected(qIndex, modelData.label)
+                                                    color: app.isOptionSelected(fieldCol.field, modelData.value)
                                                            ? Theme.primaryColor
                                                            : Theme.highlightColor
-                                                    font.bold: app.isSelected(qIndex, modelData.label)
+                                                    font.bold: app.isOptionSelected(fieldCol.field, modelData.value)
                                                     wrapMode: Text.Wrap
                                                 }
                                                 Label {
                                                     width: parent.width
-                                                    visible: modelData.description !== ""
-                                                    text: modelData.description
+                                                    visible: modelData.description !== undefined
+                                                             && modelData.description !== ""
+                                                    text: modelData.description !== undefined
+                                                          ? modelData.description : ""
                                                     font.pixelSize: Theme.fontSizeSmall
                                                     color: Theme.secondaryColor
                                                     wrapMode: Text.Wrap
@@ -1650,28 +1967,102 @@ ApplicationWindow {
                                             }
                                         }
                                     }
+
+                                    // The value of a text/number field.
                                     TextField {
                                         width: parent.width
-                                        visible: modelData.custom === true
-                                        placeholderText: qsTr("Your answer…")
-                                        onTextChanged: app.setCustom(qIndex, text)
+                                        visible: fieldCol.field.type === "string"
+                                                 && !(fieldCol.field.options
+                                                      && fieldCol.field.options.length > 0)
+                                                 || fieldCol.field.type === "number"
+                                                 || fieldCol.field.type === "integer"
+                                        placeholderText: fieldCol.field.placeholder !== undefined
+                                                         && fieldCol.field.placeholder !== ""
+                                            ? fieldCol.field.placeholder : qsTr("Your answer…")
+                                        inputMethodHints: fieldCol.field.type === "number"
+                                            || fieldCol.field.type === "integer"
+                                            ? Qt.ImhFormattedNumbers : Qt.ImhNoPredictiveText
+                                        Component.onCompleted: text = app.fieldTextValue(fieldCol.field)
+                                        onTextChanged: app.setFieldText(fieldCol.field, text)
+                                    }
+
+                                    // The own answer (the field allows a custom value).
+                                    TextField {
+                                        width: parent.width
+                                        visible: fieldCol.field.custom === true
+                                                 && (fieldCol.field.type === "string"
+                                                     || fieldCol.field.type === "multiselect")
+                                        placeholderText: qsTr("Your own answer…")
+                                        Component.onCompleted: text = app.fieldCustomValue(fieldCol.field)
+                                        onTextChanged: app.setFieldCustom(fieldCol.field, text)
+                                    }
+
+                                    // An external step: open the link, then confirm it.
+                                    Column {
+                                        width: parent.width
+                                        spacing: Theme.paddingSmall
+                                        visible: fieldCol.field.type === "external"
+
+                                        BackgroundItem {
+                                            width: parent.width
+                                            height: Theme.itemSizeSmall
+                                            onClicked: app.openFieldUrl(fieldCol.field)
+
+                                            Label {
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                anchors.left: parent.left
+                                                anchors.right: parent.right
+                                                anchors.leftMargin: Theme.horizontalPageMargin
+                                                anchors.rightMargin: Theme.horizontalPageMargin
+                                                text: fieldCol.field.url !== undefined
+                                                      ? fieldCol.field.url : ""
+                                                color: Theme.highlightColor
+                                                elide: Text.ElideRight
+                                            }
+                                        }
+                                        BackgroundItem {
+                                            width: parent.width
+                                            height: Theme.itemSizeSmall
+                                            onClicked: app.acknowledgeField(fieldCol.field)
+
+                                            Label {
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                anchors.left: parent.left
+                                                anchors.right: parent.right
+                                                anchors.leftMargin: Theme.horizontalPageMargin
+                                                anchors.rightMargin: Theme.horizontalPageMargin
+                                                text: (app.fieldAcknowledged(fieldCol.field)
+                                                       ? "\u2713  " : "")
+                                                      + qsTr("I have completed this step")
+                                                color: app.fieldAcknowledged(fieldCol.field)
+                                                       ? Theme.primaryColor
+                                                       : Theme.highlightColor
+                                                font.bold: app.fieldAcknowledged(fieldCol.field)
+                                                elide: Text.ElideRight
+                                            }
+                                        }
                                     }
                                 }
+                            }
+
+                            Label {
+                                width: parent.width
+                                visible: app.formError !== ""
+                                text: app.formError
+                                color: "#f44336"
+                                font.pixelSize: Theme.fontSizeSmall
+                                wrapMode: Text.Wrap
                             }
 
                             Button {
                                 width: parent.width
                                 text: qsTr("Answer")
-                                onClicked: app.submitQuestion()
+                                onClicked: app.submitForm()
                             }
                             Button {
                                 width: parent.width
-                                text: qsTr("Reject")
-                                onClicked: {
-                                    if (app.pendingQuestions.length > 0)
-                                        app.rejectQuestion(app.pendingQuestions[0].id)
-                                    app.questionOverlayVisible = false
-                                }
+                                text: qsTr("Cancel")
+                                onClicked: app.cancelForm()
                             }
                         }
                     }

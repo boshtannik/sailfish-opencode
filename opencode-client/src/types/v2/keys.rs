@@ -57,6 +57,20 @@ pub const DECISION: &str = "decision";
 pub const BEFORE: &str = "before";
 pub const REASON: &str = "reason";
 
+// ── form field names (`Form.*` / the `{answer:{…}}` reply body) ───────────
+pub const KEY: &str = "key";
+pub const FIELDS: &str = "fields";
+pub const OPTIONS: &str = "options";
+pub const VALUE: &str = "value";
+pub const LABEL: &str = "label";
+pub const DESCRIPTION: &str = "description";
+pub const REQUIRED: &str = "required";
+pub const DEFAULT: &str = "default";
+pub const ANSWER: &str = "answer";
+pub const WHEN: &str = "when";
+pub const OP: &str = "op";
+pub const URL: &str = "url";
+
 // ── permission-reply decision values (`{decision}` body) ─────────────────
 pub const DECISION_ONCE: &str = "once";
 pub const DECISION_ALWAYS: &str = "always";
@@ -136,18 +150,26 @@ pub const WEBSEARCH_UPDATED: &str = "websearch.updated";
 pub const REFERENCE_UPDATED: &str = "reference.updated";
 pub const PLUGIN_UPDATED: &str = "plugin.updated";
 
-// ── Permissions / questions / forms / server ─────────────────────────────
+// ── Permissions / forms / server ─────────────────────────────────────────
 pub const PERMISSION_ASKED: &str = "permission.asked";
 pub const PERMISSION_REPLIED: &str = "permission.replied";
 pub const PERMISSION_REJECTED: &str = "permission.rejected";
-// v1 questions are legacy (v2 uses forms) but the server still emits them.
-pub const QUESTION_ASKED: &str = "question.asked";
-pub const QUESTION_REPLIED: &str = "question.replied";
-pub const QUESTION_REJECTED: &str = "question.rejected";
 pub const FORM_CREATED: &str = "form.created";
 pub const FORM_REPLIED: &str = "form.replied";
 pub const FORM_CANCELLED: &str = "form.cancelled";
 pub const SERVER_CONNECTED: &str = "server.connected";
+
+// ── Form field `type` discriminators (`Form.Field.type`) ─────────────────
+pub const FIELD_STRING: &str = "string";
+pub const FIELD_NUMBER: &str = "number";
+pub const FIELD_INTEGER: &str = "integer";
+pub const FIELD_BOOLEAN: &str = "boolean";
+pub const FIELD_MULTISELECT: &str = "multiselect";
+pub const FIELD_EXTERNAL: &str = "external";
+
+// ── Form field visibility condition ops (`Form.When.op`) ─────────────────
+pub const COND_EQ: &str = "eq";
+pub const COND_NEQ: &str = "neq";
 
 // ── Full 2.0.32 registry: events we consciously recognise (handled by an arm
 // or ignored on purpose). The completeness test
