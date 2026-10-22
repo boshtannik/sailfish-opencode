@@ -19,8 +19,8 @@ use std::future::Future;
 use futures_util::Stream;
 use reqwest::Client;
 
-use crate::types::event::PermissionReplyKind;
 use crate::types::v2::form::FormInfo;
+use crate::types::v2::permission::{PermissionReplyKind, PermissionRequest, SavedPermission};
 use crate::types::v2::EventEnvelope;
 use crate::types::v2::keys as k;
 
@@ -496,12 +496,17 @@ impl OpenCodeApi for V2Adapter {
         }
     }
 
-    /// POST /api/session/{id}/permission/{reqID}/reply `{decision}` → 204.
+    /// POST /api/session/{id}/permission/{reqID}/reply `{decision, message?}`
+    /// → 204.
+    ///
+    /// `message` is the optional reason the server shows to the model (why a
+    /// request was rejected).
     fn answer_permission(
         &self,
         session_id: &str,
         permission_id: &str,
         response: &PermissionReplyKind,
+        message: Option<&str>,
     ) -> impl Future<Output = Result<bool, String>> + Send {
         async move {
             let url = format!(
@@ -513,9 +518,71 @@ impl OpenCodeApi for V2Adapter {
                 PermissionReplyKind::Always => k::DECISION_ALWAYS,
                 PermissionReplyKind::Reject => k::DECISION_REJECT,
             };
-            let body = serde_json::json!({ k::DECISION: decision });
+            let mut body = serde_json::json!({ k::DECISION: decision });
+            if let Some(m) = message {
+                if !m.is_empty() {
+                    body[k::MESSAGE] = serde_json::Value::String(m.to_string());
+                }
+            }
             let resp = self
                 .authed(self.http.post(&url).json(&body))
+                .send()
+                .await
+                .map_err(|e| e.to_string())?;
+            if resp.status().is_success() {
+                Ok(true)
+            } else {
+                Err(format!("HTTP {}", resp.status()))
+            }
+        }
+    }
+
+    /// GET /api/permission/request → `{location, data:[Permission.Request]}` —
+    /// the pending permission requests of the server's location (all sessions).
+    fn list_permissions(&self) -> impl Future<Output = Result<Option<Vec<PermissionRequest>>, String>> + Send {
+        async move {
+            let url = format!("{}/api/permission/request", self.base);
+            match self.get_json(&url).await {
+                Ok(v) => Ok(parse_permission_list(v)),
+                Err(e) => Err(e),
+            }
+        }
+    }
+
+    /// GET /api/session/{sessionID}/permission → `{data:[Permission.Request]}`.
+    fn list_session_permissions(
+        &self,
+        session_id: &str,
+    ) -> impl Future<Output = Result<Option<Vec<PermissionRequest>>, String>> + Send {
+        async move {
+            let url = format!("{}/api/session/{}/permission", self.base, session_id);
+            match self.get_json(&url).await {
+                Ok(v) => Ok(parse_permission_list(v)),
+                Err(e) => Err(e),
+            }
+        }
+    }
+
+    /// GET /api/permission/saved → `{data:[PermissionSaved.Info]}` — the rules
+    /// the server remembers ("always allow").
+    fn list_saved_permissions(
+        &self,
+    ) -> impl Future<Output = Result<Option<Vec<SavedPermission>>, String>> + Send {
+        async move {
+            let url = format!("{}/api/permission/saved", self.base);
+            match self.get_json(&url).await {
+                Ok(v) => Ok(parse_saved_permission_list(v)),
+                Err(e) => Err(e),
+            }
+        }
+    }
+
+    /// DELETE /api/permission/saved/{id} → 204 — revoke a stored rule.
+    fn remove_saved_permission(&self, id: &str) -> impl Future<Output = Result<bool, String>> + Send {
+        async move {
+            let url = format!("{}/api/permission/saved/{}", self.base, id);
+            let resp = self
+                .authed(self.http.delete(&url))
                 .send()
                 .await
                 .map_err(|e| e.to_string())?;
@@ -658,6 +725,34 @@ fn parse_form_list(v: serde_json::Value) -> Option<Vec<FormInfo>> {
     Some(out)
 }
 
+/// Parse a permission list (`{data:[Permission.Request]}`).
+fn parse_permission_list(v: serde_json::Value) -> Option<Vec<PermissionRequest>> {
+    let data = V2Adapter::unwrap_data(v);
+    let arr = data.as_array()?;
+    let mut out = Vec::with_capacity(arr.len());
+    for item in arr {
+        match serde_json::from_value::<PermissionRequest>(item.clone()) {
+            Ok(p) => out.push(p),
+            Err(e) => log::warn!("permission: не удалось разобрать запрос: {e}"),
+        }
+    }
+    Some(out)
+}
+
+/// Parse the saved ("always allow") rules (`{data:[PermissionSaved.Info]}`).
+fn parse_saved_permission_list(v: serde_json::Value) -> Option<Vec<SavedPermission>> {
+    let data = V2Adapter::unwrap_data(v);
+    let arr = data.as_array()?;
+    let mut out = Vec::with_capacity(arr.len());
+    for item in arr {
+        match serde_json::from_value::<SavedPermission>(item.clone()) {
+            Ok(p) => out.push(p),
+            Err(e) => log::warn!("permission: не удалось разобрать сохранённое правило: {e}"),
+        }
+    }
+    Some(out)
+}
+
 /// Percent-encode a query-parameter value (the form cancel reason).
 fn urlencode(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
@@ -717,6 +812,74 @@ fn fold_models_into_providers(v: &serde_json::Value) -> serde_json::Value {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// The server's pending permission list (`{location, data:[Permission.Request]}`).
+    #[test]
+    fn permission_list_parses_requests() {
+        let v = serde_json::json!({
+            "location": "/home/user/proj",
+            "data": [{
+                "id": "per_1",
+                "sessionID": "ses1",
+                "action": "bash",
+                "resources": ["ls -la"],
+                "save": ["bash"],
+                "message": "Run `ls -la`?",
+                "source": { "type": "tool", "messageID": "msg_1", "id": "call_1" }
+            }]
+        });
+        let list = parse_permission_list(v).expect("the list is parsed");
+        assert_eq!(list.len(), 1);
+        let p = &list[0];
+        assert_eq!(p.id, "per_1");
+        assert_eq!(p.session_id, "ses1");
+        assert_eq!(p.action, "bash");
+        assert_eq!(p.resources, vec!["ls -la".to_string()]);
+        assert_eq!(p.save, Some(vec!["bash".to_string()]));
+        assert_eq!(p.message.as_deref(), Some("Run `ls -la`?"));
+        let src = p.source.as_ref().expect("the source is parsed");
+        assert_eq!(src.kind, "tool");
+        assert_eq!(src.message_id, "msg_1");
+        assert_eq!(src.id, "call_1");
+    }
+
+    /// A broken item does not break the whole list (the server may send a
+    /// shape we do not know yet) — the good ones are still shown.
+    #[test]
+    fn permission_list_skips_broken_items() {
+        let v = serde_json::json!({
+            "data": [
+                { "id": "per_1", "sessionID": "ses1", "action": "bash", "resources": [] },
+                { "unexpected": true }
+            ]
+        });
+        let list = parse_permission_list(v).expect("the list is parsed");
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].id, "per_1");
+    }
+
+    /// The saved rules (`{data:[PermissionSaved.Info]}`).
+    #[test]
+    fn saved_permission_list_parses() {
+        let v = serde_json::json!({
+            "data": [{
+                "id": "saved_1",
+                "projectID": "prj_1",
+                "action": "bash",
+                "resource": "ls",
+                "time": { "created": 1.0, "updated": 2.0 }
+            }]
+        });
+        let list = parse_saved_permission_list(v).expect("the list is parsed");
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].id, "saved_1");
+        assert_eq!(list[0].project_id, "prj_1");
+        assert_eq!(list[0].action, "bash");
+        assert_eq!(list[0].resource, "ls");
+        let t = list[0].time.as_ref().expect("the time is parsed");
+        assert_eq!(t.created, 1.0);
+        assert_eq!(t.updated, 2.0);
+    }
 
     #[test]
     fn fold_models_groups_by_provider() {

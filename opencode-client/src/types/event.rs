@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 
 #[derive(Debug, Clone, Deserialize)]
@@ -119,27 +119,4 @@ pub fn human_session_error(error: Option<&serde_json::Value>) -> String {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct PermissionV2Source {
-    #[serde(rename = "type")]
-    pub kind: String,
-    pub messageID: String,
-    pub callID: String,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum PermissionReplyKind {
-    Once,
-    Always,
-    Reject,
-}
-
-impl PermissionReplyKind {
-    /// Parse the QML-supplied reply name (`once` | `always` | `reject`).
-    /// Serde is the single source of the names.
-    pub fn from_name(name: &str) -> Option<Self> {
-        serde_json::from_value(serde_json::Value::String(name.to_string())).ok()
-    }
-}
 

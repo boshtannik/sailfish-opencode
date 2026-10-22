@@ -127,7 +127,10 @@ mod tests {
         }))
         .expect("permission deserialises");
         assert_eq!(p.action, "bash");
-        assert!(matches!(p.source, Some(PermissionSource::Tool { .. })));
+        let src = p.source.as_ref().expect("source");
+        assert_eq!(src.kind, "tool");
+        assert_eq!(src.message_id, "msg_1");
+        assert_eq!(src.id, "call_1");
     }
 
     /// A form of opencode 2.0.32: the fields are keyed by `key` and labelled

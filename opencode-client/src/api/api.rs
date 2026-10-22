@@ -20,8 +20,8 @@ use std::pin::Pin;
 
 use futures_util::Stream;
 
-use crate::types::event::PermissionReplyKind;
 use crate::types::v2::form::FormInfo;
+use crate::types::v2::permission::{PermissionReplyKind, PermissionRequest, SavedPermission};
 use crate::types::v2::EventEnvelope;
 
 /// Server protocol adapter (opencode 2.x).
@@ -147,13 +147,38 @@ pub trait OpenCodeApi: Clone + Send + Sync + 'static {
     /// POST /session/{id}/abort — abort execution.
     fn abort(&self, session_id: &str) -> impl Future<Output = Result<bool, String>> + Send;
 
-    /// POST /session/{id}/permissions/{pid} — answer a permission request.
+    /// POST /api/session/{sessionID}/permission/{requestID}/reply — answer a
+    /// permission request. The body is `{decision, message?}` (v1 used
+    /// `{response}`); `message` is the optional reason shown to the model.
     fn answer_permission(
         &self,
         session_id: &str,
         permission_id: &str,
         response: &PermissionReplyKind,
+        message: Option<&str>,
     ) -> impl Future<Output = Result<bool, String>> + Send;
+
+    /// GET /api/permission/request — the pending permission requests of the
+    /// server's location (all sessions). Used to reconcile the queue with the
+    /// server (the poll); `None` means "the server did not tell" (keep the
+    /// queue as it is).
+    fn list_permissions(&self) -> impl Future<Output = Result<Option<Vec<PermissionRequest>>, String>> + Send;
+
+    /// GET /api/session/{sessionID}/permission — the pending permission
+    /// requests of one session. A fallback for `list_permissions` (a server
+    /// without the location route).
+    fn list_session_permissions(
+        &self,
+        session_id: &str,
+    ) -> impl Future<Output = Result<Option<Vec<PermissionRequest>>, String>> + Send;
+
+    /// GET /api/permission/saved — the stored "always allow" rules.
+    fn list_saved_permissions(
+        &self,
+    ) -> impl Future<Output = Result<Option<Vec<SavedPermission>>, String>> + Send;
+
+    /// DELETE /api/permission/saved/{id} — revoke a stored rule.
+    fn remove_saved_permission(&self, id: &str) -> impl Future<Output = Result<bool, String>> + Send;
 
     /// POST /api/session/{sessionID}/form/{formID}/reply — answer a form from
     /// the model. `answer` is the `{fieldKey: value}` map (see `Form.Answer`).

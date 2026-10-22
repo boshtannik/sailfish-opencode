@@ -1,14 +1,13 @@
 pub mod config;
 pub mod event;
 pub mod keys;
-pub mod permission;
 pub mod session;
 pub mod tool;
 pub mod v2;
 
 pub use config::Config;
-pub use permission::Permission;
 pub use tool::ToolState;
+pub use v2::permission::{PermissionReplyKind, PermissionRequest, PermissionSource};
 
 
 use serde::Deserialize;

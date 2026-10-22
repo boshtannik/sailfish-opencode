@@ -17,7 +17,7 @@ use opencode_client::i18n::{self, err_line, now_ms, svc_line};
 use opencode_client::markers::*;
 use opencode_client::server;
 use opencode_client::settings::Settings;
-use opencode_client::types::event::PermissionReplyKind;
+use opencode_client::types::v2::permission::PermissionReplyKind;
 use opencode_client::types::keys;
 use opencode_client::types::tool::ToolState;
 use opencode_client::types::v2::keys as v2keys;
@@ -123,6 +123,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let voice = voice::VoiceState::with_status(bridge_pinned.borrow().voice_status_handle());
     let tools = bridge_pinned.borrow().tools_handle();
     let permissions = bridge_pinned.borrow().permissions_handle();
+    let permission_error = bridge_pinned.borrow().permission_error_handle();
+    let saved_permissions = bridge_pinned.borrow().saved_permissions_handle();
     let forms = bridge_pinned.borrow().forms_handle();
     let settings = bridge_pinned.borrow().settings_handle();
     let console_login = bridge_pinned.borrow().console_login_handle();
@@ -153,6 +155,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let worker_voice = voice.clone();
     let worker_tools = tools.clone();
     let worker_permissions = permissions.clone();
+    let worker_permission_error = permission_error.clone();
+    let worker_saved_permissions = saved_permissions.clone();
     let worker_forms = forms.clone();
     let worker_url_tx = url_tx.clone();
     let worker_dispatcher = dispatcher.clone();
@@ -213,6 +217,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             worker_voice,
                             worker_tools,
                         worker_permissions,
+                        worker_permission_error,
+                        worker_saved_permissions,
                         worker_forms,
                         worker_settings,
                         console_login,
@@ -281,6 +287,8 @@ async fn run_worker(
     voice: Arc<voice::VoiceState>,
     tools: Arc<std::sync::Mutex<String>>,
     permissions: Arc<std::sync::Mutex<String>>,
+    permission_error: Arc<std::sync::Mutex<String>>,
+    saved_permissions: Arc<std::sync::Mutex<String>>,
     forms: Arc<std::sync::Mutex<String>>,
     settings: Arc<std::sync::Mutex<String>>,
     console_login: opencode_client::auth::ConsoleLogin,
@@ -311,6 +319,8 @@ async fn run_worker(
                 voice.clone(),
                 tools.clone(),
                 permissions.clone(),
+                permission_error.clone(),
+                saved_permissions.clone(),
                 forms.clone(),
                 settings.clone(),
                 console_login.clone(),
@@ -346,6 +356,8 @@ async fn run_stream_adapter(
     voice: Arc<voice::VoiceState>,
     tools: Arc<std::sync::Mutex<String>>,
     permissions: Arc<std::sync::Mutex<String>>,
+    permission_error: Arc<std::sync::Mutex<String>>,
+    saved_permissions: Arc<std::sync::Mutex<String>>,
     forms: Arc<std::sync::Mutex<String>>,
     settings: Arc<std::sync::Mutex<String>>,
     console_login: opencode_client::auth::ConsoleLogin,
@@ -354,7 +366,7 @@ async fn run_stream_adapter(
     run_stream(
         client, dispatcher, worker_pending, worker_prompts, status, sessions,
         commands, current_session, compacting, nav, todos, models, sounds, voice, tools,
-        permissions, forms, settings, console_login,
+        permissions, permission_error, saved_permissions, forms, settings, console_login,
     )
     .await
 }
@@ -600,6 +612,8 @@ async fn run_stream<A: api::OpenCodeApi>(
     voice: Arc<voice::VoiceState>,
     tools: Arc<std::sync::Mutex<String>>,
     permissions: Arc<std::sync::Mutex<String>>,
+    permission_error: Arc<std::sync::Mutex<String>>,
+    saved_permissions: Arc<std::sync::Mutex<String>>,
     forms: Arc<std::sync::Mutex<String>>,
     settings: Arc<std::sync::Mutex<String>>,
     console_login: opencode_client::auth::ConsoleLogin,
@@ -697,6 +711,17 @@ async fn run_stream<A: api::OpenCodeApi>(
     // late, or the `form.created` frame was missed): ask for the pending
     // forms once, up front.
     refresh_forms(&client, &dispatcher, &forms, current_session.as_deref()).await;
+    // The same for the permission requests: the server may already be waiting
+    // for an answer (the client started late, or the `permission.asked` frame
+    // was missed).
+    refresh_permissions(
+        &client,
+        &dispatcher,
+        &permissions,
+        current_session.as_deref(),
+    )
+    .await;
+    refresh_saved_permissions_json(&client, &saved_permissions).await;
 
     // Main loop: listen to SSE and poll the bridge for new prompts in parallel.
     loop {
@@ -760,6 +785,17 @@ async fn run_stream<A: api::OpenCodeApi>(
                             v2keys::FORM_CREATED | v2keys::FORM_REPLIED | v2keys::FORM_CANCELLED
                         ) {
                             refresh_forms_json(&dispatcher, &forms).await;
+                        }
+                        // The same for a permission request: hand the new queue
+                        // to QML right away — waiting for the 1 s tick would
+                        // delay the dialog by a whole tick.
+                        if matches!(
+                            env.kind.as_str(),
+                            v2keys::PERMISSION_ASKED
+                                | v2keys::PERMISSION_REPLIED
+                                | v2keys::SESSION_ERROR
+                        ) {
+                            refresh_permissions_json(&dispatcher, &permissions).await;
                         }
                         // The server compacted the shown session: reload its
                         // history so the summary and the "Context compacted"
@@ -1004,21 +1040,22 @@ async fn run_stream<A: api::OpenCodeApi>(
                         #[cfg(debug_assertions)]
                         Cmd::MockPermission => {
                             let mut st = dispatcher.lock().await;
-                            st.permissions.push(opencode_client::types::Permission {
+                            st.permissions.push(opencode_client::types::PermissionRequest {
                                 id: format!("mock-perm-{}", std::time::SystemTime::now()
                                     .duration_since(std::time::UNIX_EPOCH)
                                     .map(|d| d.as_millis()).unwrap_or(0)),
-                                sessionID: "mock-session".to_string(),
+                                session_id: "mock-session".to_string(),
                                 action: "bash".to_string(),
                                 resources: vec!["npm install && npm run build".to_string()],
                                 save: None,
                                 metadata: None,
                                 source: None,
+                                message: Some("Разрешить запуск команды?".to_string()),
                             });
                             drop(st);
                             refresh_permissions_json(&dispatcher, &permissions).await;
                         }
-                        Cmd::Permission { session, id, response } => {
+                        Cmd::Permission { session, id, response, message } => {
                             if session.is_empty() || id.is_empty() {
                                 continue;
                             }
@@ -1033,11 +1070,56 @@ async fn run_stream<A: api::OpenCodeApi>(
                                 log::info!("permission mock {id} removed from queue");
                                 continue;
                             }
-                            match client.answer_permission(session, id, response).await {
-                                Ok(true) => log::info!("permission {session}/{id} -> {response:?}"),
-                                Ok(false) => log::warn!("permission {session}/{id}: сервер не принял ответ"),
-                                Err(e) => log::error!("answer_permission: {e}"),
+                            match client
+                                .answer_permission(session, id, response, message.as_deref())
+                                .await
+                            {
+                                Ok(true) => {
+                                    log::info!("permission {session}/{id} -> {response:?}");
+                                    // Drop it from the queue right away; the
+                                    // `permission.replied` event does the same.
+                                    {
+                                        let mut st = dispatcher.lock().await;
+                                        st.permissions.pop(id);
+                                    }
+                                    set_permission_error(&permission_error, "");
+                                    refresh_permissions_json(&dispatcher, &permissions).await;
+                                }
+                                Ok(false) => {
+                                    log::warn!("permission {session}/{id}: сервер не принял ответ");
+                                    // The request is still pending — keep the card
+                                    // and tell the user why nothing happened.
+                                    set_permission_error(
+                                        &permission_error,
+                                        "Сервер не принял ответ — попробуй ещё раз",
+                                    );
+                                    refresh_permissions_json(&dispatcher, &permissions).await;
+                                }
+                                Err(e) => {
+                                    log::error!("answer_permission: {e}");
+                                    // The card stays on screen: the user must be
+                                    // able to answer again (the queue is only
+                                    // cleared on success).
+                                    set_permission_error(
+                                        &permission_error,
+                                        &format!("Не удалось ответить: {e}"),
+                                    );
+                                    refresh_permissions_json(&dispatcher, &permissions).await;
+                                }
                             }
+                        }
+                        Cmd::RemoveSavedPermission { id } => {
+                            if id.is_empty() {
+                                continue;
+                            }
+                            match client.remove_saved_permission(&id).await {
+                                Ok(true) => log::info!("saved permission {id} revoked"),
+                                Ok(false) => {
+                                    log::warn!("saved permission {id}: сервер не принял удаление")
+                                }
+                                Err(e) => log::error!("remove_saved_permission: {e}"),
+                            }
+                            refresh_saved_permissions_json(&client, &saved_permissions).await;
                         }
                         Cmd::Form { session, id, answer } => {
                             if session.is_empty() || id.is_empty() {
@@ -1454,6 +1536,15 @@ async fn run_stream<A: api::OpenCodeApi>(
                     // Reconcile the form queue with the server (the SSE event is
                     // the fast path; this poll is the safety net).
                     refresh_forms(&client, &dispatcher, &forms, current_session.as_deref()).await;
+                    // Same safety net for the permission requests (the SSE
+                    // event is the fast path).
+                    refresh_permissions(
+                        &client,
+                        &dispatcher,
+                        &permissions,
+                        current_session.as_deref(),
+                    )
+                    .await;
                 }
 
                 // Every ~1 second — snapshot of tools and permission requests for QML.
@@ -2141,7 +2232,18 @@ async fn refresh_tools_json(
     }
 }
 
+/// Store the last failed permission answer for the UI (empty — no error).
+fn set_permission_error(buf: &Arc<std::sync::Mutex<String>>, msg: &str) {
+    if let Ok(mut g) = buf.lock() {
+        *g = msg.to_string();
+    }
+}
+
 /// Snapshot of permission requests for the dialog.
+///
+/// Each request keeps the server's own shape (`{id, sessionID, action,
+/// resources, message, save, source}`) plus the answer options — the dialog
+/// shows what is asked (`message`/`resources`) and who asked (`source`).
 async fn refresh_permissions_json(
     dispatcher: &event::dispatcher::SharedState,
     permissions: &Arc<std::sync::Mutex<String>>,
@@ -2161,10 +2263,16 @@ async fn refresh_permissions_json(
         .map(|p| {
             serde_json::json!({
                 "id": p.id,
-                "sessionID": p.sessionID,
+                "sessionID": p.session_id,
                 "action": p.action,
                 "resources": p.resources,
-                "metadata": p.metadata.as_ref().map(|m| m.to_string()).unwrap_or_default(),
+                "message": p.message.as_deref().unwrap_or_default(),
+                "save": p.save.clone().unwrap_or_default(),
+                "source": p.source.as_ref().map(|s| serde_json::json!({
+                    "type": s.kind,
+                    "messageID": s.message_id,
+                    "id": s.id,
+                })),
                 "options": options,
             })
         })
@@ -2173,6 +2281,79 @@ async fn refresh_permissions_json(
     let pj = serde_json::Value::Array(arr).to_string();
     if let Ok(mut g) = permissions.lock() {
         *g = pj;
+    }
+}
+
+/// Reconcile the permission queue with the server.
+///
+/// The SSE `permission.asked` event is the fast path; this poll is the safety
+/// net (a request created while the client was offline, a lost SSE frame, or a
+/// request the server already settled — the ghost card). The server's list is
+/// authoritative: the queue is replaced with it, the current session's request
+/// first.
+async fn refresh_permissions(
+    client: &impl api::OpenCodeApi,
+    dispatcher: &event::dispatcher::SharedState,
+    permissions: &Arc<std::sync::Mutex<String>>,
+    current_session: Option<&str>,
+) {
+    let mut list = match client.list_permissions().await {
+        Ok(Some(l)) => l,
+        Ok(None) => return,
+        Err(e) => {
+            log::warn!("list_permissions: {e}");
+            // A server without the location route: ask the current session.
+            let sid = match current_session {
+                Some(s) => s,
+                None => return,
+            };
+            match client.list_session_permissions(sid).await {
+                Ok(Some(l)) => l,
+                _ => return,
+            }
+        }
+    };
+    // The request of the session the user is looking at comes first.
+    if let Some(sid) = current_session {
+        if let Some(idx) = list.iter().position(|p| p.session_id == sid) {
+            let p = list.remove(idx);
+            list.insert(0, p);
+        }
+    }
+    {
+        let mut st = dispatcher.lock().await;
+        st.permissions.replace(list);
+    }
+    refresh_permissions_json(dispatcher, permissions).await;
+}
+
+/// Snapshot of the saved ("always allow") permission rules.
+async fn refresh_saved_permissions_json(
+    client: &impl api::OpenCodeApi,
+    saved: &Arc<std::sync::Mutex<String>>,
+) {
+    let list = match client.list_saved_permissions().await {
+        Ok(Some(l)) => l,
+        Ok(None) => return,
+        Err(e) => {
+            log::warn!("list_saved_permissions: {e}");
+            return;
+        }
+    };
+    let arr: Vec<serde_json::Value> = list
+        .iter()
+        .map(|p| {
+            serde_json::json!({
+                "id": p.id,
+                "action": p.action,
+                "resource": p.resource,
+                "projectID": p.project_id,
+            })
+        })
+        .collect();
+    let sj = serde_json::Value::Array(arr).to_string();
+    if let Ok(mut g) = saved.lock() {
+        *g = sj;
     }
 }
 

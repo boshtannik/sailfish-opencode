@@ -643,5 +643,35 @@ long press — remove</source>
         <source>Context compacted</source>
         <translation>Контекст стиснуто</translation>
     </message>
+    <message>
+        <location filename="../qml/harbour-opencode.qml" line="1889"/>
+        <source>Will be remembered: %1</source>
+        <translation>Буде збережено: %1</translation>
+    </message>
+    <message>
+        <location filename="../qml/harbour-opencode.qml" line="1907"/>
+        <source>Tool: %1</source>
+        <translation>Інструмент: %1</translation>
+    </message>
+    <message>
+        <location filename="../qml/harbour-opencode.qml" line="1921"/>
+        <source>Reason (optional)</source>
+        <translation>Причина (необов'язково)</translation>
+    </message>
+    <message>
+        <location filename="../qml/harbour-opencode.qml" line="1947"/>
+        <source>Always allowed:</source>
+        <translation>Завжди дозволено:</translation>
+    </message>
+    <message>
+        <location filename="../qml/harbour-opencode.qml" line="1970"/>
+        <source>Revoke</source>
+        <translation>Скасувати</translation>
+    </message>
+    <message>
+        <location filename="../qml/harbour-opencode.qml" line="1980"/>
+        <source>+%1 more waiting</source>
+        <translation>+%1 ще очікують</translation>
+    </message>
 </context>
 </TS>

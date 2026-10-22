@@ -290,29 +290,18 @@ pub enum SessionStatusValue {
     Unknown,
 }
 
-/// `permission.asked` `data`.
-#[derive(Debug, Clone, Deserialize)]
-pub struct PermissionAskedData {
-    pub id: String,
-    #[serde(rename = "sessionID")]
-    pub session_id: String,
-    pub action: String,
-    #[serde(default)]
-    pub resources: Vec<String>,
-    #[serde(default)]
-    pub save: Option<Vec<String>>,
-    #[serde(default)]
-    pub metadata: Option<serde_json::Value>,
-    #[serde(default)]
-    pub source: Option<super::permission::PermissionSource>,
-    #[serde(default)]
-    pub message: Option<String>,
-}
+/// `permission.asked` `data` — the whole `Permission.Request`.
+pub type PermissionAskedData = super::permission::PermissionRequest;
 
-/// `permission.replied` `data`.
+/// `permission.replied` `data` (`{sessionID, requestID, reply}`).
 #[derive(Debug, Clone, Deserialize)]
 pub struct PermissionRepliedData {
-    pub requestID: String,
+    #[serde(rename = "requestID")]
+    pub request_id: String,
+    #[serde(rename = "sessionID", default)]
+    pub session_id: String,
+    #[serde(default)]
+    pub reply: Option<String>,
 }
 
 /// `form.created` `data` (`{form: Form.Info}`).

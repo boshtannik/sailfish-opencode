@@ -11,7 +11,6 @@ use crate::state::permission::PermissionQueue;
 use crate::state::form::FormQueue;
 use crate::state::session::SessionFsm;
 use crate::state::tool::ToolStore;
-use crate::types::permission::Permission;
 use crate::types::tool::ToolState;
 use crate::types::v2::EventEnvelope;
 use crate::types::v2::keys as k;
@@ -381,40 +380,19 @@ pub fn dispatch_v2(
             Err(e) => from_data_error(env, &e),
         },
         // ── permissions ───────────────────────────────────────────────
-        k::PERMISSION_ASKED => match from_data::<v2::PermissionAskedData>(env) {
+        //
+        // `permission.asked` carries the whole request (`Permission.Request`),
+        // `permission.replied` only its id.
+        k::PERMISSION_ASKED => match from_data::<crate::types::v2::permission::PermissionRequest>(env) {
             Ok(d) => {
-                state.permissions.push(Permission {
-                    id: d.id,
-                    sessionID: d.session_id,
-                    action: d.action,
-                    resources: d.resources,
-                    save: d.save,
-                    metadata: d.metadata,
-                    source: d.source.map(|s| match s {
-                        crate::types::v2::permission::PermissionSource::Tool {
-                            message_id,
-                            id,
-                        } => crate::types::event::PermissionV2Source {
-                            kind: k::SOURCE_TOOL.to_string(),
-                            messageID: message_id,
-                            callID: id,
-                        },
-                        crate::types::v2::permission::PermissionSource::Unknown => {
-                            crate::types::event::PermissionV2Source {
-                                kind: k::SOURCE_UNKNOWN.to_string(),
-                                messageID: String::new(),
-                                callID: String::new(),
-                            }
-                        }
-                    }),
-                });
+                state.permissions.push(d);
                 true
             }
             Err(e) => from_data_error(env, &e),
         },
         k::PERMISSION_REPLIED => match from_data::<v2::PermissionRepliedData>(env) {
             Ok(d) => {
-                state.permissions.pop(&d.requestID);
+                state.permissions.pop(&d.request_id);
                 true
             }
             Err(e) => from_data_error(env, &e),
@@ -438,6 +416,28 @@ pub fn dispatch_v2(
             }
             Err(e) => from_data_error(env, &e),
         },
+        // ── session errors ────────────────────────────────────────────
+        //
+        // `session.error` carries a structured error (`{type, message}`). The
+        // permission-related one matters for the queue: `permission.rejected`
+        // means the model gave up on the request, so the pending card must
+        // not stay on screen (the server's list is the authority — the poll
+        // would drop it too, but the card would linger until then).
+        k::SESSION_ERROR => {
+            let err = env.data.get(k::ERROR).cloned().unwrap_or_default();
+            let err_type = err.get(k::TYPE).and_then(|v| v.as_str()).unwrap_or("");
+            if err_type == k::PERMISSION_REJECTED {
+                let session = env
+                    .data
+                    .get(k::SESSION_ID)
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                state.permissions.clear_session(&session);
+                log::info!("permission rejected: очередь очищена для {session:?}");
+            }
+            false
+        }
         // ── notifications we do not render ────────────────────────────
         k::SERVER_CONNECTED => false,
         // Everything else is a v2 event with no UI handling. Recognised types
@@ -1268,6 +1268,102 @@ mod tests {
             assert!(dispatch_v2(&env, &mut state, &mut stream));
         }
         assert_eq!(fx.compacted.as_deref(), Some("ses_compact"));
+    }
+
+    /// A v2 permission request as the server sends it (`Permission.Request`).
+    fn permission_request(id: &str, session: &str) -> serde_json::Value {
+        serde_json::json!({
+            "id": id,
+            "sessionID": session,
+            "action": "bash",
+            "resources": ["rm -rf /tmp/x"],
+            "save": ["bash"],
+            "message": "Run it?",
+            "source": { "type": "tool", "messageID": "msg_1", "id": "call_1" }
+        })
+    }
+
+    /// `permission.asked` puts the whole request into the queue — the card
+    /// needs the action, the resources and the server's explanation.
+    #[test]
+    fn permission_asked_queues_the_request() {
+        use crate::types::v2::keys as k;
+        let mut fx = Fixture::new();
+        let mut state = DispatcherState::default();
+        let env = envelope(k::PERMISSION_ASKED, permission_request("per_1", "ses1"));
+        {
+            let mut stream = fx.stream(None);
+            assert!(dispatch_v2(&env, &mut state, &mut stream));
+        }
+        let p = state.permissions.first().expect("the request is queued");
+        assert_eq!(p.id, "per_1");
+        assert_eq!(p.session_id, "ses1");
+        assert_eq!(p.action, "bash");
+        assert_eq!(p.resources, vec!["rm -rf /tmp/x".to_string()]);
+        assert_eq!(p.message.as_deref(), Some("Run it?"));
+        assert_eq!(p.source.as_ref().map(|s| s.id.as_str()), Some("call_1"));
+    }
+
+    /// The same request twice (the event and the poll) must not double the
+    /// card.
+    #[test]
+    fn permission_asked_is_not_duplicated() {
+        use crate::types::v2::keys as k;
+        let mut fx = Fixture::new();
+        let mut state = DispatcherState::default();
+        let env = envelope(k::PERMISSION_ASKED, permission_request("per_1", "ses1"));
+        {
+            let mut stream = fx.stream(None);
+            assert!(dispatch_v2(&env, &mut state, &mut stream));
+            assert!(dispatch_v2(&env, &mut state, &mut stream));
+        }
+        assert_eq!(state.permissions.pending.len(), 1);
+    }
+
+    /// `permission.replied` settles the request — the card must go away.
+    #[test]
+    fn permission_replied_drops_the_request() {
+        use crate::types::v2::keys as k;
+        let mut fx = Fixture::new();
+        let mut state = DispatcherState::default();
+        let asked = envelope(k::PERMISSION_ASKED, permission_request("per_1", "ses1"));
+        let replied = envelope(
+            k::PERMISSION_REPLIED,
+            serde_json::json!({ "sessionID": "ses1", "requestID": "per_1", "reply": "once" }),
+        );
+        {
+            let mut stream = fx.stream(None);
+            assert!(dispatch_v2(&asked, &mut state, &mut stream));
+            assert!(state.permissions.contains("per_1"));
+            assert!(dispatch_v2(&replied, &mut state, &mut stream));
+        }
+        assert!(!state.permissions.contains("per_1"));
+    }
+
+    /// `session.error` with `permission.rejected` means the model gave up on
+    /// the request — the ghost card must disappear (only for that session).
+    #[test]
+    fn permission_rejected_error_clears_the_session() {
+        use crate::types::v2::keys as k;
+        let mut fx = Fixture::new();
+        let mut state = DispatcherState::default();
+        let a = envelope(k::PERMISSION_ASKED, permission_request("per_1", "ses1"));
+        let b = envelope(k::PERMISSION_ASKED, permission_request("per_2", "ses2"));
+        let rejected = envelope(
+            k::SESSION_ERROR,
+            serde_json::json!({
+                "sessionID": "ses1",
+                "error": { "type": "permission.rejected", "message": "the model gave up" }
+            }),
+        );
+        {
+            let mut stream = fx.stream(None);
+            assert!(dispatch_v2(&a, &mut state, &mut stream));
+            assert!(dispatch_v2(&b, &mut state, &mut stream));
+            dispatch_v2(&rejected, &mut state, &mut stream);
+        }
+        assert!(!state.permissions.contains("per_1"));
+        assert!(state.permissions.contains("per_2"));
     }
 
     /// `session.compaction.started` pushes ONE "Compacting…" notice for the

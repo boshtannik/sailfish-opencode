@@ -13,7 +13,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::settings::Settings;
-use crate::types::event::PermissionReplyKind;
+use crate::types::v2::permission::PermissionReplyKind;
 
 /// Commands that QML sends to the worker as JSON `{"cmd": <name>, ...fields}`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,10 +52,18 @@ pub enum Cmd {
     Unrevert {
         id: String,
     },
+    /// Answer a permission request (opencode v2).
     Permission {
         session: String,
         id: String,
         response: PermissionReplyKind,
+        /// Optional reason shown to the model (`{decision, message?}`).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message: Option<String>,
+    },
+    /// Revoke a saved ("always allow") permission rule.
+    RemoveSavedPermission {
+        id: String,
     },
     /// Answer (or cancel) a form from the model (opencode v2).
     Form {

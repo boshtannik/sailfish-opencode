@@ -643,5 +643,35 @@ lang drücken — entfernen</translation>
         <source>Context compacted</source>
         <translation>Kontext komprimiert</translation>
     </message>
+    <message>
+        <location filename="../qml/harbour-opencode.qml" line="1889"/>
+        <source>Will be remembered: %1</source>
+        <translation>Wird gespeichert: %1</translation>
+    </message>
+    <message>
+        <location filename="../qml/harbour-opencode.qml" line="1907"/>
+        <source>Tool: %1</source>
+        <translation>Werkzeug: %1</translation>
+    </message>
+    <message>
+        <location filename="../qml/harbour-opencode.qml" line="1921"/>
+        <source>Reason (optional)</source>
+        <translation>Grund (optional)</translation>
+    </message>
+    <message>
+        <location filename="../qml/harbour-opencode.qml" line="1947"/>
+        <source>Always allowed:</source>
+        <translation>Immer erlaubt:</translation>
+    </message>
+    <message>
+        <location filename="../qml/harbour-opencode.qml" line="1970"/>
+        <source>Revoke</source>
+        <translation>Widerrufen</translation>
+    </message>
+    <message>
+        <location filename="../qml/harbour-opencode.qml" line="1980"/>
+        <source>+%1 more waiting</source>
+        <translation>+%1 warten noch</translation>
+    </message>
 </context>
 </TS>

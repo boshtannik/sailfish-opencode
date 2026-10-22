@@ -278,8 +278,18 @@ ApplicationWindow {
     // Sessions whose saved mode has already been applied (we don't poke the
     // server again on every poll with the same agent switch).
     property var sessionModesApplied: ({})
-    // Pending agent permission requests (`[{id,sessionID,action,resources,options}]`).
+    // Pending agent permission requests
+    // (`[{id,sessionID,action,resources,message,save,source,options}]`).
+    // The worker reconciles the list with the server, so it is the source of
+    // truth: a request is shown while the server still waits for an answer.
     property var pendingPermissions: []
+    // The last failed answer (the card stays on screen and shows the reason).
+    property string permissionError: ""
+    // Saved ("always allow") rules of the server
+    // (`[{id,action,resource,projectID}]`).
+    property var savedPermissions: []
+    // The optional reason sent with the answer (the model sees it).
+    property string permissionReason: ""
     // Granting "Allow once": true if the request is really new
     // (so the sound fires only for newly appeared ones).
     property var knownPermissionIds: []
@@ -891,10 +901,29 @@ ApplicationWindow {
                 }
                 if (fresh) {
                     app.notifyPermission()
-                    app.showPermissionOverlay()
+                }
+                // The card follows the list: it shows itself while the server
+                // waits for an answer and hides itself when the request is
+                // gone (answered or withdrawn).
+                app.permissionOverlayVisible = parsed.length > 0
+                // A settled request clears the reason and the error.
+                if (parsed.length === 0) {
+                    app.permissionReason = ""
+                    app.permissionError = ""
                 }
             } catch (e) {
                 console.log("permissions parse error: " + e)
+            }
+        }
+        var perr = bridge.permission_error()
+        if (perr !== undefined && perr !== null)
+            app.permissionError = perr
+        var spj = bridge.saved_permissions_json()
+        if (spj !== "" && spj !== undefined) {
+            try {
+                app.savedPermissions = JSON.parse(spj)
+            } catch (e) {
+                console.log("saved permissions parse error: " + e)
             }
         }
         bridge.gui_mark("forms")
@@ -1344,8 +1373,31 @@ ApplicationWindow {
     }
 
     // Answer to an agent permission request: once / always / reject.
+    // The card is NOT hidden here: it disappears when the worker confirms the
+    // answer (the request leaves the queue). If the answer fails, the card
+    // stays and shows the error — so the request can be answered again.
     function answerPermission(session, id, response) {
-        bridge.answer_permission(session, id, response)
+        bridge.answer_permission(session, id, response, app.permissionReason)
+        app.permissionReason = ""
+    }
+
+    // Revoke a saved ("always allow") rule.
+    function removeSavedPermission(id) {
+        bridge.remove_saved_permission(id)
+    }
+
+    // The request to show: the one of the session the user is looking at
+    // first, the others wait their turn.
+    readonly property var currentPermission: {
+        var list = app.pendingPermissions
+        if (!list || list.length === 0)
+            return null
+        var cid = app.currentSessionId
+        for (var i = 0; i < list.length; i++) {
+            if (cid !== "" && list[i].sessionID === cid)
+                return list[i]
+        }
+        return list[0]
     }
 
     // show/hide the permission request overlay.
@@ -1758,7 +1810,7 @@ ApplicationWindow {
             // on the container: otherwise the text and buttons become transparent.
             Rectangle {
                 id: permissionOverlay
-                visible: app.permissionOverlayVisible && app.pendingPermissions.length > 0
+                visible: app.permissionOverlayVisible && app.currentPermission !== null
                 anchors.fill: parent
                 color: Qt.rgba(0, 0, 0, 0.65)
                 z: 20
@@ -1768,12 +1820,15 @@ ApplicationWindow {
                     id: permissionCard
                     anchors.centerIn: parent
                     width: parent.width - 2 * Theme.horizontalPageMargin
+                    height: Math.min(permissionColumn.height + 2 * Theme.paddingMedium,
+                                     parent.height - 2 * Theme.paddingLarge)
                     color: Qt.rgba(0.05, 0.05, 0.08, 0.95)
                     radius: Theme.paddingMedium
                     border.color: Theme.primaryColor
                     border.width: 1
 
                     Column {
+                        id: permissionColumn
                         anchors {
                             top: parent.top
                             left: parent.left
@@ -1792,11 +1847,13 @@ ApplicationWindow {
                             wrapMode: Text.Wrap
                         }
 
+                        // What is asked: the action and the resources.
                         Label {
-                            text: app.pendingPermissions[0]
-                                  ? (app.pendingPermissions[0].action || "")
-                                    + (app.pendingPermissions[0].resources
-                                       ? (": " + app.pendingPermissions[0].resources
+                            text: app.currentPermission
+                                  ? (app.currentPermission.action || "")
+                                    + (app.currentPermission.resources
+                                       && app.currentPermission.resources.length > 0
+                                       ? (": " + app.currentPermission.resources
                                             .map(function (r) { return r }).join(", "))
                                        : "")
                                   : ""
@@ -1808,42 +1865,168 @@ ApplicationWindow {
                             font.pixelSize: Theme.fontSizeMedium
                         }
 
+                        // The server's own explanation ("Run `rm -rf /`?").
+                        Label {
+                            visible: app.currentPermission !== null
+                                     && app.currentPermission.message !== undefined
+                                     && app.currentPermission.message !== ""
+                            text: app.currentPermission ? (app.currentPermission.message || "") : ""
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            color: Theme.secondaryColor
+                            width: parent.width
+                            horizontalAlignment: Text.AlignHCenter
+                            wrapMode: Text.Wrap
+                            font.pixelSize: Theme.fontSizeSmall
+                        }
+
+                        // What will be remembered if the answer is "always".
+                        Label {
+                            visible: app.currentPermission !== null
+                                     && app.currentPermission.save !== undefined
+                                     && app.currentPermission.save !== null
+                                     && app.currentPermission.save.length > 0
+                            text: app.currentPermission
+                                  ? qsTr("Will be remembered: %1")
+                                    .arg(app.currentPermission.save.join(", "))
+                                  : ""
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            color: Theme.secondaryColor
+                            width: parent.width
+                            horizontalAlignment: Text.AlignHCenter
+                            wrapMode: Text.Wrap
+                            font.pixelSize: Theme.fontSizeSmall
+                        }
+
+                        // Which tool asked.
+                        Label {
+                            visible: app.currentPermission !== null
+                                     && app.currentPermission.source !== undefined
+                                     && app.currentPermission.source !== null
+                                     && app.currentPermission.source.type !== undefined
+                            text: app.currentPermission && app.currentPermission.source
+                                  ? qsTr("Tool: %1").arg(app.currentPermission.source.id || "")
+                                  : ""
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            color: Theme.secondaryColor
+                            width: parent.width
+                            horizontalAlignment: Text.AlignHCenter
+                            wrapMode: Text.Wrap
+                            font.pixelSize: Theme.fontSizeSmall
+                        }
+
+                        // The optional reason: the model sees it with the answer.
+                        TextField {
+                            id: permissionReasonField
+                            width: parent.width
+                            placeholderText: qsTr("Reason (optional)")
+                            text: app.permissionReason
+                            onTextChanged: app.permissionReason = text
+                            inputMethodHints: Qt.ImhNoPredictiveText
+                        }
+
+                        // The answer did not go through — the card stays, so the
+                        // request can be answered again.
+                        Label {
+                            visible: app.permissionError !== ""
+                            text: app.permissionError
+                            color: Theme.secondaryColor
+                            width: parent.width
+                            horizontalAlignment: Text.AlignHCenter
+                            wrapMode: Text.Wrap
+                            font.pixelSize: Theme.fontSizeSmall
+                        }
+
+                        // The rules the server remembers ("always allow") — they
+                        // can be revoked here.
+                        Column {
+                            width: parent.width
+                            spacing: Theme.paddingSmall
+                            visible: app.savedPermissions.length > 0
+
+                            Label {
+                                text: qsTr("Always allowed:")
+                                color: Theme.secondaryColor
+                                font.pixelSize: Theme.fontSizeSmall
+                                font.bold: true
+                            }
+
+                            Repeater {
+                                model: app.savedPermissions
+                                delegate: Row {
+                                    width: parent.width
+                                    spacing: Theme.paddingSmall
+
+                                    Label {
+                                        width: parent.width - Theme.itemSizeSmall * 2
+                                        text: (modelData.action || "")
+                                              + (modelData.resource
+                                                 ? " / " + modelData.resource : "")
+                                        color: Theme.highlightColor
+                                        font.pixelSize: Theme.fontSizeSmall
+                                        wrapMode: Text.Wrap
+                                    }
+
+                                    Button {
+                                        text: qsTr("Revoke")
+                                        onClicked: app.removeSavedPermission(modelData.id)
+                                    }
+                                }
+                            }
+                        }
+
+                        // More requests are waiting.
+                        Label {
+                            visible: app.pendingPermissions.length > 1
+                            text: qsTr("+%1 more waiting").arg(app.pendingPermissions.length - 1)
+                            color: Theme.secondaryColor
+                            width: parent.width
+                            horizontalAlignment: Text.AlignHCenter
+                            wrapMode: Text.Wrap
+                            font.pixelSize: Theme.fontSizeSmall
+                        }
+
                         Item {
                             width: parent.width
-                            height: Theme.paddingLarge
+                            height: Theme.paddingSmall
                         }
 
                         Button {
                             text: qsTr("Allow once")
                             anchors.horizontalCenter: parent.horizontalCenter
+                            enabled: app.currentPermission !== null
                             onClicked: {
-                                app.answerPermission(
-                                    app.pendingPermissions[0].sessionID,
-                                    app.pendingPermissions[0].id,
-                                    app.replyOnce)
-                                app.permissionOverlayVisible = false
+                                if (app.currentPermission) {
+                                    app.answerPermission(
+                                        app.currentPermission.sessionID,
+                                        app.currentPermission.id,
+                                        app.replyOnce)
+                                }
                             }
                         }
                         Button {
                             text: qsTr("Always allow")
                             anchors.horizontalCenter: parent.horizontalCenter
+                            enabled: app.currentPermission !== null
                             onClicked: {
-                                app.answerPermission(
-                                    app.pendingPermissions[0].sessionID,
-                                    app.pendingPermissions[0].id,
-                                    app.replyAlways)
-                                app.permissionOverlayVisible = false
+                                if (app.currentPermission) {
+                                    app.answerPermission(
+                                        app.currentPermission.sessionID,
+                                        app.currentPermission.id,
+                                        app.replyAlways)
+                                }
                             }
                         }
                         Button {
                             text: qsTr("Deny")
                             anchors.horizontalCenter: parent.horizontalCenter
+                            enabled: app.currentPermission !== null
                             onClicked: {
-                                app.answerPermission(
-                                    app.pendingPermissions[0].sessionID,
-                                    app.pendingPermissions[0].id,
-                                    app.replyReject)
-                                app.permissionOverlayVisible = false
+                                if (app.currentPermission) {
+                                    app.answerPermission(
+                                        app.currentPermission.sessionID,
+                                        app.currentPermission.id,
+                                        app.replyReject)
+                                }
                             }
                         }
                     }

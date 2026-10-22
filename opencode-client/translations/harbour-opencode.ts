@@ -668,5 +668,35 @@ long press — remove</source>
         <source>Context compacted</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <location filename="../qml/harbour-opencode.qml" line="1889"/>
+        <source>Will be remembered: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/harbour-opencode.qml" line="1907"/>
+        <source>Tool: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/harbour-opencode.qml" line="1921"/>
+        <source>Reason (optional)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/harbour-opencode.qml" line="1947"/>
+        <source>Always allowed:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/harbour-opencode.qml" line="1970"/>
+        <source>Revoke</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/harbour-opencode.qml" line="1980"/>
+        <source>+%1 more waiting</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 </TS>
