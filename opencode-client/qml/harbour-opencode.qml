@@ -1158,8 +1158,6 @@ ApplicationWindow {
         bridge.unrevert_session(sid)
     }
 
-    function shareSession(id) { bridge.share_session(id) }
-    function unshareSession(id) { bridge.unshare_session(id) }
     function summarizeSession(id) {
         // Compaction streams its summary as a normal assistant bubble now (the
         // worker runs the blocking POST off-task so SSE keeps flowing), and

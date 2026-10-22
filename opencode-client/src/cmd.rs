@@ -81,12 +81,6 @@ pub enum Cmd {
     /// Dev-only (see `bridge/mock_permission`): the variant is absent in release builds.
     #[cfg(debug_assertions)]
     MockPermission,
-    Share {
-        id: String,
-    },
-    Unshare {
-        id: String,
-    },
     Summarize {
         id: String,
     },

@@ -280,23 +280,6 @@ impl OpenCodeApi for V2Adapter {
         }
     }
 
-    /// share has no v2 HTTP route (see `vault/Разведка-v2.md` §5). Kept as an
-    /// explicit unimplemented error until step 6 decides its fate.
-    fn share_session(
-        &self,
-        _session_id: &str,
-    ) -> impl Future<Output = Result<serde_json::Value, String>> + Send {
-        async move { Err("share is not available in the opencode v2 HTTP API".to_string()) }
-    }
-
-    /// unshare has no v2 HTTP route — see `share_session`.
-    fn unshare_session(
-        &self,
-        _session_id: &str,
-    ) -> impl Future<Output = Result<(), String>> + Send {
-        async move { Err("unshare is not available in the opencode v2 HTTP API".to_string()) }
-    }
-
     /// POST /api/session/{id}/compact → `{data: Inbox.Compaction}`. The model
     /// is taken from the session in v2; the v1 provider/model args are ignored.
     fn summarize_session(

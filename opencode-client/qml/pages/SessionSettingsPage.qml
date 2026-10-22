@@ -18,11 +18,6 @@ Item {
 
     property var session: currentSession()
     property string sessionId: session ? session.id : appWindow.currentSessionId
-    property string shareUrl: (session && session.shareUrl) ? session.shareUrl : ""
-    // The share/unshare route exists only in the v1 HTTP API; opencode 2 (v2),
-    // which this client targets exclusively, has none. The row stays visible but
-    // disabled with an explanatory note.
-    property bool shareSupported: false
     property string modelLabel: (session && session.modelID)
                                 ? (session.providerID + " / " + session.modelID)
                                 : qsTr("no data")
@@ -138,75 +133,6 @@ Item {
             BackgroundItem {
                 width: parent.width
                 contentHeight: Theme.itemSizeSmall
-                // opencode v2 has no share/unshare route at all (only v1 does),
-                // so the row stays visible but inert there — with a hint instead
-                // of a button that silently does nothing.
-                enabled: sessionSettingsPage.shareSupported
-                Label {
-                    x: Theme.horizontalPageMargin
-                    width: parent.width - 2 * Theme.horizontalPageMargin
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: sessionSettingsPage.shareUrl.length > 0
-                          ? qsTr("Refresh link")
-                          : qsTr("Share")
-                    color: !sessionSettingsPage.shareSupported
-                           ? Theme.secondaryColor
-                           : (parent.highlighted ? Theme.highlightColor : Theme.primaryColor)
-                }
-                onClicked: sessionSettingsPage.runAction(function() {
-                    appWindow.shareSession(sessionSettingsPage.sessionId)
-                })
-            }
-
-            Label {
-                x: Theme.horizontalPageMargin
-                width: parent.width - 2 * Theme.horizontalPageMargin
-                visible: !sessionSettingsPage.shareSupported
-                text: qsTr("Not supported by opencode 2 (no share API)")
-                wrapMode: Text.Wrap
-                color: Theme.secondaryColor
-                font.pixelSize: Theme.fontSizeExtraSmall
-            }
-
-            BackgroundItem {
-                width: parent.width
-                contentHeight: Theme.itemSizeSmall
-                visible: sessionSettingsPage.shareUrl.length > 0
-                Label {
-                    x: Theme.horizontalPageMargin
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: qsTr("Open link")
-                    color: parent.highlighted ? Theme.highlightColor : Theme.primaryColor
-                }
-                onClicked: Qt.openUrlExternally(sessionSettingsPage.shareUrl)
-            }
-
-            BackgroundItem {
-                width: parent.width
-                contentHeight: Theme.itemSizeSmall
-                visible: sessionSettingsPage.shareUrl.length > 0
-                Label {
-                    x: Theme.horizontalPageMargin
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: qsTr("Copy link")
-                    color: parent.highlighted ? Theme.highlightColor : Theme.primaryColor
-                }
-                onClicked: Clipboard.text = sessionSettingsPage.shareUrl
-            }
-
-            Label {
-                x: Theme.horizontalPageMargin
-                width: parent.width - 2 * Theme.horizontalPageMargin
-                visible: sessionSettingsPage.shareUrl.length > 0
-                text: sessionSettingsPage.shareUrl
-                wrapMode: Text.Wrap
-                color: Theme.secondaryColor
-                font.pixelSize: Theme.fontSizeExtraSmall
-            }
-
-            BackgroundItem {
-                width: parent.width
-                contentHeight: Theme.itemSizeSmall
                 Label {
                     x: Theme.horizontalPageMargin
                     anchors.verticalCenter: parent.verticalCenter
@@ -218,7 +144,6 @@ Item {
                            ? sessionSettingsPage.session.title : "",
                     sid: sessionSettingsPage.sessionId,
                     model: sessionSettingsPage.modelLabel,
-                    share: sessionSettingsPage.shareUrl,
                     cost: sessionSettingsPage.session ? (sessionSettingsPage.session.cost || 0) : 0,
                     tokens: sessionSettingsPage.tokensLabel()
                 })
@@ -358,7 +283,6 @@ Item {
             property string title
             property string sid
             property string model
-            property string share
             property real cost
             property string tokens
 
@@ -409,15 +333,6 @@ Item {
                     text: qsTr("Tokens: ") + dlg.tokens
                     color: Theme.secondaryColor
                     font.pixelSize: Theme.fontSizeSmall
-                }
-                Label {
-                    x: Theme.horizontalPageMargin
-                    width: parent.width - 2 * Theme.horizontalPageMargin
-                    visible: dlg.share.length > 0
-                    wrapMode: Text.Wrap
-                    text: qsTr("Link: ") + dlg.share
-                    color: Theme.secondaryColor
-                    font.pixelSize: Theme.fontSizeExtraSmall
                 }
             }
         }

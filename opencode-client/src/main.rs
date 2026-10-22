@@ -426,7 +426,7 @@ impl<'a> TurnState<'a> {
                 if !self.assistant_messages.contains(&d.assistant_message_id) {
                     return;
                 }
-                let key = v2_part_key(&d.assistant_message_id, d.ordinal);
+                let key = v2_text_key(&d.assistant_message_id, d.ordinal);
                 if self.compaction_messages.contains(&d.assistant_message_id) {
                     self.spoken_parts.insert(key.clone());
                 }
@@ -461,7 +461,7 @@ impl<'a> TurnState<'a> {
                 if !self.assistant_messages.contains(&d.assistant_message_id) {
                     return;
                 }
-                let key = v2_part_key(&d.assistant_message_id, d.ordinal);
+                let key = v2_reasoning_key(&d.assistant_message_id, d.ordinal);
                 self.reasoning_part_ids.insert(key.clone());
                 if self.reasonings.insert(key.clone(), d.text.clone()).is_none() {
                     self.reasoning_order.push(key.clone());
@@ -533,7 +533,11 @@ impl<'a> TurnState<'a> {
                 }
             }
             let tts_mode = self.voice.tts_mode.lock().map(|m| *m).unwrap_or_default();
-            if tts_mode == voice::TtsMode::Auto {
+            // The user aborted the turn: the partial answer in `parts` is not
+            // a completed reply — never auto-speak it (Jack's smoke: abort
+            // mid-generation spoke the fragment).
+            let aborted = env.kind.as_str() == k::EXECUTION_INTERRUPTED;
+            if tts_mode == voice::TtsMode::Auto && !aborted {
                 for pid in self.text_order.iter() {
                     if self.spoken_parts.contains(pid) || self.voice.dictating() {
                         continue;
@@ -563,9 +567,17 @@ impl<'a> TurnState<'a> {
     }
 }
 
-/// Accumulator key for a v2 text/reasoning block (`assistantMessageID:ordinal`).
-fn v2_part_key(assistant_message_id: &str, ordinal: i64) -> String {
-    format!("{assistant_message_id}:{ordinal}")
+/// Accumulator key for a v2 text block (`t:<assistantMessageID>:<ordinal>`).
+/// opencode numbers ordinals SEPARATELY for reasoning and text parts (both
+/// start at 0), so the kind prefix keeps the two from colliding on one
+/// `[[p:key]]` (the official TUI namespaces parts the same way).
+fn v2_text_key(assistant_message_id: &str, ordinal: i64) -> String {
+    format!("t:{assistant_message_id}:{ordinal}")
+}
+
+/// Accumulator key for a v2 reasoning block — see [`v2_text_key`].
+fn v2_reasoning_key(assistant_message_id: &str, ordinal: i64) -> String {
+    format!("r:{assistant_message_id}:{ordinal}")
 }
 
 /// A single SSE session: `Ok(())` means the stream ended, `Err` means connection failed.
@@ -1039,31 +1051,6 @@ async fn run_stream<A: api::OpenCodeApi>(
                                 Err(e) => log::error!("question {id}: {e}"),
                             }
                         }
-                        Cmd::Share { id } => {
-                            if id.is_empty() {
-                                continue;
-                            }
-                            match client.share_session(id).await {
-                                Ok(sess) => {
-                                    let url = sess[keys::SHARE][keys::URL].as_str().unwrap_or("");
-                                    log::info!("share {id} -> {url}");
-                                    refresh_sessions(&client, &sessions, &dispatcher).await;
-                                }
-                                Err(e) => log::error!("share_session: {e}"),
-                            }
-                        }
-                        Cmd::Unshare { id } => {
-                            if id.is_empty() {
-                                continue;
-                            }
-                            match client.unshare_session(id).await {
-                                Ok(()) => {
-                                    log::info!("unshare {id}");
-                                    refresh_sessions(&client, &sessions, &dispatcher).await;
-                                }
-                                Err(e) => log::error!("unshare_session: {e}"),
-                            }
-                        }
                         Cmd::Summarize { id } => {
                             if id.is_empty() {
                                 continue;
@@ -1493,11 +1480,6 @@ async fn refresh_sessions(
                                 .and_then(|t| t.get(keys::UPDATED))
                                 .cloned()
                                 .unwrap_or(serde_json::Value::Number(0.into()));
-                            let share_url = s
-                                .get(keys::SHARE)
-                                .and_then(|sh| sh.get(keys::URL))
-                                .cloned()
-                                .unwrap_or(serde_json::Value::String(String::new()));
                             // Prefer the server's `model` (v1); fall back to the
                             // model we tracked from `session.model.selected`
                             // (v2, whose list has no `model`).
@@ -1530,7 +1512,6 @@ async fn refresh_sessions(
                                 "id": id,
                                 "title": title,
                                 "updated": updated,
-                                "shareUrl": share_url,
                                 "providerID": provider_id,
                                 "modelID": model_id,
                                 "cost": cost,

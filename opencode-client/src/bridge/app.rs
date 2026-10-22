@@ -201,22 +201,6 @@ pub struct AppBridge {
             self.push_command(Cmd::Unrevert { id }.to_value());
         }
     }),
-    /// QML: share a session (get a link).
-    share_session: qt_method!(fn share_session(&self, id: QString) {
-        let id = id.to_string();
-        log::info!("QML share_session {id:?}");
-        if !id.is_empty() {
-            self.push_command(Cmd::Share { id }.to_value());
-        }
-    }),
-    /// QML: revoke link access.
-    unshare_session: qt_method!(fn unshare_session(&self, id: QString) {
-        let id = id.to_string();
-        log::info!("QML unshare_session {id:?}");
-        if !id.is_empty() {
-            self.push_command(Cmd::Unshare { id }.to_value());
-        }
-    }),
     /// QML: summarize (compact) the session history.
     summarize_session: qt_method!(fn summarize_session(&self, id: QString) {
         let id = id.to_string();

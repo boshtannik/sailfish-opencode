@@ -51,6 +51,5 @@ pub const TITLE: &str = "title";
 pub const UPDATED: &str = "updated";
 pub const MODEL: &str = "model";
 pub const PROVIDER_ID: &str = "providerID";
-pub const SHARE: &str = "share";
 pub const COST: &str = "cost";
 pub const TOKENS: &str = "tokens";

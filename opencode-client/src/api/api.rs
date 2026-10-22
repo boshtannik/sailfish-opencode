@@ -85,16 +85,6 @@ pub trait OpenCodeApi: Clone + Send + Sync + 'static {
         session_id: &str,
     ) -> impl Future<Output = Result<(), String>> + Send;
 
-    /// POST /session/{id}/share — create a public link.
-    fn share_session(
-        &self,
-        session_id: &str,
-    ) -> impl Future<Output = Result<serde_json::Value, String>> + Send;
-
-    /// DELETE /session/{id}/share — revoke link access.
-    fn unshare_session(&self, session_id: &str)
-        -> impl Future<Output = Result<(), String>> + Send;
-
     /// POST /session/{id}/summarize — compact history for the given model.
     fn summarize_session(
         &self,

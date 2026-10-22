@@ -90,10 +90,18 @@ pub struct StreamState<'a> {
 //     `session.text.started` (`assistantMessageID`);
 //   * `session.compacted` → `session.compaction.ended`.
 
-/// Stable accumulator key for a v2 text/reasoning block: v1 keyed parts by a
-/// server `partID`; v2 identifies a block by `(assistantMessageID, ordinal)`.
-fn v2_part_key(assistant_message_id: &str, ordinal: i64) -> String {
-    format!("{assistant_message_id}:{ordinal}")
+/// Stable accumulator key for a v2 text block: `(assistantMessageID, ordinal)`.
+/// opencode numbers ordinals SEPARATELY for reasoning and text parts (both
+/// start at 0), so the kind prefix keeps a reasoning block and a text block of
+/// the same message from colliding on one `[[p:key]]` (the official TUI
+/// namespaces parts the same way: `text:<ord>` / `reasoning:<ord>`).
+fn v2_text_key(assistant_message_id: &str, ordinal: i64) -> String {
+    format!("t:{assistant_message_id}:{ordinal}")
+}
+
+/// Accumulator key for a v2 reasoning block — see [`v2_text_key`].
+fn v2_reasoning_key(assistant_message_id: &str, ordinal: i64) -> String {
+    format!("r:{assistant_message_id}:{ordinal}")
 }
 
 /// Dispatch a single v2 envelope onto the shared state. Mirrors `dispatch`:
@@ -116,12 +124,22 @@ pub fn dispatch_v2(
                     // A step opens the assistant message: register it so its
                     // text parts feed the answer (v1 did this at
                     // `message.updated`).
-                    stream.assistant_messages.insert(d.assistant_message_id);
+                    stream.assistant_messages.insert(d.assistant_message_id.clone());
+                    // Auto-compaction runs its summary as a regular step with
+                    // no `mode:"compaction"` marker: while the compacting
+                    // banner is up, any message that opens IS the summary —
+                    // mark it so auto-TTS never speaks it (v1 keyed this off
+                    // `mode:"compaction"` at message.updated).
+                    if stream.current_session == Some(d.session_id.as_str())
+                        && stream.compacting.lock().map(|g| *g).unwrap_or(false)
+                    {
+                        stream.compaction_messages.insert(d.assistant_message_id);
+                    }
                     // The step carries the model in use — a source of the
                     // session's current model on v2 (whose session GET/list have
                     // no `model`), alongside `session.model.selected`.
                     if let Some(m) = record_step_model(d.model.as_ref()) {
-                        state.session_models.insert(d.session_id.clone(), m);
+                        state.session_models.insert(d.session_id, m);
                     }
                     true
                 }
@@ -152,7 +170,15 @@ pub fn dispatch_v2(
         // ── answer text ───────────────────────────────────────────────
         k::TEXT_STARTED => match from_data::<v2::TextStartedData>(env) {
             Ok(d) => {
-                stream.assistant_messages.insert(d.assistant_message_id);
+                stream.assistant_messages.insert(d.assistant_message_id.clone());
+                // Same defensive compaction guard as STEP_STARTED: a text
+                // block that opens while the banner is up belongs to the
+                // summary — keep it out of auto-TTS.
+                if stream.current_session == Some(d.session_id.as_str())
+                    && stream.compacting.lock().map(|g| *g).unwrap_or(false)
+                {
+                    stream.compaction_messages.insert(d.assistant_message_id);
+                }
                 true
             }
             Err(e) => from_data_error(env, &e),
@@ -193,7 +219,7 @@ pub fn dispatch_v2(
         // ── tool calls ────────────────────────────────────────────────
         k::TOOL_INPUT_STARTED => match from_data::<v2::ToolInputStartedData>(env) {
             Ok(d) => {
-                on_tool_input_started_v2(state, &d.id, &d.name);
+                on_tool_input_started_v2(state, stream, &d.id, &d.name);
                 true
             }
             Err(e) => from_data_error(env, &e),
@@ -207,14 +233,14 @@ pub fn dispatch_v2(
         },
         k::TOOL_INPUT_ENDED => match from_data::<v2::ToolInputEndedData>(env) {
             Ok(d) => {
-                on_tool_input_ended_v2(state, &d.id, &d.text);
+                on_tool_input_ended_v2(state, stream, &d.id, &d.text);
                 true
             }
             Err(e) => from_data_error(env, &e),
         },
         k::TOOL_CALLED => match from_data::<v2::ToolCalledData>(env) {
             Ok(d) => {
-                on_tool_called_v2(state, &d.id, &env.data);
+                on_tool_called_v2(state, stream, &d.id, &env.data);
                 true
             }
             Err(e) => from_data_error(env, &e),
@@ -228,14 +254,14 @@ pub fn dispatch_v2(
         },
         k::TOOL_SUCCESS => match from_data::<v2::ToolSuccessData>(env) {
             Ok(d) => {
-                on_tool_success_v2(state, &d.id, &env.data);
+                on_tool_success_v2(state, stream, &d.id, &env.data);
                 true
             }
             Err(e) => from_data_error(env, &e),
         },
         k::TOOL_FAILED => match from_data::<v2::ToolFailedData>(env) {
             Ok(d) => {
-                on_tool_failed_v2(state, &d.id, &env.data);
+                on_tool_failed_v2(state, stream, &d.id, &env.data);
                 true
             }
             Err(e) => from_data_error(env, &e),
@@ -456,7 +482,7 @@ fn on_v2_text_delta(stream: &mut StreamState<'_>, d: &crate::types::v2::event::T
     if !stream.assistant_messages.contains(&d.assistant_message_id) {
         return;
     }
-    let key = v2_part_key(&d.assistant_message_id, d.ordinal);
+    let key = v2_text_key(&d.assistant_message_id, d.ordinal);
     let entry = stream.text_live.entry(key.clone()).or_default();
     entry.push_str(&d.delta);
     if entry.trim().is_empty() {
@@ -479,7 +505,7 @@ fn on_v2_text_ended(stream: &mut StreamState<'_>, d: &crate::types::v2::event::T
     if !stream.assistant_messages.contains(&d.assistant_message_id) {
         return;
     }
-    let key = v2_part_key(&d.assistant_message_id, d.ordinal);
+    let key = v2_text_key(&d.assistant_message_id, d.ordinal);
     if stream.text_live.contains_key(&key) {
         stream.text_live.insert(key, d.text.clone());
     }
@@ -490,7 +516,7 @@ fn on_v2_reasoning_delta(
     stream: &mut StreamState<'_>,
     d: &crate::types::v2::event::TextDeltaData,
 ) {
-    let key = v2_part_key(&d.assistant_message_id, d.ordinal);
+    let key = v2_reasoning_key(&d.assistant_message_id, d.ordinal);
     let entry = stream.reasonings.entry(key.clone()).or_default();
     entry.push_str(&d.delta);
     if entry.trim().is_empty() {
@@ -513,7 +539,7 @@ fn on_v2_reasoning_ended(
     stream: &mut StreamState<'_>,
     d: &crate::types::v2::event::TextEndedData,
 ) {
-    let key = v2_part_key(&d.assistant_message_id, d.ordinal);
+    let key = v2_reasoning_key(&d.assistant_message_id, d.ordinal);
     stream.reasonings.insert(key, d.text.clone());
 }
 
@@ -668,9 +694,34 @@ fn human_session_error_value(error: Option<&serde_json::Value>) -> String {
 
 // v2 tool handlers: same ToolStore transitions as the v1 `on_tool_*`, but the
 // v2 `data` uses `id` (not `callID`) and carries the v1 field-name-independent
-// `input`/`content`/`error` shapes.
+// `input`/`content`/`error` shapes. Each transition (except progress — it
+// fires per output chunk and would spam the feed) also mirrors the new state
+// into QML as a `[[tool]]` line, replace-in-place by callID on the QML side.
+// v1 fed these rows via `MessagePartUpdated`; the push was lost in the v2 port.
 
-fn on_tool_input_started_v2(state: &mut DispatcherState, id: &str, name: &str) {
+/// Mirror the current ToolStore state of `id` into the QML feed.
+fn push_tool_line(state: &DispatcherState, stream: &StreamState<'_>, id: &str) {
+    let Some(st) = state.tools.state_of(id) else {
+        return;
+    };
+    let name = state.tools.name_of(id).unwrap_or("");
+    if let Ok(mut q) = stream.pending.lock() {
+        q.push(crate::markers::proto_tool_line(
+            now_ms(),
+            id,
+            name,
+            st.ui_status(),
+            &st.description(),
+        ));
+    }
+}
+
+fn on_tool_input_started_v2(
+    state: &mut DispatcherState,
+    stream: &StreamState<'_>,
+    id: &str,
+    name: &str,
+) {
     state.tools.upsert(
         id.to_string(),
         name.to_string(),
@@ -678,6 +729,7 @@ fn on_tool_input_started_v2(state: &mut DispatcherState, id: &str, name: &str) {
             input: serde_json::Value::Null,
         },
     );
+    push_tool_line(state, stream, id);
 }
 
 fn on_tool_input_delta_v2(state: &mut DispatcherState, id: &str, delta: &str) {
@@ -695,17 +747,27 @@ fn on_tool_input_delta_v2(state: &mut DispatcherState, id: &str, delta: &str) {
     );
 }
 
-fn on_tool_input_ended_v2(state: &mut DispatcherState, id: &str, text: &str) {
+fn on_tool_input_ended_v2(
+    state: &mut DispatcherState,
+    stream: &StreamState<'_>,
+    id: &str,
+    text: &str,
+) {
     if state.tools.name_of(id).is_none() {
         state.tools.ensure(id, "");
     }
     let input = serde_json::from_str(text)
         .unwrap_or_else(|_| serde_json::Value::String(text.to_string()));
     state.tools.set_state(id, ToolState::Pending { input });
+    push_tool_line(state, stream, id);
 }
 
-fn on_tool_called_v2(state: &mut DispatcherState, id: &str, data: &serde_json::Value) {
-    use crate::types::v2::keys as k;
+fn on_tool_called_v2(
+    state: &mut DispatcherState,
+    stream: &StreamState<'_>,
+    id: &str,
+    data: &serde_json::Value,
+) {
     let name = state.tools.name_of(id).unwrap_or("").to_string();
     let input = data
         .get(k::INPUT)
@@ -716,6 +778,7 @@ fn on_tool_called_v2(state: &mut DispatcherState, id: &str, data: &serde_json::V
         state.tools.ensure(id, "");
     }
     state.tools.set_state(id, ToolState::Running { input });
+    push_tool_line(state, stream, id);
 }
 
 fn on_tool_progress_v2(state: &mut DispatcherState, id: &str) {
@@ -726,8 +789,12 @@ fn on_tool_progress_v2(state: &mut DispatcherState, id: &str) {
     state.tools.set_state(id, ToolState::Running { input });
 }
 
-fn on_tool_success_v2(state: &mut DispatcherState, id: &str, data: &serde_json::Value) {
-    use crate::types::v2::keys as k;
+fn on_tool_success_v2(
+    state: &mut DispatcherState,
+    stream: &StreamState<'_>,
+    id: &str,
+    data: &serde_json::Value,
+) {
     let input = state.tools.input_of(id);
     let title = short_input(&input)
         .or_else(|| state.tools.name_of(id).map(str::to_string))
@@ -744,16 +811,22 @@ fn on_tool_success_v2(state: &mut DispatcherState, id: &str, data: &serde_json::
             title,
         },
     );
+    push_tool_line(state, stream, id);
 }
 
-fn on_tool_failed_v2(state: &mut DispatcherState, id: &str, data: &serde_json::Value) {
-    use crate::types::v2::keys as k;
+fn on_tool_failed_v2(
+    state: &mut DispatcherState,
+    stream: &StreamState<'_>,
+    id: &str,
+    data: &serde_json::Value,
+) {
     let input = state.tools.input_of(id);
     let error = data
         .get(k::ERROR)
         .map(content_to_string)
         .unwrap_or_default();
     state.tools.set_state(id, ToolState::Error { input, error });
+    push_tool_line(state, stream, id);
 }
 
 /// Every v2 event type this client consciously knows about — either handled by
@@ -1126,7 +1199,9 @@ mod tests {
     }
 
     /// The live answer line MUST carry the block key so QML can edit the exact
-    /// bubble in place, position-independently (the duplicate-bubble fix).
+    /// bubble in place, position-independently (the duplicate-bubble fix). The
+    /// key is namespaced `t:` so it never collides with a reasoning block of
+    /// the same message (opencode numbers ordinals separately per part kind).
     #[test]
     fn answer_delta_line_carries_block_key() {
         let mut fx = Fixture::new();
@@ -1137,11 +1212,11 @@ mod tests {
         }
         let q = fx.pending.lock().unwrap();
         assert_eq!(q.len(), 1, "{q:?}");
-        assert!(q[0].ends_with("[[answerlive]]hello[[p:msg1:0]]"), "{}", q[0]);
+        assert!(q[0].ends_with("[[answerlive]]hello[[p:t:msg1:0]]"), "{}", q[0]);
     }
 
-    /// Reasoning deltas route to the think-live tag, same block-key shape. No
-    /// membership check: the reasoning kind already identifies the block.
+    /// Reasoning deltas route to the think-live tag, same block-key shape,
+    /// namespaced `r:`.
     #[test]
     fn reasoning_delta_line_carries_block_key() {
         let mut fx = Fixture::new();
@@ -1151,7 +1226,28 @@ mod tests {
         }
         let q = fx.pending.lock().unwrap();
         assert_eq!(q.len(), 1, "{q:?}");
-        assert!(q[0].ends_with("[[thinklive]]why[[p:msg1:3]]"), "{}", q[0]);
+        assert!(q[0].ends_with("[[thinklive]]why[[p:r:msg1:3]]"), "{}", q[0]);
+    }
+
+    /// A reasoning block and a text block of the same message BOTH start at
+    /// ordinal 0 (opencode numbers them per part kind). Their live keys must
+    /// differ, or the answer bubble replaces the think bubble in place
+    /// (the disappearing-think-bubble bug).
+    #[test]
+    fn reasoning_and_text_blocks_of_one_message_have_distinct_keys() {
+        let mut fx = Fixture::new();
+        fx.assistant_messages.insert("msg1".to_string());
+        {
+            let mut stream = fx.stream(None);
+            on_v2_reasoning_delta(&mut stream, &text_delta("msg1", 0, "think"));
+            on_v2_text_delta(&mut stream, &text_delta("msg1", 0, "answer"));
+        }
+        assert!(fx.reasonings.contains_key("r:msg1:0"), "{:?}", fx.reasonings);
+        assert!(fx.text_live.contains_key("t:msg1:0"), "{:?}", fx.text_live);
+        let q = fx.pending.lock().unwrap();
+        assert_eq!(q.len(), 2, "{q:?}");
+        assert!(q[0].contains("[[thinklive]]"), "{}", q[0]);
+        assert!(q[1].contains("[[answerlive]]"), "{}", q[1]);
     }
 
     /// A text delta of a message that never registered (not in
@@ -1313,5 +1409,86 @@ mod tests {
             state.session_models.get("ses_y"),
             Some(&("openai".to_string(), "gpt-5".to_string()))
         );
+    }
+
+    /// Live tool calls: `tool.input.started` opens a `[[tool]]` row and
+    /// `tool.success` replaces it in place with the completed status. Without
+    /// these pushes the feed row only appeared after a session switch (the
+    /// v1 `MessagePartUpdated` push was lost in the v2 port).
+    #[test]
+    fn tool_lifecycle_pushes_tool_lines() {
+        use crate::types::v2::keys as k;
+        let mut fx = Fixture::new();
+        let mut state = DispatcherState::default();
+        {
+            let mut stream = fx.stream(None);
+            let started = envelope(
+                k::TOOL_INPUT_STARTED,
+                serde_json::json!({
+                    "sessionID": "ses",
+                    "assistantMessageID": "msg1",
+                    "id": "call_1",
+                    "name": "bash",
+                }),
+            );
+            assert!(dispatch_v2(&started, &mut state, &mut stream));
+            let ok = envelope(
+                k::TOOL_SUCCESS,
+                serde_json::json!({
+                    "sessionID": "ses",
+                    "assistantMessageID": "msg1",
+                    "id": "call_1",
+                    "content": [{ "type": "text", "text": "done" }],
+                }),
+            );
+            assert!(dispatch_v2(&ok, &mut state, &mut stream));
+        }
+        let q = fx.pending.lock().unwrap();
+        let tools: Vec<&String> = q.iter().filter(|l| l.contains("[[tool]]")).collect();
+        assert_eq!(tools.len(), 2, "{q:?}");
+        assert!(
+            tools[0].contains("call_1") && tools[0].contains("bash") && tools[0].contains("running"),
+            "{}",
+            tools[0]
+        );
+        assert!(
+            tools[1].contains("call_1") && tools[1].contains("completed"),
+            "{}",
+            tools[1]
+        );
+    }
+
+    /// `session.tool.progress` must NOT push a feed line: it fires per output
+    /// chunk and would flood the transcript (status stays "running").
+    #[test]
+    fn tool_progress_does_not_push_lines() {
+        use crate::types::v2::keys as k;
+        let mut fx = Fixture::new();
+        let mut state = DispatcherState::default();
+        {
+            let mut stream = fx.stream(None);
+            let started = envelope(
+                k::TOOL_INPUT_STARTED,
+                serde_json::json!({
+                    "sessionID": "ses",
+                    "assistantMessageID": "msg1",
+                    "id": "call_1",
+                    "name": "bash",
+                }),
+            );
+            assert!(dispatch_v2(&started, &mut state, &mut stream));
+            let progress = envelope(
+                k::TOOL_PROGRESS,
+                serde_json::json!({
+                    "sessionID": "ses",
+                    "assistantMessageID": "msg1",
+                    "id": "call_1",
+                }),
+            );
+            assert!(dispatch_v2(&progress, &mut state, &mut stream));
+        }
+        let q = fx.pending.lock().unwrap();
+        let tools: Vec<&String> = q.iter().filter(|l| l.contains("[[tool]]")).collect();
+        assert_eq!(tools.len(), 1, "progress must not push: {q:?}");
     }
 }
