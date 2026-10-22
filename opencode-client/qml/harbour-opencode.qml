@@ -79,7 +79,10 @@ ApplicationWindow {
     property bool soundOnFinish: soundOnFinishSetting.value !== undefined
                                  ? soundOnFinishSetting.value : true
     property bool soundOnPermission: soundOnPermissionSetting.value !== undefined
-                                     ? soundOnPermissionSetting.value : true
+                                        ? soundOnPermissionSetting.value : true
+    property Component sessionNameDialog: sessionNameDialogComponent
+    property Component sessionNameDialogComp: sessionNameDialogComponent
+    property Component sessionSettingsPageComponent: sessionSettingsPageComponent
     property bool sendImmediately: sendImmediatelySetting.value !== undefined
                                    ? sendImmediatelySetting.value : false
     // OpenCode Console device-login state (worker → QML): {state,url,code,message}.
@@ -1779,12 +1782,8 @@ ApplicationWindow {
         }
     }
 
-    // Session-name dialog, shared by "create new session" and "rename session"
-    // (same purpose — naming a session). In "new" mode accepting with an empty
-    // field (or swiping the dialog away) still creates the session; the server
-    // then generates the title automatically.
     Component {
-        id: sessionNameDialog
+        id: sessionNameDialogComponent
         Dialog {
             id: nameDlg
             property string mode: "new"
@@ -1831,4 +1830,6 @@ ApplicationWindow {
             }
         }
     }
+
+    // Session-name dialog, shared by "create new session" and "rename session"
 }

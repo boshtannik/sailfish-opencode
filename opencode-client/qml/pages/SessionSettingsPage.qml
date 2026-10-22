@@ -136,6 +136,25 @@ Item {
                 Label {
                     x: Theme.horizontalPageMargin
                     anchors.verticalCenter: parent.verticalCenter
+                    text: qsTr("Rename")
+                    color: parent.highlighted ? Theme.highlightColor : Theme.primaryColor
+                }
+                onClicked: {
+                    var cur = sessionSettingsPage.session
+                    appWindow.pageStack.push(appWindow.sessionNameDialogComp, {
+                        mode: "rename",
+                        sessionId: sessionSettingsPage.sessionId,
+                        currentTitle: cur ? (cur.title || "") : ""
+                    })
+                }
+            }
+
+            BackgroundItem {
+                width: parent.width
+                contentHeight: Theme.itemSizeSmall
+                Label {
+                    x: Theme.horizontalPageMargin
+                    anchors.verticalCenter: parent.verticalCenter
                     text: qsTr("Session summary")
                     color: parent.highlighted ? Theme.highlightColor : Theme.primaryColor
                 }
