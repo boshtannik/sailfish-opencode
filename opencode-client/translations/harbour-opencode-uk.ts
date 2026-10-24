@@ -211,6 +211,26 @@ long press — remove</source>
 <context>
     <name>SessionSettingsPage</name>
     <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml" line="103"/>
+        <source>Working mode</source>
+        <translation>Режим роботи</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml" line="104"/>
+        <source>Server agent used by this session</source>
+        <translation>Агент сервера для цієї сесії</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml" line="106"/>
+        <source>Build — active work</source>
+        <translation>Build — активна робота</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml" line="107"/>
+        <source>Plan — planning</source>
+        <translation>Plan — планування</translation>
+    </message>
+    <message>
         <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="24"/>
         <source>no data</source>
         <translation>немає даних</translation>
@@ -227,24 +247,9 @@ long press — remove</source>
         <translation>Форк (гілка)</translation>
     </message>
     <message>
-        <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="117"/>
-        <source>Refresh link</source>
-        <translation>Оновити посилання</translation>
-    </message>
-    <message>
-        <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="118"/>
-        <source>Share</source>
-        <translation>Поділитися</translation>
-    </message>
-    <message>
-        <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="133"/>
-        <source>Open link</source>
-        <translation>Відкрити посилання</translation>
-    </message>
-    <message>
-        <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="146"/>
-        <source>Copy link</source>
-        <translation>Скопіювати посилання</translation>
+        <location filename="../qml/pages/SessionSettingsPage.qml" line="139"/>
+        <source>Rename</source>
+        <translation>Перейменувати</translation>
     </message>
     <message>
         <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="168"/>
@@ -287,9 +292,29 @@ long press — remove</source>
         <translation>Інше</translation>
     </message>
     <message>
-        <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="276"/>
-        <source>Show tool calls</source>
-        <translation>Показувати виклики інструментів</translation>
+        <location filename="../qml/pages/SessionSettingsPage.qml" line="268"/>
+        <source>Tool calls</source>
+        <translation>Виклики інструментів</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml" line="269"/>
+        <source>How tool calls are shown in the transcript</source>
+        <translation>Як показувати виклики інструментів у транскрипті</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml" line="273"/>
+        <source>Show (name + argument)</source>
+        <translation>Показувати (назва + аргумент)</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml" line="274"/>
+        <source>Minimal (name only)</source>
+        <translation>Мінімально (лише назва)</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml" line="275"/>
+        <source>Hide</source>
+        <translation>Приховати</translation>
     </message>
     <message>
         <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="305"/>
@@ -315,11 +340,6 @@ long press — remove</source>
         <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="345"/>
         <source>Tokens: </source>
         <translation>Токени: </translation>
-    </message>
-    <message>
-        <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="354"/>
-        <source>Link: </source>
-        <translation>Посилання: </translation>
     </message>
     <message>
         <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="378"/>
@@ -384,11 +404,6 @@ long press — remove</source>
         <location filename="../../i18n/qml-src/pages/SessionsPage.qml" line="78"/>
         <source>Pull down to create a new session</source>
         <translation>Потягніть вниз, щоб створити нову сесію</translation>
-    </message>
-    <message>
-        <location filename="../../i18n/qml-src/pages/SessionsPage.qml" line="113"/>
-        <source>Session name</source>
-        <translation>Назва сесії</translation>
     </message>
 </context>
 <context>
@@ -674,29 +689,34 @@ long press — remove</source>
         <translation>+%1 ще очікують</translation>
     </message>
     <message>
-        <location filename="../qml/pages/SessionSettingsPage.qml"/>
-        <source>Tool calls</source>
-        <translation>Виклики інструментів</translation>
+        <location filename="../qml/harbour-opencode.qml" line="2366"/>
+        <source>Create</source>
+        <translation>Створити</translation>
     </message>
     <message>
-        <location filename="../qml/pages/SessionSettingsPage.qml"/>
-        <source>How tool calls are shown in the transcript</source>
-        <translation>Як показувати виклики інструментів у діалозі</translation>
+        <location filename="../qml/harbour-opencode.qml" line="2367"/>
+        <source>Rename</source>
+        <translation>Перейменувати</translation>
     </message>
     <message>
-        <location filename="../qml/pages/SessionSettingsPage.qml"/>
-        <source>Show (name + argument)</source>
-        <translation>Показувати (ім'я + аргумент)</translation>
+        <location filename="../qml/harbour-opencode.qml" line="2387"/>
+        <source>New session</source>
+        <translation>Нова сесія</translation>
     </message>
     <message>
-        <location filename="../qml/pages/SessionSettingsPage.qml"/>
-        <source>Minimal (name only)</source>
-        <translation>Мінімально (лише ім'я)</translation>
+        <location filename="../qml/harbour-opencode.qml" line="2388"/>
+        <source>Session name</source>
+        <translation>Назва сесії</translation>
     </message>
     <message>
-        <location filename="../qml/pages/SessionSettingsPage.qml"/>
-        <source>Hide</source>
-        <translation>Приховати</translation>
+        <location filename="../qml/harbour-opencode.qml" line="2393"/>
+        <source>Session name (optional)</source>
+        <translation>Назва сесії (необов’язково)</translation>
+    </message>
+    <message>
+        <location filename="../qml/harbour-opencode.qml" line="2396"/>
+        <source>Leave empty to name automatically</source>
+        <translation>Залиште порожнім, щоб назвати автоматично</translation>
     </message>
 </context>
 </TS>

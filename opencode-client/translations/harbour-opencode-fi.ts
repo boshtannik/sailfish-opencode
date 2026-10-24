@@ -211,6 +211,26 @@ pitkä painallus — poista</translation>
 <context>
     <name>SessionSettingsPage</name>
     <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml" line="103"/>
+        <source>Working mode</source>
+        <translation>Työtila</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml" line="104"/>
+        <source>Server agent used by this session</source>
+        <translation>Palvelimen agentti tälle istunnolle</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml" line="106"/>
+        <source>Build — active work</source>
+        <translation>Build — aktiivinen työ</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml" line="107"/>
+        <source>Plan — planning</source>
+        <translation>Plan — suunnittelu</translation>
+    </message>
+    <message>
         <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="24"/>
         <source>no data</source>
         <translation>ei tietoja</translation>
@@ -227,24 +247,9 @@ pitkä painallus — poista</translation>
         <translation>Haarukoi (haara)</translation>
     </message>
     <message>
-        <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="117"/>
-        <source>Refresh link</source>
-        <translation>Päivitä linkki</translation>
-    </message>
-    <message>
-        <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="118"/>
-        <source>Share</source>
-        <translation>Jaa</translation>
-    </message>
-    <message>
-        <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="133"/>
-        <source>Open link</source>
-        <translation>Avaa linkki</translation>
-    </message>
-    <message>
-        <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="146"/>
-        <source>Copy link</source>
-        <translation>Kopioi linkki</translation>
+        <location filename="../qml/pages/SessionSettingsPage.qml" line="139"/>
+        <source>Rename</source>
+        <translation>Nimeä uudelleen</translation>
     </message>
     <message>
         <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="168"/>
@@ -287,9 +292,29 @@ pitkä painallus — poista</translation>
         <translation>Muut</translation>
     </message>
     <message>
-        <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="276"/>
-        <source>Show tool calls</source>
-        <translation>Näytä työkalukutsut</translation>
+        <location filename="../qml/pages/SessionSettingsPage.qml" line="268"/>
+        <source>Tool calls</source>
+        <translation>Työkalukutsut</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml" line="269"/>
+        <source>How tool calls are shown in the transcript</source>
+        <translation>Miten työkalukutsut näytetään transkriptissa</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml" line="273"/>
+        <source>Show (name + argument)</source>
+        <translation>Näytä (nimi + argumentti)</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml" line="274"/>
+        <source>Minimal (name only)</source>
+        <translation>Minimaalinen (vain nimi)</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml" line="275"/>
+        <source>Hide</source>
+        <translation>Piilota</translation>
     </message>
     <message>
         <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="305"/>
@@ -315,11 +340,6 @@ pitkä painallus — poista</translation>
         <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="345"/>
         <source>Tokens: </source>
         <translation>Tokenit: </translation>
-    </message>
-    <message>
-        <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="354"/>
-        <source>Link: </source>
-        <translation>Linkki: </translation>
     </message>
     <message>
         <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="378"/>
@@ -384,11 +404,6 @@ pitkä painallus — poista</translation>
         <location filename="../../i18n/qml-src/pages/SessionsPage.qml" line="78"/>
         <source>Pull down to create a new session</source>
         <translation>Vedä alas luodaksesi uuden istunnon</translation>
-    </message>
-    <message>
-        <location filename="../../i18n/qml-src/pages/SessionsPage.qml" line="113"/>
-        <source>Session name</source>
-        <translation>Istunnon nimi</translation>
     </message>
 </context>
 <context>
@@ -674,29 +689,34 @@ pitkä painallus — poista</translation>
         <translation>+%1 odottaa</translation>
     </message>
     <message>
-        <location filename="../qml/pages/SessionSettingsPage.qml"/>
-        <source>Tool calls</source>
-        <translation>Työkalukutsut</translation>
+        <location filename="../qml/harbour-opencode.qml" line="2366"/>
+        <source>Create</source>
+        <translation>Luo</translation>
     </message>
     <message>
-        <location filename="../qml/pages/SessionSettingsPage.qml"/>
-        <source>How tool calls are shown in the transcript</source>
-        <translation>Miten työkalukutsut näytetään transkriptissa</translation>
+        <location filename="../qml/harbour-opencode.qml" line="2367"/>
+        <source>Rename</source>
+        <translation>Nimeä uudelleen</translation>
     </message>
     <message>
-        <location filename="../qml/pages/SessionSettingsPage.qml"/>
-        <source>Show (name + argument)</source>
-        <translation>Näytä (nimi + argumentti)</translation>
+        <location filename="../qml/harbour-opencode.qml" line="2387"/>
+        <source>New session</source>
+        <translation>Uusi istunto</translation>
     </message>
     <message>
-        <location filename="../qml/pages/SessionSettingsPage.qml"/>
-        <source>Minimal (name only)</source>
-        <translation>Minimaalinen (vain nimi)</translation>
+        <location filename="../qml/harbour-opencode.qml" line="2388"/>
+        <source>Session name</source>
+        <translation>Istunnon nimi</translation>
     </message>
     <message>
-        <location filename="../qml/pages/SessionSettingsPage.qml"/>
-        <source>Hide</source>
-        <translation>Piilota</translation>
+        <location filename="../qml/harbour-opencode.qml" line="2393"/>
+        <source>Session name (optional)</source>
+        <translation>Istunnon nimi (valinnainen)</translation>
+    </message>
+    <message>
+        <location filename="../qml/harbour-opencode.qml" line="2396"/>
+        <source>Leave empty to name automatically</source>
+        <translation>Jätä tyhjäksi, niin nimetetään automaattisesti</translation>
     </message>
 </context>
 </TS>

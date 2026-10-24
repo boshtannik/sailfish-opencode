@@ -204,6 +204,26 @@ long press — remove</source>
 <context>
     <name>SessionSettingsPage</name>
     <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml" line="103"/>
+        <source>Working mode</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml" line="104"/>
+        <source>Server agent used by this session</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml" line="106"/>
+        <source>Build — active work</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml" line="107"/>
+        <source>Plan — planning</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="24"/>
         <source>no data</source>
         <translation type="unfinished"></translation>
@@ -220,23 +240,8 @@ long press — remove</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="117"/>
-        <source>Refresh link</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="118"/>
-        <source>Share</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="133"/>
-        <source>Open link</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="146"/>
-        <source>Copy link</source>
+        <location filename="../qml/pages/SessionSettingsPage.qml" line="139"/>
+        <source>Rename</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -280,8 +285,28 @@ long press — remove</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="276"/>
-        <source>Show tool calls</source>
+        <location filename="../qml/pages/SessionSettingsPage.qml" line="268"/>
+        <source>Tool calls</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml" line="269"/>
+        <source>How tool calls are shown in the transcript</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml" line="273"/>
+        <source>Show (name + argument)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml" line="274"/>
+        <source>Minimal (name only)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml" line="275"/>
+        <source>Hide</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -307,11 +332,6 @@ long press — remove</source>
     <message>
         <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="345"/>
         <source>Tokens: </source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="354"/>
-        <source>Link: </source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -376,11 +396,6 @@ long press — remove</source>
     <message>
         <location filename="../../i18n/qml-src/pages/SessionsPage.qml" line="78"/>
         <source>Pull down to create a new session</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location filename="../../i18n/qml-src/pages/SessionsPage.qml" line="113"/>
-        <source>Session name</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -699,28 +714,33 @@ long press — remove</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/pages/SessionSettingsPage.qml"/>
-        <source>Tool calls</source>
+        <location filename="../qml/harbour-opencode.qml" line="2366"/>
+        <source>Create</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/pages/SessionSettingsPage.qml"/>
-        <source>How tool calls are shown in the transcript</source>
+        <location filename="../qml/harbour-opencode.qml" line="2367"/>
+        <source>Rename</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/pages/SessionSettingsPage.qml"/>
-        <source>Show (name + argument)</source>
+        <location filename="../qml/harbour-opencode.qml" line="2387"/>
+        <source>New session</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/pages/SessionSettingsPage.qml"/>
-        <source>Minimal (name only)</source>
+        <location filename="../qml/harbour-opencode.qml" line="2388"/>
+        <source>Session name</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/pages/SessionSettingsPage.qml"/>
-        <source>Hide</source>
+        <location filename="../qml/harbour-opencode.qml" line="2393"/>
+        <source>Session name (optional)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/harbour-opencode.qml" line="2396"/>
+        <source>Leave empty to name automatically</source>
         <translation type="unfinished"></translation>
     </message>
 </context>

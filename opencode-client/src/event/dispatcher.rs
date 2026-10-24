@@ -651,9 +651,9 @@ fn on_session_error_v2(stream: &mut StreamState<'_>, error: Option<&serde_json::
     if let Ok(mut q) = stream.pending.lock() {
         q.push(err_line(now_ms(), crate::i18n::K_SERVER_ERROR, &[msg]));
     }
-    if let Ok(mut s) = stream.status.lock() {
-        *s = "error".to_string();
-    }
+    // Connection/stream errors set status to "error" from run_stream (SSE closed).
+    // Session execution errors (including quota/free-usage) must not flip the header
+    // indicator red — just show a red bubble in the feed (v1 behavior).
 }
 
 /// True when a v2 structured error marks a user-initiated abort

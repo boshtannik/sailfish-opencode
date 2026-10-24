@@ -483,7 +483,11 @@ ApplicationWindow {
     function copyText(text) {
         if (text === undefined || text === "")
             return
-        Clipboard.text = text
+        try {
+            if (typeof Clipboard !== "undefined") {
+                Clipboard.text = text
+            }
+        } catch (e) {}
         copyToast.bannerText = qsTr("Copied")
         copyToast.visible = true
         copyToastTimer.restart()
@@ -1318,9 +1322,8 @@ ApplicationWindow {
         notify.publish()
     }
 
-    // Server error: always-visible notification + status.
+    // Server error: always-visible notification + red bubble.
     function publishError(msg) {
-        app.statusText = "error"
         if (msg === "") msg = qsTr("Server error")
         app.playDing()
         app.publishNotification(qsTr("Server error"), msg)
@@ -1818,7 +1821,9 @@ ApplicationWindow {
                 // The card with the request text is almost opaque so it stays readable.
                 Rectangle {
                     id: permissionCard
-                    anchors.centerIn: parent
+                    anchors.top: parent.top
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    anchors.topMargin: Theme.paddingLarge
                     width: parent.width - 2 * Theme.horizontalPageMargin
                     height: Math.min(permissionColumn.height + 2 * Theme.paddingMedium,
                                      parent.height - 2 * Theme.paddingLarge)
@@ -2044,7 +2049,9 @@ ApplicationWindow {
 
                 Rectangle {
                     id: formCard
-                    anchors.centerIn: parent
+                    anchors.top: parent.top
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    anchors.topMargin: Theme.paddingLarge
                     width: parent.width - 2 * Theme.horizontalPageMargin
                     height: Math.min(formColumn.height + 2 * Theme.paddingMedium,
                                      parent.height - 2 * Theme.paddingLarge)
