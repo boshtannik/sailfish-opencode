@@ -51,7 +51,7 @@ ApplicationWindow {
             }
         }
     }
-    property string statusText: "connecting"
+    property string statusText: app.kServerStatusConnecting
     property string inputMode: inputModeSetting.value !== undefined
                                ? inputModeSetting.value : "text_ptt"
     property var sessions: []
@@ -132,6 +132,12 @@ ApplicationWindow {
     // `[[tool]]<callID>\u001f<name>\u001f<status>\u001f<text>`, replaced in
     // place as the call moves running → completed/error (TUI-style).
     readonly property string kToolTag: "[[tool]]"
+    // Server daemon connection statuses (mirror of markers.rs STATUS_*).
+    readonly property string kServerStatusConnecting: "connecting"
+    readonly property string kServerStatusIdle: "idle"
+    readonly property string kServerStatusBusy: "busy"
+    readonly property string kServerStatusError: "error"
+    readonly property string kServerStatusRetryPrefix: "retry|"
     // Tool statuses (mirror of types/tool.rs STATUS_*).
     readonly property string kStatusRunning: "running"
     readonly property string kStatusCompleted: "completed"
@@ -988,13 +994,13 @@ ApplicationWindow {
     }
 
     function statusColor(s) {
-        if (s.indexOf("retry|") === 0) return "#ff9800"
+        if (s.indexOf(app.kServerStatusRetryPrefix) === 0) return "#ff9800"
         switch (s) {
-        case "connecting": return "#2196f3"
-        case "idle":       return "#4caf50"
-        case "busy":       return "#ffc107"
-        case "error":      return "#f44336"
-        default:           return Theme.secondaryColor
+        case app.kServerStatusConnecting: return "#2196f3"
+        case app.kServerStatusIdle:       return "#4caf50"
+        case app.kServerStatusBusy:       return "#ffc107"
+        case app.kServerStatusError:      return "#f44336"
+        default:                          return Theme.secondaryColor
         }
     }
 
@@ -1002,7 +1008,23 @@ ApplicationWindow {
     // busy). The worker sets `retry|<next_ms>|<attempt>|<message>` while the
     // server is retrying a failed model call (see main.rs `session.status`).
     function statusBase(s) {
-        return s.indexOf("retry|") === 0 ? "busy" : s
+        return s.indexOf(app.kServerStatusRetryPrefix) === 0 ? app.kServerStatusBusy : s
+    }
+
+    // Human-readable remaining time: "23h 12m", "4m 05s", "45s".
+    function formatRemainingTime(seconds) {
+        if (seconds <= 0) return ""
+        if (seconds >= 3600) {
+            var h = Math.floor(seconds / 3600)
+            var m = Math.floor((seconds % 3600) / 60)
+            return h + "h " + (m < 10 ? "0" : "") + m + "m"
+        }
+        if (seconds >= 60) {
+            var mins = Math.floor(seconds / 60)
+            var secs = seconds % 60
+            return mins + "m " + (secs < 10 ? "0" : "") + secs + "s"
+        }
+        return seconds + "s"
     }
 
     function send(text) {
@@ -1322,7 +1344,8 @@ ApplicationWindow {
         notify.publish()
     }
 
-    // Server error: always-visible notification + red bubble.
+    // Server error: always-visible notification + red bubble in the feed.
+    // Does NOT alter daemon connection status (statusText reflects background daemon health).
     function publishError(msg) {
         if (msg === "") msg = qsTr("Server error")
         app.playDing()
@@ -1832,16 +1855,20 @@ ApplicationWindow {
                     border.color: Theme.primaryColor
                     border.width: 1
 
-                    Column {
-                        id: permissionColumn
-                        anchors {
-                            top: parent.top
-                            left: parent.left
-                            right: parent.right
-                            bottom: parent.bottom
-                            margins: Theme.paddingMedium
-                        }
-                        spacing: Theme.paddingMedium
+                    SilicaFlickable {
+                        id: permissionFlick
+                        anchors.fill: parent
+                        anchors.margins: Theme.paddingMedium
+                        contentWidth: width
+                        contentHeight: permissionColumn.height
+                        flickableDirection: Flickable.VerticalFlick
+                        clip: true
+                        VerticalScrollDecorator {}
+
+                        Column {
+                            id: permissionColumn
+                            width: parent.width
+                            spacing: Theme.paddingMedium
 
                         Label {
                             text: qsTr("Agent requests permission")
@@ -2037,6 +2064,7 @@ ApplicationWindow {
                     }
                 }
             }
+        }
 
             // Model form overlay (higher z than the permission card).
             Rectangle {

@@ -137,7 +137,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let forms = bridge_pinned.borrow().forms_handle();
     let settings = bridge_pinned.borrow().settings_handle();
     let console_login = bridge_pinned.borrow().console_login_handle();
-    bridge_pinned.borrow().set_status_shared("connecting");
+    bridge_pinned.borrow().set_status_shared(markers::STATUS_CONNECTING);
 
     let dispatcher: event::dispatcher::SharedState = Arc::new(Mutex::new(Default::default()));
 
@@ -235,7 +235,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     )
                     .await
                     }
-                    None => set_status(&worker_status, "error"),
+                    None => set_server_status(&worker_status, &markers::ServerConnectionStatus::Error),
                 }
                 // Guard drop happens here: after the stop signal.
                 drop(guard);
@@ -338,7 +338,7 @@ async fn run_worker(
                     Ok(StreamEnd::Reconnect) => log::warn!("SSE stream ended, reconnecting…"),
                     Err(e) => log::error!("SSE error: {e}, reconnecting…"),
                 }
-                set_status(&status, "connecting");
+                set_server_status(&status, &markers::ServerConnectionStatus::Connecting);
                 tokio::time::sleep(Duration::from_secs(2)).await;
             }
         }
@@ -574,7 +574,7 @@ impl<'a> TurnState<'a> {
                 }
             }
         }
-        set_status(self.status, "idle");
+        set_server_status(self.status, &markers::ServerConnectionStatus::Idle);
         self.parts.clear();
         self.text_live.clear();
         self.text_order.clear();
@@ -629,7 +629,7 @@ async fn run_stream<A: api::OpenCodeApi>(
 ) -> Result<StreamEnd, String> {
     let mut stream = client.event_stream().await?;
     log::info!("SSE connected");
-    set_status(&status, "idle");
+    set_server_status(&status, &markers::ServerConnectionStatus::Idle);
 
     // Accumulate assistant text parts by part.id (see example full_cycle).
     let mut parts: std::collections::HashMap<String, String> = Default::default();
@@ -753,12 +753,18 @@ async fn run_stream<A: api::OpenCodeApi>(
                                             "session retry #{} at {}: {message}",
                                             attempt, next
                                         );
-                                        set_status(
+                                        set_server_status(
                                             &status,
-                                            &format!("retry|{next}|{attempt}|{message}"),
+                                            &markers::ServerConnectionStatus::Retry {
+                                                next,
+                                                attempt,
+                                                message,
+                                            },
                                         );
                                     }
-                                    RetryStatus::Busy => set_status(&status, "busy"),
+                                    RetryStatus::Busy => {
+                                        set_server_status(&status, &markers::ServerConnectionStatus::Busy)
+                                    }
                                     RetryStatus::Idle => {}
                                 }
                             }
@@ -867,7 +873,7 @@ async fn run_stream<A: api::OpenCodeApi>(
                     Some(Err(e)) => log::error!("sse error: {e}"),
                     None => {
                         log::error!("SSE closed");
-                        set_status(&status, "error");
+                        set_server_status(&status, &markers::ServerConnectionStatus::Error);
                         return Ok(StreamEnd::Reconnect);
                     }
                 }
@@ -949,7 +955,7 @@ async fn run_stream<A: api::OpenCodeApi>(
                             load_history(&client, id, &worker_pending, &dispatcher).await;
                             ensure_session_model(&client, id, &dispatcher).await;
                             refresh_sessions(&client, &sessions, &dispatcher).await;
-                            set_status(&status, "idle");
+                            set_server_status(&status, &markers::ServerConnectionStatus::Idle);
                             set_current_session(&current_session_shared, &current_session);
                             refresh_todo(&client, id, &todos).await;
                         }
@@ -1013,7 +1019,7 @@ async fn run_stream<A: api::OpenCodeApi>(
                                     last_answer_push = 0;
                                     clear_tools(&dispatcher, &tools).await;
                                     load_history(&client, id, &worker_pending, &dispatcher).await;
-                                    set_status(&status, "idle");
+                                    set_server_status(&status, &markers::ServerConnectionStatus::Idle);
                                     refresh_todo(&client, id, &todos).await;
                                 }
                                 Err(e) => log::error!("revert_session: {e}"),
@@ -1041,7 +1047,7 @@ async fn run_stream<A: api::OpenCodeApi>(
                                     last_answer_push = 0;
                                     clear_tools(&dispatcher, &tools).await;
                                     load_history(&client, id, &worker_pending, &dispatcher).await;
-                                    set_status(&status, "idle");
+                                    set_server_status(&status, &markers::ServerConnectionStatus::Idle);
                                 }
                                 Err(e) => log::error!("unrevert_session: {e}"),
                             }
@@ -1222,7 +1228,7 @@ async fn run_stream<A: api::OpenCodeApi>(
                             match client.abort(id).await {
                                 Ok(_) => {
                                     log::info!("abort {id}");
-                                    set_status(&status, "idle");
+                                    set_server_status(&status, &markers::ServerConnectionStatus::Idle);
                                 }
                                 Err(e) => log::error!("abort: {e}"),
                             }
@@ -1461,7 +1467,7 @@ async fn run_stream<A: api::OpenCodeApi>(
 
                 for prompt in worker_prompts.lock().map(|mut q| std::mem::take(&mut *q)).unwrap_or_default() {
                     log::info!("QML промпт: {prompt}");
-                    set_status(&status, "busy");
+                    set_server_status(&status, &markers::ServerConnectionStatus::Busy);
                     // Create a session if there is none.
                     if current_session.is_none() {
                         match client.create_session(None).await {
@@ -1477,7 +1483,7 @@ async fn run_stream<A: api::OpenCodeApi>(
                                     if let Ok(mut q) = worker_pending.lock() {
                                         q.push(svc_line(now_ms(), i18n::K_SESSION_ERROR, &[msg]));
                                     }
-                                    set_status(&status, "error");
+                                    set_server_status(&status, &markers::ServerConnectionStatus::Idle);
                                     continue;
                                 }
                             },
@@ -1491,7 +1497,7 @@ async fn run_stream<A: api::OpenCodeApi>(
                                         &[emsg],
                                     ));
                                 }
-                                set_status(&status, "error");
+                                set_server_status(&status, &markers::ServerConnectionStatus::Idle);
                                 continue;
                             }
                         }
@@ -1517,7 +1523,7 @@ async fn run_stream<A: api::OpenCodeApi>(
                                 if let Ok(mut q) = worker_pending.lock() {
                                     q.push(svc_line(now_ms(), i18n::K_PROMPT_ERROR, &[emsg]));
                                 }
-                                set_status(&status, "error");
+                                set_server_status(&status, &markers::ServerConnectionStatus::Idle);
                             }
                             // v2 returns the user-message id in the response:
                             // hand it straight to QML so the fresh bubble offers
@@ -2043,10 +2049,10 @@ async fn load_history(
     }
 }
 
-/// Thread-safely set status for QML (no Qt signals).
-fn set_status(status: &Arc<std::sync::Mutex<String>>, s: &str) {
+/// Thread-safely set server connection status for QML (no Qt signals).
+fn set_server_status(status: &Arc<std::sync::Mutex<String>>, s: &markers::ServerConnectionStatus) {
     if let Ok(mut g) = status.lock() {
-        *g = s.to_string();
+        *g = s.to_status_string();
     }
 }
 

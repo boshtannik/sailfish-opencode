@@ -3,11 +3,8 @@ import Sailfish.Silica 1.0
 
 Item {
     id: statusHeader
-    // One line normally; while the server reports a retry the message wraps
-    // over as many lines as it needs, then the header shrinks back.
-    height: statusHeader.retry
-            ? retryColumn.height + 2 * Theme.paddingSmall
-            : Theme.itemSizeSmall
+    // Compact single-line header plate reflecting daemon connection status.
+    height: Theme.itemSizeSmall
 
     property var appWindow
 
@@ -16,9 +13,11 @@ Item {
     // Mirrors the opencode TUI line: "message — retrying in N s - attempt #A".
     readonly property var retry: {
         var s = appWindow && appWindow.statusText ? appWindow.statusText : ""
-        if (s.indexOf("retry|") !== 0)
+        var prefix = appWindow && appWindow.kServerStatusRetryPrefix
+                     ? appWindow.kServerStatusRetryPrefix : "retry|"
+        if (s.indexOf(prefix) !== 0)
             return null
-        var p = s.substring(6).split("|")
+        var p = s.substring(prefix.length).split("|")
         return {
             next: parseInt(p[0], 10),
             attempt: parseInt(p[1], 10),
@@ -38,18 +37,26 @@ Item {
         statusHeader.tick // dependency: re-evaluate every second
         return Math.max(0, Math.ceil((statusHeader.retry.next - Date.now()) / 1000))
     }
+    readonly property string remainingText: {
+        if (!statusHeader.retry) return ""
+        if (appWindow && appWindow.formatRemainingTime)
+            return appWindow.formatRemainingTime(statusHeader.retrySeconds)
+        return statusHeader.retrySeconds + "s"
+    }
     readonly property string retryText: {
         if (!statusHeader.retry) return ""
         var line = qsTr("retrying")
         if (statusHeader.retrySeconds > 0)
-            line += " " + qsTr("in %1 s").arg(statusHeader.retrySeconds)
+            line += " " + qsTr("in %1").arg(statusHeader.remainingText)
         var tail = qsTr("attempt #%1").arg(statusHeader.retry.attempt)
-        return statusHeader.retry.message + " — " + line + " - " + tail
+        var msg = statusHeader.retry.message
+        if (msg !== "")
+            return msg + " — " + line + " - " + tail
+        return line + " - " + tail
     }
 
-    // Compact header: one line (idle / busy / connecting / error).
+    // Single-line connection header: [●] opencode [connecting | idle | busy | waiting… | error]
     Row {
-        visible: !statusHeader.retry
         anchors {
             left: parent.left
             leftMargin: Theme.horizontalPageMargin
@@ -70,45 +77,12 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
         }
         Label {
-            text: appWindow.statusText
+            text: statusHeader.retry ? qsTr("waiting…") : appWindow.statusText
             width: Math.min(implicitWidth, statusHeader.width * 0.65)
             elide: Text.ElideRight
             color: appWindow.statusColor(appWindow.statusText)
             font.pixelSize: Theme.fontSizeExtraSmall
             anchors.verticalCenter: parent.verticalCenter
-        }
-    }
-
-    // Retry header: title line + wrapped message, growing as needed.
-    Column {
-        id: retryColumn
-        visible: !!statusHeader.retry
-        x: Theme.horizontalPageMargin
-        y: Theme.paddingSmall
-        width: statusHeader.width - 2 * Theme.horizontalPageMargin
-        spacing: Theme.paddingSmall
-
-        Row {
-            spacing: Theme.paddingSmall
-            Label {
-                text: "●"
-                color: appWindow.statusColor(appWindow.statusText)
-                font.pixelSize: Theme.fontSizeSmall
-                anchors.verticalCenter: parent.verticalCenter
-            }
-            Label {
-                text: "opencode"
-                color: Theme.primaryColor
-                font.pixelSize: Theme.fontSizeMedium
-                anchors.verticalCenter: parent.verticalCenter
-            }
-        }
-        Label {
-            width: parent.width
-            text: statusHeader.retryText
-            wrapMode: Text.WordWrap
-            color: appWindow.statusColor(appWindow.statusText)
-            font.pixelSize: Theme.fontSizeExtraSmall
         }
     }
 }

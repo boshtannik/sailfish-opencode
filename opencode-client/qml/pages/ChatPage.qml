@@ -253,7 +253,7 @@ Item {
             top: compactionBanner.bottom
             left: parent.left
             right: parent.right
-            bottom: revertStrip.top
+            bottom: retryStrip.visible ? retryStrip.top : (revertStrip.visible ? revertStrip.top : inputPanel.top)
         }
         model: appWindow.chatModel
         clip: true
@@ -828,6 +828,55 @@ Item {
         }
     }
 
+    // ── Strip shown when a server retry / quota reset countdown is pending ──
+    Item {
+        id: retryStrip
+        readonly property bool on: statusHeader.retry !== null
+        visible: on
+        height: visible ? retryCol.height + 2 * Theme.paddingSmall : 0
+        anchors {
+            left: parent.left
+            right: parent.right
+            bottom: revertStrip.visible ? revertStrip.top : inputPanel.top
+        }
+        clip: true
+
+        Rectangle {
+            anchors.fill: parent
+            color: Theme.rgba("#ff9800", 0.15)
+        }
+
+        Column {
+            id: retryCol
+            anchors {
+                left: parent.left
+                right: parent.right
+                margins: Theme.horizontalPageMargin
+                verticalCenter: parent.verticalCenter
+            }
+            spacing: Theme.paddingSmall
+
+            Label {
+                width: parent.width
+                text: statusHeader.retryText
+                wrapMode: Text.Wrap
+                font.pixelSize: Theme.fontSizeExtraSmall
+                color: "#ff9800"
+            }
+        }
+
+        // Hairline separating the banner from the chat above.
+        Rectangle {
+            anchors {
+                left: parent.left
+                right: parent.right
+                top: parent.top
+            }
+            height: 1
+            color: Theme.rgba(Theme.primaryColor, 0.15)
+        }
+    }
+
     Item {
         id: inputPanel
         anchors {
@@ -990,7 +1039,7 @@ Item {
                 verticalCenter: inputPanel.verticalCenter
             }
             icon.source: "image://theme/icon-m-enter-accept"
-            enabled: input.text.length > 0
+            enabled: input.text.length > 0 && statusHeader.retry === null
             onClicked: {
                 appWindow.send(input.text)
                 input.text = ""
@@ -1014,7 +1063,7 @@ Item {
         TextArea {
             id: input
             visible: appWindow.inputMode !== "voice"
-            enabled: !chatPage.busy
+            enabled: !chatPage.busy && statusHeader.retry === null
             background: null
             // We draw the placeholder inside the field, not as a layer on top — otherwise
             // the field looks two-level.
