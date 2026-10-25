@@ -209,6 +209,83 @@ Item {
         anchors.top: parent.top
     }
 
+    // Server-reported retry/rate-limit notice (token quota / retryable errors).
+    // Mirrors parsing from StatusHeader.qml and stays visible on scroll.
+    readonly property var retryInfo: {
+        var aw = chatPage.appWindow
+        if (!aw) return null
+        var s = aw.statusText ? aw.statusText : ""
+        var prefix = aw.kServerStatusRetryPrefix ? aw.kServerStatusRetryPrefix : "retry|"
+        if (s.indexOf(prefix) !== 0) return null
+        var p = s.substring(prefix.length).split("|")
+        if (p.length < 2) return null
+        return {
+            next: parseInt(p[0], 10),
+            attempt: parseInt(p[1], 10),
+            message: p.slice(2).join("|")
+        }
+    }
+    property int retryTick: 0
+    Timer {
+        interval: 1000
+        repeat: true
+        running: retryInfo !== null
+        onTriggered: retryTick++
+    }
+    readonly property int retrySecondsLeft: {
+        if (!retryInfo) return 0
+        retryTick
+        return Math.max(0, Math.ceil((retryInfo.next - Date.now()) / 1000))
+    }
+    readonly property string retryRemainingText: {
+        if (!retryInfo) return ""
+        var aw = chatPage.appWindow
+        if (aw && aw.formatRemainingTime)
+            return aw.formatRemainingTime(retrySecondsLeft)
+        return retrySecondsLeft + "s"
+    }
+    readonly property string retryBannerText: {
+        if (!retryInfo) return ""
+        var line = qsTr("retrying")
+        if (retrySecondsLeft > 0)
+            line += " " + qsTr("in %1").arg(retryRemainingText)
+        var tail = qsTr("attempt #%1").arg(retryInfo.attempt)
+        var msg = retryInfo.message
+        if (msg !== "")
+            return msg + " — " + line + " - " + tail
+        return line + " - " + tail
+    }
+
+    Rectangle {
+        id: retryBanner
+        anchors {
+            top: header.bottom
+            left: parent.left
+            right: parent.right
+        }
+        height: visible ? Theme.itemSizeSmall : 0
+        visible: retryInfo !== null
+        // Warm amber tint with transparency so text stays readable on any theme.
+        color: Qt.rgba(1.0, 0.7, 0.25, 0.16)
+        border.color: Qt.rgba(1.0, 0.7, 0.25, 0.55)
+        border.width: 1
+        z: 7
+
+        Label {
+            text: retryBannerText
+            font.pixelSize: Theme.fontSizeSmall
+            color: Theme.primaryColor
+            elide: Text.ElideRight
+            anchors {
+                left: parent.left
+                leftMargin: Theme.horizontalPageMargin
+                right: parent.right
+                rightMargin: Theme.horizontalPageMargin
+                verticalCenter: parent.verticalCenter
+            }
+        }
+    }
+
     // Compaction activity banner. While the shown session is compacted (manual
     // "Compact" or auto on context overflow) the summary streams as a normal
     // growing bubble; this banner marks the operation (spinner + label) until
@@ -216,12 +293,12 @@ Item {
     Rectangle {
         id: compactionBanner
         anchors {
-            top: header.bottom
+            top: retryBanner.visible ? retryBanner.bottom : header.bottom
             left: parent.left
             right: parent.right
         }
         height: visible ? Theme.itemSizeSmall : 0
-        visible: chatPage.appWindow ? chatPage.appWindow.compactionActive : false
+        visible: !retryBanner.visible && (chatPage.appWindow ? chatPage.appWindow.compactionActive : false)
         color: Theme.rgba(Theme.highlightBackgroundColor, 0.9)
         z: 5
 
@@ -250,7 +327,7 @@ Item {
     SilicaListView {
         id: chatList
         anchors {
-            top: compactionBanner.bottom
+            top: compactionBanner.visible ? compactionBanner.bottom : (retryBanner.visible ? retryBanner.bottom : header.bottom)
             left: parent.left
             right: parent.right
             bottom: retryStrip.visible ? retryStrip.top : (revertStrip.visible ? revertStrip.top : inputPanel.top)
