@@ -1872,11 +1872,12 @@ ApplicationWindow {
 
                         Label {
                             text: qsTr("Agent requests permission")
-                            anchors.horizontalCenter: parent.horizontalCenter
+                            width: parent.width
+                            horizontalAlignment: Text.AlignHCenter
                             color: Theme.primaryColor
                             font.pixelSize: Theme.fontSizeLarge
                             font.bold: true
-                            wrapMode: Text.Wrap
+                            wrapMode: Text.WordWrap
                         }
 
                         // What is asked: the action and the resources.
@@ -1889,11 +1890,10 @@ ApplicationWindow {
                                             .map(function (r) { return r }).join(", "))
                                        : "")
                                   : ""
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            color: Theme.highlightColor
                             width: parent.width
                             horizontalAlignment: Text.AlignHCenter
-                            wrapMode: Text.Wrap
+                            color: Theme.highlightColor
+                            wrapMode: Text.WordWrap
                             font.pixelSize: Theme.fontSizeMedium
                         }
 
@@ -1903,11 +1903,10 @@ ApplicationWindow {
                                      && app.currentPermission.message !== undefined
                                      && app.currentPermission.message !== ""
                             text: app.currentPermission ? (app.currentPermission.message || "") : ""
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            color: Theme.secondaryColor
                             width: parent.width
                             horizontalAlignment: Text.AlignHCenter
-                            wrapMode: Text.Wrap
+                            color: Theme.secondaryColor
+                            wrapMode: Text.WordWrap
                             font.pixelSize: Theme.fontSizeSmall
                         }
 
