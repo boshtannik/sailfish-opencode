@@ -14,7 +14,7 @@ use opencode_client::bridge::app::AppBridge;
 use opencode_client::cmd::Cmd;
 use opencode_client::event;
 use opencode_client::i18n::{self, err_line, now_ms, svc_line};
-use opencode_client::markers::*;
+use opencode_client::markers::{self, *};
 use opencode_client::server;
 use opencode_client::settings::Settings;
 use opencode_client::types::v2::permission::PermissionReplyKind;
