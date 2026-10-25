@@ -10,7 +10,29 @@
 # Использование:
 #   scripts/cargo-check.sh                     # короткий формат диагностик
 #   scripts/cargo-check.sh --message-format=full  # как обычно
+#
+# Про версию rustc: дистрибутивный тулчейн Debian (1.85) слишком старый для
+# текущего дерева зависимостей (icu_* 2.3 требует >= 1.88). В SDK-образе
+# сборки стоит 1.89, поэтому берём rustup-тулчейн (shims в ~/.cargo/bin) —
+# он новее и ближе к настоящей сборке. Без rustup скрипт честно скажет,
+# что версия мала.
 set -e
+
+# rustup-шимы впереди системных: `cargo`/`rustc` должны быть из rustup,
+# а не из /usr/bin (apt-версия).
+if [ -x "$HOME/.cargo/bin/cargo" ]; then
+    PATH="$HOME/.cargo/bin:$PATH"
+    export PATH
+fi
+
+MIN_RUSTC="1.88"
+rustc_ver="$(rustc -V | awk '{print $2}')"
+# sort -V: если минимальная версия оказалась не первой — текущая старше.
+if [ "$(printf '%s\n%s\n' "$MIN_RUSTC" "$rustc_ver" | sort -V | head -n 1)" != "$MIN_RUSTC" ]; then
+    echo "rustc $rustc_ver слишком старый: нужно >= $MIN_RUSTC (icu_* 2.3)." >&2
+    echo "Поставь rustup-тулчейн (stable уже подходит): ~/.cargo/bin в PATH." >&2
+    exit 1
+fi
 
 PROJ="$(cd "$(dirname "$0")/.." && pwd)"
 CLIENT="$PROJ/opencode-client"
