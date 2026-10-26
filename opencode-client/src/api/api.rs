@@ -50,6 +50,12 @@ pub trait OpenCodeApi: Clone + Send + Sync + 'static {
     /// GET /session — session list.
     fn list_sessions(&self) -> impl Future<Output = Result<serde_json::Value, String>> + Send;
 
+    /// GET /api/session/active — sessions the server is currently running,
+    /// keyed by session id (`{data: {"ses…": {type: "running"}}}`). The
+    /// authoritative answer to "is this session working", used to repair the
+    /// turn state on (re)connect.
+    fn active_sessions(&self) -> impl Future<Output = Result<serde_json::Value, String>> + Send;
+
     /// PATCH /session/{id} — rename a session.
     fn rename_session(
         &self,

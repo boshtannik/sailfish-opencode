@@ -171,6 +171,24 @@ impl OpenCodeApi for V2Adapter {
         }
     }
 
+    /// GET /api/session/active — `{data: {"ses…": {type:"running"}}}`. The
+    /// server's own view of which sessions are draining; absent = inactive.
+    fn active_sessions(&self) -> impl Future<Output = Result<serde_json::Value, String>> + Send {
+        async move {
+            let url = format!("{}/api/session/active", self.base);
+            let resp = self
+                .authed(self.http.get(&url))
+                .send()
+                .await
+                .map_err(|e| e.to_string())?;
+            if !resp.status().is_success() {
+                return Err(format!("HTTP {}", resp.status()));
+            }
+            let v: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+            Ok(Self::unwrap_data(v))
+        }
+    }
+
     /// PATCH /api/session/{id} `{title}` → 204.
     fn rename_session(
         &self,

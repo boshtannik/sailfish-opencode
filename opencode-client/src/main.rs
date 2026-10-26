@@ -380,37 +380,6 @@ async fn run_stream_adapter(
     .await
 }
 
-/// Normalised retry/busy/idle state, from the v2 `session.status` event — so
-/// the main loop formats the status banner once.
-enum RetryStatus {
-    Idle,
-    Busy,
-    Retry {
-        attempt: u32,
-        message: String,
-        next: u64,
-    },
-}
-
-/// Extract the retry/busy/idle state from a `session.status` event.
-fn retry_status(env: &opencode_client::types::v2::EventEnvelope) -> Option<(String, RetryStatus)> {
-    use opencode_client::types::v2::event::SessionStatusValue;
-    if env.kind != opencode_client::types::v2::keys::STATUS {
-        return None;
-    }
-    let d: opencode_client::types::v2::event::SessionStatusData =
-        serde_json::from_value(env.data.clone()).ok()?;
-    let st = match d.status {
-        SessionStatusValue::Retry { attempt, message, next } => {
-            RetryStatus::Retry { attempt, message, next }
-        }
-        SessionStatusValue::Busy => RetryStatus::Busy,
-        SessionStatusValue::Idle => RetryStatus::Idle,
-        SessionStatusValue::Unknown => return None,
-    };
-    Some((d.sessionID, st))
-}
-
 /// Per-turn streaming accumulators plus the shared IO handles a terminal
 /// streaming event needs. Bundling them keeps the v2 terminal handlers
 /// (`on_v2_event`/`on_v2_idle`) signature small.
@@ -429,7 +398,6 @@ struct TurnState<'a> {
     last_answer_push: &'a mut u64,
     current_session: Option<&'a str>,
     pending: &'a Arc<std::sync::Mutex<Vec<String>>>,
-    status: &'a Arc<std::sync::Mutex<String>>,
     voice: &'a Arc<voice::VoiceState>,
 }
 
@@ -574,7 +542,9 @@ impl<'a> TurnState<'a> {
                 }
             }
         }
-        set_server_status(self.status, &markers::ServerConnectionStatus::Idle);
+        // Note: the turn status (`busy` → `idle`) is published by the
+        // dispatcher's FSM when it sees the same `session.execution.*` /
+        // `session.idle` event — the single writer of the composer gate.
         self.parts.clear();
         self.text_live.clear();
         self.text_order.clear();
@@ -716,6 +686,20 @@ async fn run_stream<A: api::OpenCodeApi>(
     refresh_sounds(&sounds);
     // Resume the last session on startup — the chat shows its history.
     resume_last_session(&client, &mut current_session, &current_session_shared, &worker_pending, &todos, &dispatcher, &sessions).await;
+    // Repair the turn state from the server's own answer: frames sent while
+    // we were disconnected are gone from the stream, and a turn may have
+    // started or ended in that window. No timeout is involved — this is the
+    // authoritative `GET /api/session/active` map, checked on every (re)connect.
+    match client.active_sessions().await {
+        Ok(active) => {
+            {
+                let mut st = dispatcher.lock().await;
+                event::dispatcher::reconcile_active_sessions(&mut st, &active);
+            }
+            sync_status_from_fsm(&dispatcher, &status, current_session.as_deref()).await;
+        }
+        Err(e) => log::warn!("session/active: {e}"),
+    }
     // The server may already be waiting for an answer (the client started
     // late, or the `form.created` frame was missed): ask for the pending
     // forms once, up front.
@@ -738,49 +722,10 @@ async fn run_stream<A: api::OpenCodeApi>(
             item = stream.next() => {
                 match item {
                     Some(Ok(env)) => {
-                        // The server reports its own retry state (retryable model
-                        // errors such as a failed URL call or an exhausted quota):
-                        // `session.status` carries the human message, the attempt
-                        // number and `next` — the ms timestamp of the next try.
-                        // Mirror the TUI: show "message — retrying in N s (#attempt)".
-                        if let Some((sid, retry)) = retry_status(&env) {
-                            if current_session.as_deref() == Some(sid.as_str()) {
-                                match retry {
-                                    RetryStatus::Retry { attempt, message, next } => {
-                                        // Token consumed by QML StatusHeader (live countdown):
-                                        // `retry|<next_ms>|<attempt>|<message>`.
-                                        log::info!(
-                                            "session retry #{} at {}: {message}",
-                                            attempt, next
-                                        );
-                                        set_server_status(
-                                            &status,
-                                            &markers::ServerConnectionStatus::Retry {
-                                                next,
-                                                attempt,
-                                                message,
-                                            },
-                                        );
-                                    }
-                                    RetryStatus::Busy => {
-                                        set_server_status(&status, &markers::ServerConnectionStatus::Busy)
-                                    }
-                                    // The server's idle is authoritative: it clears a
-                                    // pending retry (and with it the "waiting…" banner
-                                    // and the disabled input). It used to be a no-op,
-                                    // which left the plate — and the composer — stuck
-                                    // on `retry|…` whenever the turn ended without an
-                                    // `execution.*` event.
-                                    RetryStatus::Idle => set_server_status(
-                                        &status,
-                                        &markers::ServerConnectionStatus::Idle,
-                                    ),
-                                }
-                            }
-                        }
                         {
                             // The event hub (`dispatch`) owns what each server
-                            // event does; we only lend it the streaming
+                            // event does — including the turn status the
+                            // composer gates on; we only lend it the streaming
                             // accumulators for this turn.
                             let mut stream = event::dispatcher::StreamState {
                                 pending: &*worker_pending,
@@ -873,7 +818,6 @@ async fn run_stream<A: api::OpenCodeApi>(
                             last_answer_push: &mut last_answer_push,
                             current_session: current_session.as_deref(),
                             pending: &worker_pending,
-                            status: &status,
                             voice: &voice,
                         };
                         turn.on_v2_event(&env, &client).await;
@@ -889,9 +833,6 @@ async fn run_stream<A: api::OpenCodeApi>(
             }
             _ = tick.tick() => {
                 ticks = ticks.wrapping_add(1);
-                // Never let an overdue retry token lock the composer (a missing
-                // follow-up event would otherwise keep the session "busy").
-                clear_expired_retry(&status);
 
                 // Commands from QML: new / open / rename / delete (JSON).
                 for raw in commands.lock().map(|mut q| std::mem::take(&mut *q)).unwrap_or_default() {
@@ -928,6 +869,7 @@ async fn run_stream<A: api::OpenCodeApi>(
                                     ensure_session_model(&client, id, &dispatcher).await;
                                     refresh_sessions(&client, &sessions, &dispatcher).await;
                                     set_current_session(&current_session_shared, &current_session);
+                                    sync_status_from_fsm(&dispatcher, &status, current_session.as_deref()).await;
                                     if let Ok(mut g) = todos.lock() {
                                         *g = "[]".to_string();
                                     }
@@ -967,8 +909,11 @@ async fn run_stream<A: api::OpenCodeApi>(
                             load_history(&client, id, &worker_pending, &dispatcher).await;
                             ensure_session_model(&client, id, &dispatcher).await;
                             refresh_sessions(&client, &sessions, &dispatcher).await;
-                            set_server_status(&status, &markers::ServerConnectionStatus::Idle);
                             set_current_session(&current_session_shared, &current_session);
+                            // The token belongs to the session now on screen:
+                            // show ITS turn state (it may still be working in
+                            // the background) rather than a guessed idle.
+                            sync_status_from_fsm(&dispatcher, &status, current_session.as_deref()).await;
                             refresh_todo(&client, id, &todos).await;
                         }
                         Cmd::Fork { id, message } => {
@@ -1001,6 +946,7 @@ async fn run_stream<A: api::OpenCodeApi>(
                                         ensure_session_model(&client, new_id, &dispatcher).await;
                                         refresh_sessions(&client, &sessions, &dispatcher).await;
                                         set_current_session(&current_session_shared, &current_session);
+                                        sync_status_from_fsm(&dispatcher, &status, current_session.as_deref()).await;
                                         refresh_todo(&client, new_id, &todos).await;
                                         request_nav(&nav, 2);
                                     }
@@ -1299,6 +1245,7 @@ async fn run_stream<A: api::OpenCodeApi>(
                                         current_session = None;
                                         persist_last_session(None);
                                         set_current_session(&current_session_shared, &current_session);
+                                        sync_status_from_fsm(&dispatcher, &status, current_session.as_deref()).await;
                                         if let Ok(mut g) = todos.lock() {
                                             *g = "[]".to_string();
                                         }
@@ -1341,6 +1288,7 @@ async fn run_stream<A: api::OpenCodeApi>(
                                 current_session = None;
                                 persist_last_session(None);
                                 set_current_session(&current_session_shared, &current_session);
+                                sync_status_from_fsm(&dispatcher, &status, current_session.as_deref()).await;
                                 if let Ok(mut g) = todos.lock() {
                                     *g = "[]".to_string();
                                 }
@@ -1370,6 +1318,7 @@ async fn run_stream<A: api::OpenCodeApi>(
                                         }
                                         clear_tools(&dispatcher, &tools).await;
                                         set_current_session(&current_session_shared, &current_session);
+                                        sync_status_from_fsm(&dispatcher, &status, current_session.as_deref()).await;
                                         if let Ok(mut g) = todos.lock() {
                                             *g = "[]".to_string();
                                         }
@@ -2068,31 +2017,31 @@ fn set_server_status(status: &Arc<std::sync::Mutex<String>>, s: &markers::Server
     }
 }
 
-/// Clear a `retry|<next_ms>|<attempt>|<message>` token whose deadline has
-/// passed by more than [`RETRY_GRACE_MS`].
+/// Mirror the turn status of the session on screen (kept by the dispatcher's
+/// per-session FSM) into the QML token. Called after the UI switches sessions:
+/// the token is global, so it must follow the session the user now sees.
 ///
-/// The retry token is a promise: the server is expected to report the next
-/// state (`busy` when it tries again, `idle`/`error` when the turn ends) once
-/// `next` arrives. When that follow-up never comes — the server gave up on the
-/// turn quietly, the quota error ended it without `execution.*`, the app was
-/// suspended, … — the client would stay "busy" forever. Because the composer
-/// is disabled while busy, that locks the user out of the input entirely. The
-/// deadline is a hard bound: past it, the session is effectively idle, so fall
-/// back to idle and let the next server event drive the plate again.
-fn clear_expired_retry(status: &Arc<std::sync::Mutex<String>>) {
-    const RETRY_GRACE_MS: u64 = 5_000;
-    let Ok(mut g) = status.lock() else { return };
-    let Some(rest) = g.strip_prefix(markers::STATUS_RETRY_PREFIX) else {
-        return;
+/// Only a turn token is replaced — `connecting`/`error` belong to the SSE
+/// connection, not to a session, and must survive a switch.
+async fn sync_status_from_fsm(
+    dispatcher: &event::dispatcher::SharedState,
+    status: &Arc<std::sync::Mutex<String>>,
+    current_session: Option<&str>,
+) {
+    let token = {
+        let st = dispatcher.lock().await;
+        match current_session {
+            Some(sid) => event::dispatcher::status_token_for(&st, sid),
+            None => markers::STATUS_IDLE.to_string(),
+        }
     };
-    let next = rest
-        .split('|')
-        .next()
-        .and_then(|s| s.parse::<u64>().ok())
-        .unwrap_or(0);
-    if next > 0 && i18n::now_ms() > next.saturating_add(RETRY_GRACE_MS) {
-        log::info!("retry deadline passed without a server follow-up — status back to idle");
-        *g = markers::ServerConnectionStatus::Idle.to_status_string();
+    let Ok(mut g) = status.lock() else { return };
+    let is_turn = g.is_empty()
+        || g.as_str() == markers::STATUS_IDLE
+        || g.as_str() == markers::STATUS_BUSY
+        || g.starts_with(markers::STATUS_RETRY_PREFIX);
+    if is_turn {
+        *g = token;
     }
 }
 

@@ -14,4 +14,9 @@ impl SessionFsm {
     pub fn is_busy(&self) -> bool {
         matches!(self.status, SessionStatus::Busy | SessionStatus::Retry { .. })
     }
+
+    /// A pending server-reported retry (busy with a banner and a deadline).
+    pub fn is_retry(&self) -> bool {
+        matches!(self.status, SessionStatus::Retry { .. })
+    }
 }

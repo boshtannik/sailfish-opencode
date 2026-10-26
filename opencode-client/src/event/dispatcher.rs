@@ -11,6 +11,7 @@ use crate::state::permission::PermissionQueue;
 use crate::state::form::FormQueue;
 use crate::state::session::SessionFsm;
 use crate::state::tool::ToolStore;
+use crate::types::session::SessionStatus;
 use crate::types::tool::ToolState;
 use crate::types::v2::EventEnvelope;
 use crate::types::v2::keys as k;
@@ -102,6 +103,102 @@ fn v2_reasoning_key(assistant_message_id: &str, ordinal: i64) -> String {
     format!("r:{assistant_message_id}:{ordinal}")
 }
 
+/// QML status token for a turn state: `idle`, `busy` or
+/// `retry|<next_ms>|<attempt>|<message>`. This is the token the composer gates
+/// on (`busy` disables sending/typing, a `retry|…` token keeps the input open
+/// but send disabled — see `ChatPage.qml`).
+fn status_token(status: &SessionStatus) -> String {
+    match status {
+        SessionStatus::Idle => crate::markers::STATUS_IDLE.to_string(),
+        SessionStatus::Busy => crate::markers::STATUS_BUSY.to_string(),
+        SessionStatus::Retry {
+            attempt,
+            message,
+            next,
+        } => crate::markers::ServerConnectionStatus::Retry {
+            next: *next,
+            attempt: *attempt,
+            message: message.clone(),
+        }
+        .to_status_string(),
+    }
+}
+
+/// The one place that writes "is this session working": store the server's
+/// event in the per-session FSM and, when that session is the one on screen,
+/// mirror it into the status token QML renders.
+///
+/// Turn state is driven exclusively by server events
+/// (`session.status` / `session.execution.*` / step lifecycle / errors) — no
+/// deadline ever flips it. A missed frame is repaired from the server's own
+/// `GET /api/session/active` answer on (re)connect, see
+/// [`reconcile_active_sessions`].
+fn set_turn_status(
+    state: &mut DispatcherState,
+    stream: &StreamState<'_>,
+    session_id: &str,
+    status: SessionStatus,
+) {
+    let shown = stream.current_session == Some(session_id);
+    let fsm = state
+        .sessions
+        .entry(session_id.to_string())
+        .or_insert_with(SessionFsm::default);
+    fsm.apply(status.clone());
+    if shown {
+        if let Ok(mut s) = stream.status.lock() {
+            *s = status_token(&status);
+        }
+    }
+}
+
+/// Status token for a session, from its FSM state (`idle` when unknown).
+///
+/// Used by the worker after a UI session switch: the token is global, so it
+/// must follow the session the user now sees. The session's own server events
+/// keep it current afterwards.
+pub fn status_token_for(state: &DispatcherState, session_id: &str) -> String {
+    state
+        .sessions
+        .get(session_id)
+        .map(|fsm| status_token(&fsm.status))
+        .unwrap_or_else(|| status_token(&SessionStatus::Idle))
+}
+
+/// Repair the turn state from `GET /api/session/active` — the server's own
+/// answer to "which sessions are running". Called when the SSE connection is
+/// (re)established, where frames were missed while disconnected.
+///
+/// A session the server still runs is busy; a pending `retry|…` is kept (it is
+/// a busy variant with the banner already on screen, and the server will move
+/// it forward). Anything absent from the map is idle — including a retry whose
+/// turn died while the client was away.
+pub fn reconcile_active_sessions(state: &mut DispatcherState, active: &serde_json::Value) {
+    let active: HashSet<&str> = active
+        .as_object()
+        .map(|m| {
+            m.keys()
+                .map(String::as_str)
+                .filter(|id| id.starts_with("ses"))
+                .collect()
+        })
+        .unwrap_or_default();
+    for sid in &active {
+        let fsm = state
+            .sessions
+            .entry((*sid).to_string())
+            .or_insert_with(SessionFsm::default);
+        if matches!(fsm.status, SessionStatus::Idle) {
+            fsm.apply(SessionStatus::Busy);
+        }
+    }
+    for (sid, fsm) in state.sessions.iter_mut() {
+        if !active.contains(sid.as_str()) {
+            fsm.apply(SessionStatus::Idle);
+        }
+    }
+}
+
 /// Dispatch a single v2 envelope onto the shared state. Mirrors `dispatch`:
 /// every known type is handled, the rest warn once via `note_unimplemented_v2`.
 pub fn dispatch_v2(
@@ -137,8 +234,12 @@ pub fn dispatch_v2(
                     // session's current model on v2 (whose session GET/list have
                     // no `model`), alongside `session.model.selected`.
                     if let Some(m) = record_step_model(d.model.as_ref()) {
-                        state.session_models.insert(d.session_id, m);
+                        state.session_models.insert(d.session_id.clone(), m);
                     }
+                    // A step opening means the server is working again: busy,
+                    // which also drops a stale `retry|…` banner (the retry
+                    // succeeded and is generating).
+                    set_turn_status(state, stream, &d.session_id, SessionStatus::Busy);
                     true
                 }
                 Err(e) => from_data_error(env, &e),
@@ -161,6 +262,11 @@ pub fn dispatch_v2(
                 if !is_aborted_error(d.error.as_ref()) {
                     on_session_error_v2(stream, d.error.as_ref());
                 }
+                // The step is over and the turn cannot make progress here: a
+                // retry that dies on this step gets no follow-up status event,
+                // so drop it now (idle). If the server retries instead, the
+                // next `step.started` puts the session back to busy.
+                set_turn_status(state, stream, &d.session_id, SessionStatus::Idle);
                 true
             }
             Err(e) => from_data_error(env, &e),
@@ -317,19 +423,25 @@ pub fn dispatch_v2(
         // own send path). Recognised so they are not reported as unknown.
         k::SYNTHETIC | k::REVERT_STAGED | k::REVERT_CLEARED | k::REVERT_COMMITTED
         | k::SHELL_STARTED | k::SHELL_ENDED | k::MESSAGE_CONTENT_UPDATED
-        | k::USAGE_RECORDED | k::USAGE_UPDATED | k::EXECUTION_STARTED => true,
+        | k::USAGE_RECORDED | k::USAGE_UPDATED => true,
         // ── turn lifecycle (2.0.32) ───────────────────────────────────
         // The real turn-end signal: `session.execution.succeeded` on success,
-        // `session.execution.interrupted` on a user stop. Both are a clean end
-        // (the main loop's `on_v2_idle` flushes the answer and sets idle).
-        // `session.execution.failed` is a failed turn, but the connection is
-        // still alive — it must NOT paint the connection indicator red, which
-        // is reserved for a real SSE/daemon loss. The red feed bubble explains
-        // the failure (quota, provider error, …).
-        k::EXECUTION_SUCCEEDED | k::EXECUTION_INTERRUPTED => true,
-        k::EXECUTION_FAILED => {
-            if let Ok(mut s) = stream.status.lock() {
-                *s = crate::markers::ServerConnectionStatus::Idle.to_status_string();
+        // `session.execution.interrupted` on a user stop, `.failed` on a
+        // failed turn. All three end it; `.failed` must NOT paint the
+        // connection indicator red — that is reserved for a real SSE/daemon
+        // loss. The red feed bubble explains the failure (quota, provider
+        // error, …).
+        k::EXECUTION_STARTED => {
+            // The server started draining the turn: busy. This is also how a
+            // resumed retry stops looking like a retry.
+            if let Ok(d) = from_data::<v2::SessionIdleData>(env) {
+                set_turn_status(state, stream, &d.sessionID, SessionStatus::Busy);
+            }
+            true
+        }
+        k::EXECUTION_SUCCEEDED | k::EXECUTION_INTERRUPTED | k::EXECUTION_FAILED => {
+            if let Ok(d) = from_data::<v2::SessionIdleData>(env) {
+                set_turn_status(state, stream, &d.sessionID, SessionStatus::Idle);
             }
             true
         },
@@ -346,9 +458,7 @@ pub fn dispatch_v2(
         // ── status / idle ─────────────────────────────────────────────
         k::IDLE => match from_data::<v2::SessionIdleData>(env) {
             Ok(d) => {
-                if let Some(fsm) = state.sessions.get_mut(&d.sessionID) {
-                    fsm.apply(crate::types::session::SessionStatus::Idle);
-                }
+                set_turn_status(state, stream, &d.sessionID, SessionStatus::Idle);
                 if stream.current_session == Some(d.sessionID.as_str()) {
                     if let Ok(mut g) = stream.compacting.lock() {
                         *g = false;
@@ -362,22 +472,29 @@ pub fn dispatch_v2(
         },
         k::STATUS => match from_data::<v2::SessionStatusData>(env) {
             Ok(d) => {
-                let fsm = state
-                    .sessions
-                    .entry(d.sessionID.clone())
-                    .or_insert_with(SessionFsm::default);
-                match d.status {
-                    v2::SessionStatusValue::Idle => {
-                        fsm.apply(crate::types::session::SessionStatus::Idle)
+                let status = match d.status {
+                    v2::SessionStatusValue::Idle => SessionStatus::Idle,
+                    v2::SessionStatusValue::Busy => SessionStatus::Busy,
+                    v2::SessionStatusValue::Retry {
+                        attempt,
+                        message,
+                        next,
+                    } => {
+                        // Mirror the TUI: the human message, the attempt and
+                        // the ms timestamp of the next try drive the banner
+                        // (live countdown in QML).
+                        if stream.current_session == Some(d.sessionID.as_str()) {
+                            log::info!("session retry #{attempt} at {next}: {message}");
+                        }
+                        SessionStatus::Retry {
+                            attempt,
+                            message,
+                            next,
+                        }
                     }
-                    v2::SessionStatusValue::Busy => {
-                        fsm.apply(crate::types::session::SessionStatus::Busy)
-                    }
-                    v2::SessionStatusValue::Retry { attempt, message, next } => fsm.apply(
-                        crate::types::session::SessionStatus::Retry { attempt, message, next },
-                    ),
-                    v2::SessionStatusValue::Unknown => {}
-                }
+                    v2::SessionStatusValue::Unknown => return true,
+                };
+                set_turn_status(state, stream, &d.sessionID, status);
                 true
             }
             Err(e) => from_data_error(env, &e),
@@ -427,13 +544,11 @@ pub fn dispatch_v2(
         // not stay on screen (the server's list is the authority — the poll
         // would drop it too, but the card would linger until then).
         k::SESSION_ERROR => {
-            // Same as `on_session_error_v2`: a failed turn must not leave a
-            // pending `retry|…` token behind (no follow-up event follows), or
-            // the input stays disabled forever.
-            if let Ok(mut s) = stream.status.lock() {
-                if s.starts_with(crate::markers::STATUS_RETRY_PREFIX) {
-                    *s = crate::markers::ServerConnectionStatus::Idle.to_status_string();
-                }
+            // A failed turn must not leave the session busy: without a
+            // follow-up event the composer would stay disabled. Idle here; a
+            // retryable failure arrives as its own `session.status` afterwards.
+            if let Some(sid) = env.data.get(k::SESSION_ID).and_then(|v| v.as_str()) {
+                set_turn_status(state, stream, sid, SessionStatus::Idle);
             }
             let err = env.data.get(k::ERROR).cloned().unwrap_or_default();
             let err_type = err.get(k::TYPE).and_then(|v| v.as_str()).unwrap_or("");
@@ -654,18 +769,6 @@ fn record_step_model(model: Option<&serde_json::Value>) -> Option<(String, Strin
 
 /// v2 `session.error`-equivalent: surface a structured error as a feed line.
 fn on_session_error_v2(stream: &mut StreamState<'_>, error: Option<&serde_json::Value>) {
-    // A failure supersedes a pending retry: if the server had scheduled a
-    // retry and the next attempt failed for good (quota exhausted, provider
-    // error, …) there is no follow-up status event. Leaving the `retry|…`
-    // token in place would keep the session "busy" forever — and the input
-    // field is disabled while busy (see ChatPage.qml), so the user could not
-    // type at all. The red feed bubble explains the failure; the connection
-    // itself is untouched, so the plate goes back to idle.
-    if let Ok(mut s) = stream.status.lock() {
-        if s.starts_with(crate::markers::STATUS_RETRY_PREFIX) {
-            *s = crate::markers::ServerConnectionStatus::Idle.to_status_string();
-        }
-    }
     let msg = human_session_error_value(error);
     if msg.is_empty() {
         return;
@@ -1600,11 +1703,12 @@ mod tests {
     }
 
     /// A business/turn failure (quota, provider, …) arrives as `step.failed`
-    /// with a structured error: it pushes the red feed line but must leave the
-    /// header status untouched. Red is reserved for a real SSE/daemon loss (set
-    /// by the SSE loop), otherwise a quota error falsely claims the daemon died.
+    /// with a structured error: it pushes the red feed line but must NOT paint
+    /// the connection plate red. Red is reserved for a real SSE/daemon loss
+    /// (set by the SSE loop), otherwise a quota error falsely claims the daemon
+    /// died. The turn is over, so the session goes idle (composer usable again).
     #[test]
-    fn business_error_keeps_connection_status_unchanged() {
+    fn business_error_does_not_paint_the_connection_red() {
         use crate::types::v2::keys as k;
         let mut fx = Fixture::new();
         *fx.status.lock().unwrap() = "busy".to_string();
@@ -1624,7 +1728,10 @@ mod tests {
             let mut stream = fx.stream(Some("ses1"));
             assert!(dispatch_v2(&env, &mut state, &mut stream));
         }
-        assert_eq!(fx.status.lock().unwrap().as_str(), "busy");
+        assert_eq!(
+            fx.status.lock().unwrap().as_str(),
+            crate::markers::STATUS_IDLE
+        );
         let q = fx.pending.lock().unwrap();
         assert_eq!(q.len(), 1, "{q:?}");
         assert!(q[0].contains("Free usage limit exceeded"), "{}", q[0]);
@@ -1715,5 +1822,158 @@ mod tests {
             fx.status.lock().unwrap().as_str(),
             crate::markers::STATUS_IDLE
         );
+    }
+
+    /// `session.status retry` is the server's own word: the shown session gets
+    /// the retry banner token (the FSM records busy-with-a-deadline) and the
+    /// main loop no longer has to parse the event itself.
+    #[test]
+    fn retry_status_publishes_the_banner_token() {
+        use crate::types::v2::keys as k;
+        let mut fx = Fixture::new();
+        let mut state = DispatcherState::default();
+        let env = envelope(
+            k::STATUS,
+            serde_json::json!({
+                "sessionID": "ses1",
+                "status": { "type": "retry", "attempt": 2, "message": "quota", "next": 1_700_000_000_000u64 }
+            }),
+        );
+        {
+            let mut stream = fx.stream(Some("ses1"));
+            assert!(dispatch_v2(&env, &mut state, &mut stream));
+        }
+        assert_eq!(
+            fx.status.lock().unwrap().as_str(),
+            "retry|1700000000000|2|quota"
+        );
+        assert!(state.sessions.get("ses1").unwrap().is_busy());
+    }
+
+    /// The status token is global and belongs to the session on screen: another
+    /// session's status updates only its own FSM entry.
+    #[test]
+    fn other_sessions_status_does_not_touch_the_shown_token() {
+        use crate::types::v2::keys as k;
+        let mut fx = Fixture::new();
+        let mut state = DispatcherState::default();
+        let busy_elsewhere = envelope(
+            k::STATUS,
+            serde_json::json!({ "sessionID": "ses2", "status": { "type": "busy" } }),
+        );
+        {
+            let mut stream = fx.stream(Some("ses1"));
+            assert!(dispatch_v2(&busy_elsewhere, &mut state, &mut stream));
+        }
+        assert_eq!(fx.status.lock().unwrap().as_str(), "");
+        assert!(state.sessions.get("ses2").unwrap().is_busy());
+        assert!(state.sessions.get("ses1").is_none());
+        // Switching to ses2 must surface its busy state.
+        assert_eq!(status_token_for(&state, "ses2"), crate::markers::STATUS_BUSY);
+        assert_eq!(status_token_for(&state, "ses1"), crate::markers::STATUS_IDLE);
+    }
+
+    /// `session.execution.started` means the server is draining the turn —
+    /// busy, even if no status event arrived (or a previous turn ended late).
+    #[test]
+    fn execution_started_sets_busy() {
+        use crate::types::v2::keys as k;
+        let mut fx = Fixture::new();
+        *fx.status.lock().unwrap() = crate::markers::STATUS_IDLE.to_string();
+        let mut state = DispatcherState::default();
+        let env = envelope(
+            k::EXECUTION_STARTED,
+            serde_json::json!({ "sessionID": "ses1" }),
+        );
+        {
+            let mut stream = fx.stream(Some("ses1"));
+            assert!(dispatch_v2(&env, &mut state, &mut stream));
+        }
+        assert_eq!(
+            fx.status.lock().unwrap().as_str(),
+            crate::markers::STATUS_BUSY
+        );
+    }
+
+    /// A retry that succeeds: the next `step.started` means generation resumed,
+    /// so the `retry|…` banner must go away (and the composer's send button
+    /// come back as a stop).
+    #[test]
+    fn step_started_clears_a_pending_retry_token() {
+        use crate::types::v2::keys as k;
+        let mut fx = Fixture::new();
+        *fx.status.lock().unwrap() = format!(
+            "{}{}",
+            crate::markers::STATUS_RETRY_PREFIX,
+            "1700000000000|3|quota"
+        );
+        let mut state = DispatcherState::default();
+        state.sessions.insert(
+            "ses1".to_string(),
+            SessionFsm {
+                status: SessionStatus::Retry {
+                    attempt: 3,
+                    message: "quota".to_string(),
+                    next: 1_700_000_000_000,
+                },
+            },
+        );
+        let env = envelope(
+            k::STEP_STARTED,
+            serde_json::json!({
+                "sessionID": "ses1",
+                "assistantMessageID": "msg1"
+            }),
+        );
+        {
+            let mut stream = fx.stream(Some("ses1"));
+            assert!(dispatch_v2(&env, &mut state, &mut stream));
+        }
+        assert_eq!(
+            fx.status.lock().unwrap().as_str(),
+            crate::markers::STATUS_BUSY
+        );
+        assert!(state.sessions.get("ses1").unwrap().is_busy());
+    }
+
+    /// Reconnect repair: `GET /api/session/active` is the server's own answer.
+    /// A running session is busy, a pending retry is kept, anything absent is
+    /// idle — no timer involved.
+    #[test]
+    fn reconcile_active_sessions_follows_the_server_map() {
+        let mut state = DispatcherState::default();
+        state.sessions.insert(
+            "ses_running".to_string(),
+            SessionFsm {
+                status: SessionStatus::Idle,
+            },
+        );
+        state.sessions.insert(
+            "ses_retrying".to_string(),
+            SessionFsm {
+                status: SessionStatus::Retry {
+                    attempt: 1,
+                    message: "quota".to_string(),
+                    next: 1_700_000_000_000,
+                },
+            },
+        );
+        state.sessions.insert(
+            "ses_stale".to_string(),
+            SessionFsm {
+                status: SessionStatus::Busy,
+            },
+        );
+        let active = serde_json::json!({
+            "ses_running": { "type": "running" },
+            "ses_retrying": { "type": "running" },
+            "ses_new": { "type": "running" },
+        });
+        reconcile_active_sessions(&mut state, &active);
+        assert!(state.sessions.get("ses_running").unwrap().is_busy());
+        assert!(state.sessions.get("ses_retrying").unwrap().is_busy());
+        assert!(state.sessions.get("ses_retrying").unwrap().is_retry());
+        assert!(!state.sessions.get("ses_stale").unwrap().is_busy());
+        assert!(state.sessions.get("ses_new").unwrap().is_busy());
     }
 }
