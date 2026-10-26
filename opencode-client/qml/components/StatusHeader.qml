@@ -10,7 +10,8 @@ Item {
 
     // Server-reported retry status: `retry|<next_ms>|<attempt>|<message>`
     // (set by the worker on the `session.status` SSE event, see main.rs).
-    // Mirrors the opencode TUI line: "message — retrying in N s - attempt #A".
+    // The header itself stays one line ("waiting…"); the details (server
+    // message + live countdown + attempt) live in ChatPage's retry banner.
     readonly property var retry: {
         var s = appWindow && appWindow.statusText ? appWindow.statusText : ""
         var prefix = appWindow && appWindow.kServerStatusRetryPrefix
@@ -23,36 +24,6 @@ Item {
             attempt: parseInt(p[1], 10),
             message: p.slice(2).join("|")
         }
-    }
-    // Ticks once per second so the countdown below is live.
-    property int tick: 0
-    Timer {
-        interval: 1000
-        repeat: true
-        running: statusHeader.retry !== null
-        onTriggered: statusHeader.tick++
-    }
-    readonly property int retrySeconds: {
-        if (!statusHeader.retry) return 0
-        statusHeader.tick // dependency: re-evaluate every second
-        return Math.max(0, Math.ceil((statusHeader.retry.next - Date.now()) / 1000))
-    }
-    readonly property string remainingText: {
-        if (!statusHeader.retry) return ""
-        if (appWindow && appWindow.formatRemainingTime)
-            return appWindow.formatRemainingTime(statusHeader.retrySeconds)
-        return statusHeader.retrySeconds + "s"
-    }
-    readonly property string retryText: {
-        if (!statusHeader.retry) return ""
-        var line = qsTr("retrying")
-        if (statusHeader.retrySeconds > 0)
-            line += " " + qsTr("in %1").arg(statusHeader.remainingText)
-        var tail = qsTr("attempt #%1").arg(statusHeader.retry.attempt)
-        var msg = statusHeader.retry.message
-        if (msg !== "")
-            return msg + " — " + line + " - " + tail
-        return line + " - " + tail
     }
 
     // Single-line connection header: [●] opencode [connecting | idle | busy | waiting… | error]

@@ -330,7 +330,7 @@ Item {
             top: compactionBanner.visible ? compactionBanner.bottom : (retryBanner.visible ? retryBanner.bottom : header.bottom)
             left: parent.left
             right: parent.right
-            bottom: retryStrip.visible ? retryStrip.top : (revertStrip.visible ? revertStrip.top : inputPanel.top)
+            bottom: revertStrip.visible ? revertStrip.top : inputPanel.top
         }
         model: appWindow.chatModel
         clip: true
@@ -891,55 +891,6 @@ Item {
             height: Theme.itemSizeExtraSmall
             text: qsTr("Restore")
             onClicked: appWindow.unrevertSession()
-        }
-
-        // Hairline separating the banner from the chat above.
-        Rectangle {
-            anchors {
-                left: parent.left
-                right: parent.right
-                top: parent.top
-            }
-            height: 1
-            color: Theme.rgba(Theme.primaryColor, 0.15)
-        }
-    }
-
-    // ── Strip shown when a server retry / quota reset countdown is pending ──
-    Item {
-        id: retryStrip
-        readonly property bool on: header.retry !== null
-        visible: on
-        height: visible ? retryCol.height + 2 * Theme.paddingSmall : 0
-        anchors {
-            left: parent.left
-            right: parent.right
-            bottom: revertStrip.visible ? revertStrip.top : inputPanel.top
-        }
-        clip: true
-
-        Rectangle {
-            anchors.fill: parent
-            color: Theme.rgba("#ff9800", 0.15)
-        }
-
-        Column {
-            id: retryCol
-            anchors {
-                left: parent.left
-                right: parent.right
-                margins: Theme.horizontalPageMargin
-                verticalCenter: parent.verticalCenter
-            }
-            spacing: Theme.paddingSmall
-
-            Label {
-                width: parent.width
-                text: header.retryText
-                wrapMode: Text.Wrap
-                font.pixelSize: Theme.fontSizeExtraSmall
-                color: "#ff9800"
-            }
         }
 
         // Hairline separating the banner from the chat above.
