@@ -908,7 +908,7 @@ Item {
     // ── Strip shown when a server retry / quota reset countdown is pending ──
     Item {
         id: retryStrip
-        readonly property bool on: statusHeader.retry !== null
+        readonly property bool on: header.retry !== null
         visible: on
         height: visible ? retryCol.height + 2 * Theme.paddingSmall : 0
         anchors {
@@ -935,7 +935,7 @@ Item {
 
             Label {
                 width: parent.width
-                text: statusHeader.retryText
+                text: header.retryText
                 wrapMode: Text.Wrap
                 font.pixelSize: Theme.fontSizeExtraSmall
                 color: "#ff9800"
@@ -1107,7 +1107,9 @@ Item {
 
         IconButton {
             id: send
-            visible: !chatPage.busy
+            // During a retry the agent is "busy" but nothing is generating:
+            // show the (disabled) send button instead of an unusable stop.
+            visible: !chatPage.busy || chatPage.retryInfo !== null
             width: Theme.itemSizeMedium
             height: Theme.itemSizeMedium
             anchors {
@@ -1116,7 +1118,10 @@ Item {
                 verticalCenter: inputPanel.verticalCenter
             }
             icon.source: "image://theme/icon-m-enter-accept"
-            enabled: input.text.length > 0 && statusHeader.retry === null
+            // A pending retry is "busy" for the agent but not for the user: the
+            // button stays visible (disabled) so it does not turn into a useless
+            // stop button, and the composer keeps accepting text (see `input`).
+            enabled: input.text.length > 0 && header.retry === null
             onClicked: {
                 appWindow.send(input.text)
                 input.text = ""
@@ -1125,7 +1130,7 @@ Item {
 
         IconButton {
             id: stop
-            visible: chatPage.busy
+            visible: chatPage.busy && header.retry === null
             width: Theme.itemSizeMedium
             height: Theme.itemSizeMedium
             anchors {
@@ -1140,7 +1145,11 @@ Item {
         TextArea {
             id: input
             visible: appWindow.inputMode !== "voice"
-            enabled: !chatPage.busy && statusHeader.retry === null
+            // Typing stays possible while the server retries: only sending is
+            // blocked. Previously a broken binding (`statusHeader` is the
+            // component's internal id, not visible here) silently left this
+            // `false` forever, which locked the user out of the composer.
+            enabled: !chatPage.busy || chatPage.retryInfo !== null
             background: null
             // We draw the placeholder inside the field, not as a layer on top — otherwise
             // the field looks two-level.

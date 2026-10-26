@@ -322,11 +322,14 @@ pub fn dispatch_v2(
         // The real turn-end signal: `session.execution.succeeded` on success,
         // `session.execution.interrupted` on a user stop. Both are a clean end
         // (the main loop's `on_v2_idle` flushes the answer and sets idle).
-        // `session.execution.failed` is a genuine failure → error banner.
+        // `session.execution.failed` is a failed turn, but the connection is
+        // still alive — it must NOT paint the connection indicator red, which
+        // is reserved for a real SSE/daemon loss. The red feed bubble explains
+        // the failure (quota, provider error, …).
         k::EXECUTION_SUCCEEDED | k::EXECUTION_INTERRUPTED => true,
         k::EXECUTION_FAILED => {
             if let Ok(mut s) = stream.status.lock() {
-                *s = "error".to_string();
+                *s = crate::markers::ServerConnectionStatus::Idle.to_status_string();
             }
             true
         },
@@ -424,6 +427,14 @@ pub fn dispatch_v2(
         // not stay on screen (the server's list is the authority — the poll
         // would drop it too, but the card would linger until then).
         k::SESSION_ERROR => {
+            // Same as `on_session_error_v2`: a failed turn must not leave a
+            // pending `retry|…` token behind (no follow-up event follows), or
+            // the input stays disabled forever.
+            if let Ok(mut s) = stream.status.lock() {
+                if s.starts_with(crate::markers::STATUS_RETRY_PREFIX) {
+                    *s = crate::markers::ServerConnectionStatus::Idle.to_status_string();
+                }
+            }
             let err = env.data.get(k::ERROR).cloned().unwrap_or_default();
             let err_type = err.get(k::TYPE).and_then(|v| v.as_str()).unwrap_or("");
             if err_type == k::PERMISSION_REJECTED {
@@ -643,6 +654,18 @@ fn record_step_model(model: Option<&serde_json::Value>) -> Option<(String, Strin
 
 /// v2 `session.error`-equivalent: surface a structured error as a feed line.
 fn on_session_error_v2(stream: &mut StreamState<'_>, error: Option<&serde_json::Value>) {
+    // A failure supersedes a pending retry: if the server had scheduled a
+    // retry and the next attempt failed for good (quota exhausted, provider
+    // error, …) there is no follow-up status event. Leaving the `retry|…`
+    // token in place would keep the session "busy" forever — and the input
+    // field is disabled while busy (see ChatPage.qml), so the user could not
+    // type at all. The red feed bubble explains the failure; the connection
+    // itself is untouched, so the plate goes back to idle.
+    if let Ok(mut s) = stream.status.lock() {
+        if s.starts_with(crate::markers::STATUS_RETRY_PREFIX) {
+            *s = crate::markers::ServerConnectionStatus::Idle.to_status_string();
+        }
+    }
     let msg = human_session_error_value(error);
     if msg.is_empty() {
         return;
@@ -1574,5 +1597,123 @@ mod tests {
         let q = fx.pending.lock().unwrap();
         let tools: Vec<&String> = q.iter().filter(|l| l.contains("[[tool]]")).collect();
         assert_eq!(tools.len(), 1, "progress must not push: {q:?}");
+    }
+
+    /// A business/turn failure (quota, provider, …) arrives as `step.failed`
+    /// with a structured error: it pushes the red feed line but must leave the
+    /// header status untouched. Red is reserved for a real SSE/daemon loss (set
+    /// by the SSE loop), otherwise a quota error falsely claims the daemon died.
+    #[test]
+    fn business_error_keeps_connection_status_unchanged() {
+        use crate::types::v2::keys as k;
+        let mut fx = Fixture::new();
+        *fx.status.lock().unwrap() = "busy".to_string();
+        let mut state = DispatcherState::default();
+        let env = envelope(
+            k::STEP_FAILED,
+            serde_json::json!({
+                "sessionID": "ses1",
+                "assistantMessageID": "msg1",
+                "error": {
+                    "type": "free-usage-exceeded",
+                    "message": "Free usage limit exceeded. Subscribe to GO."
+                }
+            }),
+        );
+        {
+            let mut stream = fx.stream(Some("ses1"));
+            assert!(dispatch_v2(&env, &mut state, &mut stream));
+        }
+        assert_eq!(fx.status.lock().unwrap().as_str(), "busy");
+        let q = fx.pending.lock().unwrap();
+        assert_eq!(q.len(), 1, "{q:?}");
+        assert!(q[0].contains("Free usage limit exceeded"), "{}", q[0]);
+    }
+
+    /// `session.execution.failed` ends the turn while the connection stays
+    /// alive: status returns to idle, NOT error. The red feed bubble explains
+    /// the failure; the connection plate must not turn red.
+    #[test]
+    fn execution_failed_sets_idle_not_error() {
+        use crate::types::v2::keys as k;
+        let mut fx = Fixture::new();
+        *fx.status.lock().unwrap() = "busy".to_string();
+        let mut state = DispatcherState::default();
+        let env = envelope(k::EXECUTION_FAILED, serde_json::json!({ "sessionID": "ses1" }));
+        {
+            let mut stream = fx.stream(Some("ses1"));
+            assert!(dispatch_v2(&env, &mut state, &mut stream));
+        }
+        assert_eq!(
+            fx.status.lock().unwrap().as_str(),
+            crate::markers::STATUS_IDLE
+        );
+    }
+
+    /// A retry that ends in a hard failure never gets a follow-up state event:
+    /// `step.failed` must therefore drop the `retry|…` token. Otherwise the
+    /// session stays "busy" forever — the composer is disabled while busy, so
+    /// the user could not type at all.
+    #[test]
+    fn step_failed_clears_a_pending_retry_token() {
+        use crate::types::v2::keys as k;
+        let mut fx = Fixture::new();
+        *fx.status.lock().unwrap() = format!(
+            "{}{}",
+            crate::markers::STATUS_RETRY_PREFIX,
+            "1700000000000|3|quota"
+        );
+        let mut state = DispatcherState::default();
+        let env = envelope(
+            k::STEP_FAILED,
+            serde_json::json!({
+                "sessionID": "ses1",
+                "assistantMessageID": "msg1",
+                "error": {
+                    "type": "free-usage-exceeded",
+                    "message": "Free usage limit exceeded. Subscribe to GO."
+                }
+            }),
+        );
+        {
+            let mut stream = fx.stream(Some("ses1"));
+            assert!(dispatch_v2(&env, &mut state, &mut stream));
+        }
+        assert_eq!(
+            fx.status.lock().unwrap().as_str(),
+            crate::markers::STATUS_IDLE
+        );
+    }
+
+    /// `session.error` for the same reason: the turn is over, so a pending
+    /// retry token must not survive it.
+    #[test]
+    fn session_error_clears_a_pending_retry_token() {
+        use crate::types::v2::keys as k;
+        let mut fx = Fixture::new();
+        *fx.status.lock().unwrap() = format!(
+            "{}{}",
+            crate::markers::STATUS_RETRY_PREFIX,
+            "1700000000000|1|quota"
+        );
+        let mut state = DispatcherState::default();
+        let env = envelope(
+            k::SESSION_ERROR,
+            serde_json::json!({
+                "sessionID": "ses1",
+                "error": {
+                    "type": "free-usage-exceeded",
+                    "message": "Free usage limit exceeded. Subscribe to GO."
+                }
+            }),
+        );
+        {
+            let mut stream = fx.stream(Some("ses1"));
+            dispatch_v2(&env, &mut state, &mut stream);
+        }
+        assert_eq!(
+            fx.status.lock().unwrap().as_str(),
+            crate::markers::STATUS_IDLE
+        );
     }
 }

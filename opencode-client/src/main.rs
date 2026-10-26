@@ -765,7 +765,16 @@ async fn run_stream<A: api::OpenCodeApi>(
                                     RetryStatus::Busy => {
                                         set_server_status(&status, &markers::ServerConnectionStatus::Busy)
                                     }
-                                    RetryStatus::Idle => {}
+                                    // The server's idle is authoritative: it clears a
+                                    // pending retry (and with it the "waiting…" banner
+                                    // and the disabled input). It used to be a no-op,
+                                    // which left the plate — and the composer — stuck
+                                    // on `retry|…` whenever the turn ended without an
+                                    // `execution.*` event.
+                                    RetryStatus::Idle => set_server_status(
+                                        &status,
+                                        &markers::ServerConnectionStatus::Idle,
+                                    ),
                                 }
                             }
                         }
@@ -880,6 +889,9 @@ async fn run_stream<A: api::OpenCodeApi>(
             }
             _ = tick.tick() => {
                 ticks = ticks.wrapping_add(1);
+                // Never let an overdue retry token lock the composer (a missing
+                // follow-up event would otherwise keep the session "busy").
+                clear_expired_retry(&status);
 
                 // Commands from QML: new / open / rename / delete (JSON).
                 for raw in commands.lock().map(|mut q| std::mem::take(&mut *q)).unwrap_or_default() {
@@ -2053,6 +2065,34 @@ async fn load_history(
 fn set_server_status(status: &Arc<std::sync::Mutex<String>>, s: &markers::ServerConnectionStatus) {
     if let Ok(mut g) = status.lock() {
         *g = s.to_status_string();
+    }
+}
+
+/// Clear a `retry|<next_ms>|<attempt>|<message>` token whose deadline has
+/// passed by more than [`RETRY_GRACE_MS`].
+///
+/// The retry token is a promise: the server is expected to report the next
+/// state (`busy` when it tries again, `idle`/`error` when the turn ends) once
+/// `next` arrives. When that follow-up never comes — the server gave up on the
+/// turn quietly, the quota error ended it without `execution.*`, the app was
+/// suspended, … — the client would stay "busy" forever. Because the composer
+/// is disabled while busy, that locks the user out of the input entirely. The
+/// deadline is a hard bound: past it, the session is effectively idle, so fall
+/// back to idle and let the next server event drive the plate again.
+fn clear_expired_retry(status: &Arc<std::sync::Mutex<String>>) {
+    const RETRY_GRACE_MS: u64 = 5_000;
+    let Ok(mut g) = status.lock() else { return };
+    let Some(rest) = g.strip_prefix(markers::STATUS_RETRY_PREFIX) else {
+        return;
+    };
+    let next = rest
+        .split('|')
+        .next()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(0);
+    if next > 0 && i18n::now_ms() > next.saturating_add(RETRY_GRACE_MS) {
+        log::info!("retry deadline passed without a server follow-up — status back to idle");
+        *g = markers::ServerConnectionStatus::Idle.to_status_string();
     }
 }
 
