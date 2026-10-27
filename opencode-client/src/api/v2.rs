@@ -189,9 +189,107 @@ impl OpenCodeApi for V2Adapter {
         }
     }
 
-    /// PATCH /api/session/{id} `{title}` → 204.
-    fn rename_session(
+    /// POST /api/integration/{id}/connect/oauth `{methodID}` → the attempt
+    /// (`{location, data: {attemptID, url, instructions, mode, time}}`).
+    fn integration_oauth_connect(
         &self,
+        integration_id: &str,
+        method_id: &str,
+    ) -> impl Future<Output = Result<crate::types::v2::integration::Attempt, String>> + Send {
+        async move {
+            let url = format!("{}/api/integration/{}/connect/oauth", self.base, integration_id);
+            let body = serde_json::json!({ k::METHOD_ID: method_id });
+            let resp = self
+                .authed(self.http.post(&url).json(&body))
+                .send()
+                .await
+                .map_err(|e| e.to_string())?;
+            let status = resp.status();
+            let v: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+            if !status.is_success() {
+                return Err(format!("HTTP {status}: {v}"));
+            }
+            serde_json::from_value(Self::unwrap_data(v))
+                .map_err(|e| format!("connect/oauth answer: {e}"))
+        }
+    }
+
+    /// GET /api/integration/{id}/connect/oauth/{attemptID} → attempt status.
+    fn integration_oauth_status(
+        &self,
+        integration_id: &str,
+        attempt_id: &str,
+    ) -> impl Future<Output = Result<crate::types::v2::integration::AttemptStatus, String>> + Send
+    {
+        async move {
+            let url = format!(
+                "{}/api/integration/{}/connect/oauth/{}",
+                self.base, integration_id, attempt_id
+            );
+            let resp = self
+                .authed(self.http.get(&url))
+                .send()
+                .await
+                .map_err(|e| e.to_string())?;
+            let status = resp.status();
+            let v: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+            if !status.is_success() {
+                return Err(format!("HTTP {status}: {v}"));
+            }
+            serde_json::from_value(Self::unwrap_data(v))
+                .map_err(|e| format!("connect/oauth status: {e}"))
+        }
+    }
+
+    /// POST …/{attemptID}/complete `{code: null}` → 204 (credential persisted).
+    fn integration_oauth_complete(
+        &self,
+        integration_id: &str,
+        attempt_id: &str,
+    ) -> impl Future<Output = Result<(), String>> + Send {
+        async move {
+            let url = format!(
+                "{}/api/integration/{}/connect/oauth/{}/complete",
+                self.base, integration_id, attempt_id
+            );
+            let body = serde_json::json!({ k::CODE: serde_json::Value::Null });
+            let resp = self
+                .authed(self.http.post(&url).json(&body))
+                .send()
+                .await
+                .map_err(|e| e.to_string())?;
+            if !resp.status().is_success() {
+                return Err(format!("HTTP {}", resp.status()));
+            }
+            Ok(())
+        }
+    }
+
+    /// DELETE …/{attemptID} → 204 (abandoned attempt).
+    fn integration_oauth_cancel(
+        &self,
+        integration_id: &str,
+        attempt_id: &str,
+    ) -> impl Future<Output = Result<(), String>> + Send {
+        async move {
+            let url = format!(
+                "{}/api/integration/{}/connect/oauth/{}",
+                self.base, integration_id, attempt_id
+            );
+            let resp = self
+                .authed(self.http.delete(&url))
+                .send()
+                .await
+                .map_err(|e| e.to_string())?;
+            if !resp.status().is_success() {
+                return Err(format!("HTTP {}", resp.status()));
+            }
+            Ok(())
+        }
+    }
+
+    /// PATCH /api/session/{id} `{title}` → 204.
+    fn rename_session(        &self,
         session_id: &str,
         title: &str,
     ) -> impl Future<Output = Result<(), String>> + Send {
@@ -614,7 +712,7 @@ impl OpenCodeApi for V2Adapter {
 
     /// POST /api/session/{sessionID}/form/{formID}/reply `{answer: {…}}` → 204.
     ///
-    /// The route is session-scoped in opencode 2.0.32 (the form id alone is not
+    /// The route is session-scoped in opencode 2.1.4 (the form id alone is not
     /// enough): `GET /api/session/{sessionID}/form/{formID}/reply`.
     fn reply_form(
         &self,

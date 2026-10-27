@@ -30,10 +30,22 @@ Item {
 
     // Syncing the PTT position dropdown. The currentIndex binding breaks
     // on manual menu item selection, so we set the index explicitly.
+    //
+    // The index space is the one of the *menu*: the hidden "Center" item still
+    // occupies its slot, so "Right" is index 2 in both modes. Using a shortened
+    // list for Text + PTT was the bug — tapping "Right" produced index 2,
+    // `available[2]` was undefined and the position silently stayed "left".
     readonly property var pttPositions: ["left", "center", "right"]
+    // The centre slot exists only in the dictation-only ("voice") mode.
+    readonly property bool pttCenterAllowed: appWindow.inputMode === "voice"
+
     function syncPttCombo() {
-        var v = pttPosCombo.available
-        var idx = v.indexOf(appWindow.pttPosition)
+        // Read the mode directly: the `pttCenterAllowed` binding may not have
+        // re-evaluated yet when this is called from the mode dropdown handler.
+        var centerAllowed = appWindow.inputMode === "voice"
+        var idx = pttPositions.indexOf(appWindow.pttPosition)
+        if (idx === 1 && !centerAllowed)
+            idx = 0
         if (idx < 0)
             idx = 0
         pttPosCombo.currentIndex = idx
@@ -89,24 +101,29 @@ Item {
             ComboBox {
                 id: pttPosCombo
                 label: qsTr("PTT button position")
-                // Center is available only in "Dictation only" mode.
-                property var available: appWindow.inputMode === "voice"
-                                        ? globalSettingsPage.pttPositions
-                                        : ["left", "right"]
                 currentIndex: 0
                 menu: ContextMenu {
                     MenuItem { text: qsTr("Left") }
                     MenuItem {
                         text: qsTr("Center")
-                        // In text_ptt the center is not allowed — hide the item.
-                        visible: appWindow.inputMode === "voice"
+                        // In Text + PTT the centre is not allowed — hide the item.
+                        // A hidden MenuItem still keeps its index (see above).
+                        visible: globalSettingsPage.pttCenterAllowed
                     }
                     MenuItem { text: qsTr("Right") }
                 }
                 onCurrentIndexChanged: {
-                    var v = pttPosCombo.available
-                    if (currentIndex >= 0 && currentIndex < v.length)
-                        appWindow.pttPosition = v[currentIndex]
+                    var v = globalSettingsPage.pttPositions
+                    if (currentIndex < 0 || currentIndex >= v.length)
+                        return
+                    var pos = v[currentIndex]
+                    // Defensive: the hidden slot cannot be activated, but never
+                    // let a stale index push the button into the centre.
+                    if (pos === "center" && appWindow.inputMode !== "voice") {
+                        globalSettingsPage.syncPttCombo()
+                        return
+                    }
+                    appWindow.pttPosition = pos
                 }
                 Component.onCompleted: globalSettingsPage.syncPttCombo()
             }
@@ -130,25 +147,10 @@ Item {
                                { appWindow: globalSettingsPage.appWindow })
             }
 
-            Label {
-                x: Theme.horizontalPageMargin
-                width: parent.width - 2 * Theme.horizontalPageMargin
-                text: qsTr("Recognition:\n%1\nSynthesiser:\n%2")
-                      .arg(appWindow.sttModelName())
-                      .arg(appWindow.ttsModelName())
-                wrapMode: Text.Wrap
-                color: Theme.secondaryColor
-                font.pixelSize: Theme.fontSizeExtraSmall
-            }
-
-            Label {
-                x: Theme.horizontalPageMargin
-                width: parent.width - 2 * Theme.horizontalPageMargin
-                text: qsTr("↓ download\n→ start using\n✓ selected\n✕ cancel\nlong press — remove")
-                wrapMode: Text.Wrap
-                color: Theme.secondaryColor
-                font.pixelSize: Theme.fontSizeExtraSmall
-            }
+            // Both the icon legend and the "which model is in use" info live on
+            // the Voice models page itself: the downloaded models there are
+            // already split into "Downloaded · Recognition" and
+            // "Downloaded · Synthesis" sections, with the active model marked ✓.
 
             // — Dictation: a separate section about sending recognized text.
             SectionHeader { text: qsTr("Dictation") }

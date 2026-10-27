@@ -188,7 +188,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 let guard = server::ServerGuard::start(server::ServerConfig { cwd: Some(cwd), ..Default::default() }).await;
                 // Auth for the connection the worker will use. Our own server
-                // (2.0.32) prints a Basic-auth password on startup → take it
+                // (2.1.x) prints a Basic-auth password on startup → take it
                 // from the guard; the env auth only matters for a pre-existing
                 // external server (`base` from the environment).
                 let mut worker_auth = worker_auth;
@@ -482,7 +482,7 @@ impl<'a> TurnState<'a> {
     ) {
         use opencode_client::types::v2::event as v2;
         use opencode_client::types::v2::keys as k;
-        // Turn end in 2.0.32 is `session.execution.succeeded` (success) or
+        // Turn end in 2.1.x is `session.execution.succeeded` (success) or
         // `session.execution.interrupted` (user abort) — the legacy
         // `session.idle` is not emitted on this path. All three end the turn
         // cleanly; only `session.execution.failed` is an error (handled in the
@@ -1394,7 +1394,7 @@ async fn run_stream<A: api::OpenCodeApi>(
                             }
                         }
                         Cmd::ConsoleLogin => {
-                            if let Err(e) = console_login.start() {
+                            if let Err(e) = console_login.begin(&client).await {
                                 log::warn!("console login: {e}");
                             }
                         }
@@ -1404,6 +1404,11 @@ async fn run_stream<A: api::OpenCodeApi>(
                         }
                     }
                 }
+
+                // Advance a pending device login: one throttled status poll of
+                // the server's attempt. Event-driven on the server side (it
+                // polls the provider itself); this only reads its answer.
+                console_login.poll(&client).await;
 
                 // Device login finished: on success reload the server config so
                 // the fresh account (org/models) is used, then tell the user.

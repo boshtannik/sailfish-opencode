@@ -87,7 +87,8 @@ pub struct StreamState<'a> {
 //   * tool `callID` → `id`;
 //   * `message.updated` (register assistant) → `session.step.started` /
 //     `session.text.started` (`assistantMessageID`);
-//   * `session.compacted` → `session.compaction.ended`.
+//   * `session.compacted` → `session.compaction.ended` (v1 bridge only; 2.1.4
+//     dropped `session.compacted` outright, the job events below remained).
 
 /// Stable accumulator key for a v2 text block: `(assistantMessageID, ordinal)`.
 /// opencode numbers ordinals SEPARATELY for reasoning and text parts (both
@@ -208,7 +209,7 @@ pub fn dispatch_v2(
 ) -> bool {
     use crate::types::v2::event as v2;
     use crate::types::v2::keys as k;
-    // opencode 2.0.32 emits the plain `session.*` v2 event names, so the raw
+    // opencode 2.x emits the plain `session.*` v2 event names, so the raw
     // envelope type is matched directly (no bridge prefix to strip).
     let kind = env.kind.as_str();
     match kind {
@@ -424,7 +425,7 @@ pub fn dispatch_v2(
         k::SYNTHETIC | k::REVERT_STAGED | k::REVERT_CLEARED | k::REVERT_COMMITTED
         | k::SHELL_STARTED | k::SHELL_ENDED | k::MESSAGE_CONTENT_UPDATED
         | k::USAGE_RECORDED | k::USAGE_UPDATED => true,
-        // ── turn lifecycle (2.0.32) ───────────────────────────────────
+        // ── turn lifecycle (2.x) ───────────────────────────────────
         // The real turn-end signal: `session.execution.succeeded` on success,
         // `session.execution.interrupted` on a user stop, `.failed` on a
         // failed turn. All three end it; `.failed` must NOT paint the
@@ -445,7 +446,7 @@ pub fn dispatch_v2(
             }
             true
         },
-        // ── catalog/config invalidation (2.0.32): re-read lazily ──────
+        // ── catalog/config invalidation (2.x): re-read lazily ─────────
         k::PROJECT_UPDATED | k::INTEGRATION_UPDATED | k::PROVIDER_UPDATED | k::MODEL_UPDATED
         | k::AGENT_UPDATED | k::COMMAND_UPDATED | k::SKILL_UPDATED | k::WEBSEARCH_UPDATED
         | k::REFERENCE_UPDATED | k::PLUGIN_UPDATED => true,
@@ -948,9 +949,9 @@ fn on_tool_failed_v2(
 /// a dedicated arm in `dispatch_v2`, or recognised and deliberately ignored.
 ///
 /// This is the strict-gate source of truth for
-/// `types::v2::tests::every_2_0_32_event_is_recognised`: that test asserts the
+/// `types::v2::tests::every_2_1_4_event_is_recognised`: that test asserts the
 /// set below is *exactly* the event registry of the vendored opencode fixture
-/// (`tests/fixtures/v2-events-2.0.32.txt`). A new upstream event (or a renamed
+/// (`tests/fixtures/v2-events-2.1.4.txt`). A new upstream event (or a renamed
 /// one) makes the test fail, so drift is caught at build time rather than by a
 /// silent `note_unimplemented_v2` warning at runtime.
 ///
@@ -997,7 +998,8 @@ pub const RECOGNISED_V2: &[&str] = &[
     k::SESSION_UPDATED,
     k::SESSION_FORKED,
     k::SESSION_VIEWED,
-    k::SESSION_COMPACTED,
+    k::SESSION_ARCHIVED,
+    k::SESSION_UNARCHIVED,
     k::SESSION_DIFF,
     k::SESSION_ERROR,
     k::SESSION_PERMISSIONS,
@@ -1084,7 +1086,7 @@ pub const RECOGNISED_V2: &[&str] = &[
     k::PERSISTENT_PTY_ADDED,
     k::PERSISTENT_PTY_REMOVED,
     // Permissions / forms / server
-    // NOTE: the v1 question model (`question.asked` & co) is NOT in the 2.0.32
+    // NOTE: the v1 question model (`question.asked` & co) is NOT in the 2.x
     // event registry — opencode v2 asks with forms — so it is gone entirely.
     k::PERMISSION_ASKED,
     k::PERMISSION_REPLIED,
@@ -1533,7 +1535,7 @@ mod tests {
 
     #[test]
     fn v2_event_constants_are_plain_session_names() {
-        // opencode 2.0.32 emits plain `session.*` event names (no `session.next.`
+        // opencode 2.x emits plain `session.*` event names (no `session.next.`
         // bridge prefix). Guard the dispatch constants against a stray prefix or
         // typo: each must be exactly the unprefixed wire spelling.
         use crate::types::v2::keys as k;

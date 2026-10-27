@@ -21,6 +21,7 @@ use std::pin::Pin;
 use futures_util::Stream;
 
 use crate::types::v2::form::FormInfo;
+use crate::types::v2::integration::{Attempt, AttemptStatus};
 use crate::types::v2::permission::{PermissionReplyKind, PermissionRequest, SavedPermission};
 use crate::types::v2::EventEnvelope;
 
@@ -55,6 +56,36 @@ pub trait OpenCodeApi: Clone + Send + Sync + 'static {
     /// authoritative answer to "is this session working", used to repair the
     /// turn state on (re)connect.
     fn active_sessions(&self) -> impl Future<Output = Result<serde_json::Value, String>> + Send;
+
+    /// POST /api/integration/{id}/connect/oauth — begin an OAuth attempt
+    /// (the OpenCode Console account uses the `device` method). The answer
+    /// carries the verification URL, the user code and the deadline.
+    fn integration_oauth_connect(
+        &self,
+        integration_id: &str,
+        method_id: &str,
+    ) -> impl Future<Output = Result<Attempt, String>> + Send;
+
+    /// GET /api/integration/{id}/connect/oauth/{attemptID} — attempt state.
+    fn integration_oauth_status(
+        &self,
+        integration_id: &str,
+        attempt_id: &str,
+    ) -> impl Future<Output = Result<AttemptStatus, String>> + Send;
+
+    /// POST …/{attemptID}/complete — persist the authorized credential.
+    fn integration_oauth_complete(
+        &self,
+        integration_id: &str,
+        attempt_id: &str,
+    ) -> impl Future<Output = Result<(), String>> + Send;
+
+    /// DELETE …/{attemptID} — drop an abandoned attempt.
+    fn integration_oauth_cancel(
+        &self,
+        integration_id: &str,
+        attempt_id: &str,
+    ) -> impl Future<Output = Result<(), String>> + Send;
 
     /// PATCH /session/{id} — rename a session.
     fn rename_session(

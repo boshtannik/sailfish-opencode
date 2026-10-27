@@ -257,15 +257,18 @@ pub enum ToolContent {
 }
 
 /// Compaction message state — union by `status` (`running|completed|failed`).
+///
+/// 2.1.4 dropped the `recent` field that 2.0.32 sent in both `running` and
+/// `completed` (it was required, and unused by this client — parsing it as a
+/// required `String` made the whole history load fail).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "status")]
 pub enum CompactionStatus {
     #[serde(rename = "running")]
-    Running { summary: String, recent: String },
+    Running { summary: String },
     #[serde(rename = "completed")]
     Completed {
         summary: String,
-        recent: String,
         #[serde(default)]
         model: Option<ModelRef>,
     },

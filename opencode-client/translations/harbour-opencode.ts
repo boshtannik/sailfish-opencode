@@ -93,23 +93,6 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="109"/>
-        <source>Recognition:
-%1
-Synthesiser:
-%2</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="120"/>
-        <source>↓ download
-→ start using
-✓ selected
-✕ cancel
-long press — remove</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="126"/>
         <source>Voice answers</source>
         <translation type="unfinished"></translation>
@@ -402,6 +385,25 @@ long press — remove</source>
 <context>
     <name>VoiceModelsPage</name>
     <message>
+        <location filename="../../i18n/qml-src/pages/VoiceModelsPage.qml" line="158"/>
+        <source>Downloaded · Recognition</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/VoiceModelsPage.qml" line="161"/>
+        <source>Downloaded · Synthesis</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/VoiceModelsPage.qml" line="286"/>
+        <source>↓ download
+→ start using
+✓ selected
+✕ cancel
+long press — remove</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <location filename="../../i18n/qml-src/pages/VoiceModelsPage.qml" line="43"/>
         <source>Multilingual</source>
         <translation type="unfinished"></translation>
@@ -419,11 +421,6 @@ long press — remove</source>
     <message>
         <location filename="../../i18n/qml-src/pages/VoiceModelsPage.qml" line="129"/>
         <source>Downloading… %1% (%2 / %3)</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location filename="../../i18n/qml-src/pages/VoiceModelsPage.qml" line="152"/>
-        <source>Downloaded models</source>
         <translation type="unfinished"></translation>
     </message>
     <message>

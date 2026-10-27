@@ -113,17 +113,17 @@ docker run --rm \
   #
   # opencode has TWO release lines (see vault/Разведка-v2.md §10):
   #   * v1.x (1.19.0..1.19.3) — "OpenCode 1": GitHub Releases + npm `latest`.
-  #   * v2.0.x (2.0.28..2.0.32) — the real "OpenCode 2": CDN only, NOT in GitHub Releases.
+  #   * v2.1.x (2.1.0..2.1.4) — the real "OpenCode 2": CDN only, NOT in GitHub Releases.
   # 1.19.0 was a *bridge* build (v1 routes AND /api/* v2 routes, live events under
-  # `session.next.*`). We target the real v2 now: 2.0.32 drops the bridge (no
+  # `session.next.*`). We target the real v2 now: 2.1.4 drops the bridge (no
   # `session.next.*`, no v1 routes) and emits the plain `session.*` v2 events the
-  # client already handles. 2.0.x binaries live on the CDN, not under GitHub Releases:
+  # client already handles. 2.x binaries live on the CDN, not under GitHub Releases:
   #   https://opencode.ai/files/bin/<ver>/opencode-linux-arm64.tar.gz
-  OC_VERSION="2.0.32"
-  # SHA-256 of the reference 2.0.32 binary (linux-arm64, extracted from the CDN tarball).
+  OC_VERSION="2.1.4"
+  # SHA-256 of the reference 2.1.4 binary (linux-arm64, extracted from the CDN tarball).
   # We check not only the version but the file itself: protection against cache substitution,
   # which could otherwise slip the wrong "opencode" into the RPM.
-  OC_SHA256="4199ae2d2c96ad2a140d32cabe6a1d9280b4cd1d9d8ed533a5431f54c422693c"
+  OC_SHA256="7f32303fcd2d41e54c9ea36d4e4d4029b916901f3fbe5ad3fcee8f1b877b8bba"
   OC_CLI="$HOME/cargo-cache/opencode-cli"
   # set -e: sha256sum of a missing file exits with 1 — that is not an error
   # but a signal that the file "needs downloading" (checked in the if below).

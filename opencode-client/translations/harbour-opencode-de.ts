@@ -93,30 +93,6 @@
         <translation>Sprachmodelle</translation>
     </message>
     <message>
-        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="109"/>
-        <source>Recognition:
-%1
-Synthesiser:
-%2</source>
-        <translation>Erkennung:
-%1
-Synthese:
-%2</translation>
-    </message>
-    <message>
-        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="120"/>
-        <source>↓ download
-→ start using
-✓ selected
-✕ cancel
-long press — remove</source>
-        <translation>↓ herunterladen
-→ verwenden
-✓ ausgewählt
-✕ abbrechen
-lang drücken — entfernen</translation>
-    </message>
-    <message>
         <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="126"/>
         <source>Voice answers</source>
         <translation>Sprachantworten</translation>
@@ -409,6 +385,29 @@ lang drücken — entfernen</translation>
 <context>
     <name>VoiceModelsPage</name>
     <message>
+        <location filename="../../i18n/qml-src/pages/VoiceModelsPage.qml" line="158"/>
+        <source>Downloaded · Recognition</source>
+        <translation>Heruntergeladen · Erkennung</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/VoiceModelsPage.qml" line="161"/>
+        <source>Downloaded · Synthesis</source>
+        <translation>Heruntergeladen · Synthese</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/VoiceModelsPage.qml" line="286"/>
+        <source>↓ download
+→ start using
+✓ selected
+✕ cancel
+long press — remove</source>
+        <translation>↓ herunterladen
+→ verwenden
+✓ ausgewählt
+✕ abbrechen
+lang drücken — entfernen</translation>
+    </message>
+    <message>
         <location filename="../../i18n/qml-src/pages/VoiceModelsPage.qml" line="43"/>
         <source>Multilingual</source>
         <translation>Mehrsprachig</translation>
@@ -427,11 +426,6 @@ lang drücken — entfernen</translation>
         <location filename="../../i18n/qml-src/pages/VoiceModelsPage.qml" line="129"/>
         <source>Downloading… %1% (%2 / %3)</source>
         <translation>Wird heruntergeladen… %1% (%2 / %3)</translation>
-    </message>
-    <message>
-        <location filename="../../i18n/qml-src/pages/VoiceModelsPage.qml" line="152"/>
-        <source>Downloaded models</source>
-        <translation>Heruntergeladene Modelle</translation>
     </message>
     <message>
         <location filename="../../i18n/qml-src/pages/VoiceModelsPage.qml" line="161"/>

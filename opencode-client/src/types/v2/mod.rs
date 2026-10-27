@@ -7,6 +7,7 @@
 
 pub mod event;
 pub mod form;
+pub mod integration;
 pub mod keys;
 pub mod message;
 pub mod permission;
@@ -14,6 +15,7 @@ pub mod session;
 
 pub use event::EventEnvelope;
 pub use form::{Choice, Condition, Field, FormInfo};
+pub use integration::{Attempt, AttemptMode, AttemptStatus};
 pub use message::{
     AssistantFields, CompactionReason, CompactionStatus, Content, FileAttachment, IdleOutcome,
     MessageBody, MessageInfo, MessageTime, ModelRef, SessionError, ShellStatus, ToolContent,
@@ -86,7 +88,7 @@ mod tests {
     fn compaction_message_parses_with_status_and_reason() {
         let m = msg(json!({
             "id": "msg_4", "type": "compaction", "time": {"created": 8},
-            "status": "completed", "reason": "auto", "summary": "S", "recent": "R"
+            "status": "completed", "reason": "auto", "summary": "S"
         }));
         assert!(matches!(
             m.body,
@@ -95,6 +97,29 @@ mod tests {
                 reason: CompactionReason::Auto
             }
         ));
+    }
+
+    /// 2.1.4 dropped the required `recent` field from both compaction states
+    /// (2.0.32 always sent it). A stale `recent` must not break parsing either,
+    /// so both the old and the new payload load.
+    #[test]
+    fn compaction_message_parses_with_and_without_recent() {
+        for payload in [
+            json!({
+                "id": "msg_6", "type": "compaction", "time": {"created": 10},
+                "status": "running", "reason": "auto", "summary": "S"
+            }),
+            json!({
+                "id": "msg_7", "type": "compaction", "time": {"created": 11},
+                "status": "running", "reason": "auto", "summary": "S", "recent": "R"
+            }),
+        ] {
+            let m = msg(payload);
+            assert!(matches!(
+                m.body,
+                MessageBody::Compaction { status: CompactionStatus::Running { .. }, .. }
+            ));
+        }
     }
 
     #[test]
@@ -133,7 +158,7 @@ mod tests {
         assert_eq!(src.id, "call_1");
     }
 
-    /// A form of opencode 2.0.32: the fields are keyed by `key` and labelled
+    /// A form of opencode 2.1.4: the fields are keyed by `key` and labelled
     /// by `title` (NOT `id`/`label` — that was the v1 question model).
     #[test]
     fn form_parses_the_2_0_32_field_union() {
@@ -154,7 +179,7 @@ mod tests {
     /// Strict coverage gate for the v2 event surface.
     ///
     /// The vendored fixture is the *exact* event registry extracted from the
-    /// opencode 2.0.32 binary (`scripts/gen-v2-fixtures.sh`). This test asserts
+    /// opencode 2.1.4 binary (`scripts/gen-v2-fixtures.sh`). This test asserts
     /// it matches `event::dispatcher::RECOGNISED_V2` as a set, in both
     /// directions:
     ///   - every fixture event is recognised (a new/renamed upstream event
@@ -162,11 +187,11 @@ mod tests {
     ///   - every recognised event is in the fixture (a stale entry we no longer
     ///     need, or a typo, fails too).
     #[test]
-    fn every_2_0_32_event_is_recognised() {
+    fn every_2_1_4_event_is_recognised() {
         use crate::event::dispatcher::RECOGNISED_V2;
         use std::collections::BTreeSet;
 
-        let fixture: BTreeSet<&str> = include_str!("../../../tests/fixtures/v2-events-2.0.32.txt")
+        let fixture: BTreeSet<&str> = include_str!("../../../tests/fixtures/v2-events-2.1.4.txt")
             .lines()
             .map(str::trim)
             .filter(|l| !l.is_empty())
@@ -176,14 +201,14 @@ mod tests {
         let unhandled: Vec<&&str> = fixture.difference(&recognised).collect();
         assert!(
             unhandled.is_empty(),
-            "events in the 2.0.32 registry but missing from RECOGNISED_V2 \
+            "events in the 2.1.4 registry but missing from RECOGNISED_V2 \
              (add the constant to types/v2/keys.rs and list it): {unhandled:?}"
         );
 
         let stale: Vec<&&str> = recognised.difference(&fixture).collect();
         assert!(
             stale.is_empty(),
-            "RECOGNISED_V2 lists events not in the 2.0.32 registry \
+            "RECOGNISED_V2 lists events not in the 2.1.4 registry \
              (remove them, or refresh the fixture via scripts/gen-v2-fixtures.sh): {stale:?}"
         );
     }

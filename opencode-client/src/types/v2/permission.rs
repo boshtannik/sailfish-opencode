@@ -1,6 +1,6 @@
 //! opencode v2 permission model (see `vault/Разведка-v2.md` §1.5).
 //!
-//! The 2.0.32 OpenAPI describes three shapes we need:
+//! The 2.1.4 OpenAPI describes three shapes we need:
 //!   - `Permission.Request` — a pending request (the `permission.asked` payload);
 //!   - `Permission.Reply` — the decision (`once|always|reject`);
 //!   - `PermissionSaved.Info` — a stored "always allow" rule.

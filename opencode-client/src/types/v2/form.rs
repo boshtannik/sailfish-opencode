@@ -1,9 +1,9 @@
-//! opencode v2 form model (opencode **2.0.32**) — the successor of the v1
+//! opencode v2 form model (opencode **2.1.4**) — the successor of the v1
 //! question model. A form has a title and a list of fields; the reply is
 //! `{answer: {fieldKey: value}}`.
 //!
 //! Source of truth: the vendored OpenAPI 3.1 spec of the real server
-//! (`tests/fixtures/openapi-2.0.32.json`, schemas `Form.*`) — the same
+//! (`tests/fixtures/openapi-2.1.4.json`, schemas `Form.*`) — the same
 //! fixture the client routes are checked against. Field naming follows it
 //! exactly: the answer key is `key` (NOT `id`), the label is `title` (NOT
 //! `label`), options are `{value,label,description}`.
@@ -137,7 +137,7 @@ pub struct Condition {
 impl Condition {
     /// Does the condition hold for the given answers?
     ///
-    /// The rules are the server's ones (opencode 2.0.32, `Form.When`): an
+    /// The rules are the server's ones (opencode 2.1.4, `Form.When`): an
     /// unanswered field never satisfies a condition (the field stays hidden),
     /// `eq` compares the answer with the value, `neq` is its negation. An
     /// answer that is a list is compared element by element.
@@ -163,7 +163,7 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    /// The real 2.0.32 shape: `key`/`title`/`options[].value` (NOT `id`/`label`).
+    /// The real 2.1.4 shape: `key`/`title`/`options[].value` (NOT `id`/`label`).
     #[test]
     fn form_info_parses_the_2_0_32_shape() {
         let f: FormInfo = serde_json::from_value(json!({

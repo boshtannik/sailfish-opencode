@@ -130,7 +130,7 @@ sg docker -c "./mbuild.sh"            # debug — fast, for development
 sg docker -c "./mbuild.sh --release"  # release — optimized
 ```
 
-Output: `harbour-opencode-0.1.0-1.aarch64.rpm`.
+Output: `harbour-opencode-0.2.77-1.aarch64.rpm`.
 
 Alternative non-Docker build via `mb2`: `scripts/build.sh`.
 
@@ -147,7 +147,7 @@ Env vars (no credentials are hardcoded in the repo):
 - `SFOS_USER` — ssh user (default `defaultuser`)
 - `SFOS_PASS` — ssh password
 
-Install the RPM on the device: `devel-su rpm -Uvh --force harbour-opencode-0.1.0-1.aarch64.rpm`.
+Install the RPM on the device: `devel-su rpm -Uvh --force harbour-opencode-0.2.77-1.aarch64.rpm`.
 
 Dev-only scripts (`restart-probe.sh`, `opencode-client/qml/do-probe.sh`,
 `scripts/tts-restart.sh`, …) reuse `devel-su` and read the password from

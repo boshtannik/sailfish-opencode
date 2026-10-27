@@ -58,7 +58,7 @@ rpc.internal
 sdk.plugin.updated
 server.connected
 session.agent.selected
-session.compacted
+session.archived
 session.compaction.delta
 session.compaction.ended
 session.compaction.failed
@@ -110,6 +110,7 @@ session.tool.input.ended
 session.tool.input.started
 session.tool.progress
 session.tool.success
+session.unarchived
 session.updated
 session.usage.recorded
 session.usage.updated

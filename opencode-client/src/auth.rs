@@ -1,16 +1,31 @@
 //! Provider credentials that the user can enter in-app.
 //!
-//! The OpenCode provider ("big-pickle" models) is authenticated with a plain
-//! API key obtained from <https://opencode.ai/auth>. The key is stored on the
-//! server side via `PUT /auth/{provider}`; the server writes it to
-//! `~/.local/share/opencode/auth.json` in the form
-//! `{"<provider>": {"type": "api", "key": "..."}}`.
+//! The OpenCode provider ("big-pickle" models) is authenticated either with a
+//! plain API key (see [`has_api_key`]) or with the OpenCode Console account
+//! (device login, see [`ConsoleLogin`]).
+
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+
+use crate::api::OpenCodeApi;
+use crate::i18n::now_ms;
+use crate::types::v2::integration::{Attempt, AttemptStatus};
 
 /// Provider id of the OpenCode (Zen) provider.
 pub const OPENCODE_PROVIDER: &str = "opencode";
 
 /// Browser page where the user creates / copies their OpenCode API key.
 pub const OPENCODE_AUTH_URL: &str = "https://opencode.ai/auth";
+
+/// Integration id of the Console account (`GET /api/integration` → "OpenCode
+/// Console"), and the id of its OAuth method (the device flow).
+const CONSOLE_INTEGRATION: &str = "opencode";
+const CONSOLE_METHOD: &str = "device";
+
+/// How often the attempt is polled. The server polls the provider itself (the
+/// method is `mode: "auto"`), so this only reads the local status — 1.5 s keeps
+/// the "signed in" feedback prompt without hammering the daemon.
+const POLL_MS: u64 = 1_500;
 
 /// Path to opencode's credential store (`$XDG_DATA_HOME/opencode/auth.json`,
 /// defaulting to `~/.local/share/opencode/auth.json`).
@@ -21,7 +36,6 @@ pub fn auth_json_path() -> Option<std::path::PathBuf> {
     Some(data_home.join("opencode").join("auth.json"))
 }
 
-/// Whether an API-key credential is stored for `provider`.
 /// Whether an API-key credential is stored for `provider`.
 pub fn has_api_key(provider: &str) -> bool {
     let Some(path) = auth_json_path() else {
@@ -40,19 +54,23 @@ pub fn has_api_key(provider: &str) -> bool {
         .unwrap_or(false)
 }
 
-// ── OpenCode Console device login ─────────────────────────────────────────────
+// ── OpenCode Console account login ────────────────────────────────────────────
 //
-// The `opencode` provider's account method is an OAuth 2.0 device authorization
-// grant (RFC 8628) against `https://opencode.ai/console`, exposed by the CLI as
-// `opencode console login`. The CLI prints
+// opencode 2.0.32 exposes the Console device login as HTTP, not as a CLI
+// subcommand (`opencode console login` is gone — `auth`/`api` replaced it, see
+// `vault/Разведка-v2.md`). The client therefore drives the integration API:
 //
-//     Go to:  https://opencode.ai/console/device?user_code=XXXX-XXXX&client_id=…
-//     Enter code: XXXX-XXXX
+//   POST   /api/integration/opencode/connect/oauth {methodID:"device"}
+//     → {attemptID, url, instructions, mode:"auto", time:{created, expires}}
+//   GET    /api/integration/opencode/connect/oauth/{attemptID}
+//     → {status:"pending"|"complete"|"failed"|"expired", …}
+//   POST   /api/integration/opencode/connect/oauth/{attemptID}/complete
+//     → 204, the credential is persisted by the server
+//   DELETE …/{attemptID} → 204 when the user cancels
 //
-// and then polls until the user authorizes (or the code expires). We do NOT
-// reimplement the flow: writing the credential into the CLI's own store is
-// version-specific, so we spawn the real CLI, parse the two lines out of its
-// (ANSI) output, show them in the UI, and let the CLI persist the result.
+// The state machine is advanced by the worker's tick (`begin` once, then
+// `poll`), so no thread and no blocking call sit in the UI path, and every
+// transition is driven by the server's own answer.
 
 /// Visual state of a device login, serialized to QML as JSON.
 #[derive(Clone, Default, serde::Serialize)]
@@ -67,16 +85,27 @@ pub struct LoginStatus {
     pub message: String,
 }
 
-/// Owns the `opencode console login` child and its shared state.
+impl LoginStatus {
+    pub fn is_waiting(&self) -> bool {
+        self.state == "waiting"
+    }
+}
+
+/// Owns the device-login state shared between the QML bridge and the worker.
 ///
-/// Cheap to clone (the state is behind `Arc`); one instance is shared between
-/// the QML bridge (reads `status_json`) and the worker (starts/cancels it).
+/// Cheap to clone (the state is behind `Arc`); `begin`/`poll` are called by the
+/// worker (which holds the API client), `status_json` by QML via the bridge.
 #[derive(Clone, Default)]
 pub struct ConsoleLogin {
-    status: std::sync::Arc<std::sync::Mutex<LoginStatus>>,
-    child: std::sync::Arc<std::sync::Mutex<Option<std::process::Child>>>,
-    /// Set to `Some(success)` when the child exits; taken once by the worker.
-    finished: std::sync::Arc<std::sync::Mutex<Option<bool>>>,
+    status: Arc<Mutex<LoginStatus>>,
+    /// The live attempt, while one is pending.
+    attempt: Arc<Mutex<Option<Attempt>>>,
+    /// Epoch ms of the last status poll (throttles `poll`).
+    last_poll: Arc<Mutex<u64>>,
+    /// Set by `cancel`; the next `poll` drops the attempt server-side.
+    cancelled: Arc<AtomicBool>,
+    /// Set to `Some(success)` when the login ends; taken once by the worker.
+    finished: Arc<Mutex<Option<bool>>>,
 }
 
 impl ConsoleLogin {
@@ -86,91 +115,9 @@ impl ConsoleLogin {
         serde_json::to_string(&st).unwrap_or_else(|_| "{\"state\":\"error\"}".to_string())
     }
 
-    fn set_state(&self, state: &str, message: &str) {
-        if let Ok(mut g) = self.status.lock() {
-            g.state = state.to_string();
-            g.message = message.to_string();
-        }
-    }
-
-    fn set_device(&self, url: Option<&str>, code: Option<&str>) {
-        if let Ok(mut g) = self.status.lock() {
-            if let Some(u) = url {
-                g.url = u.to_string();
-            }
-            if let Some(c) = code {
-                g.code = c.to_string();
-            }
-        }
-    }
-
-    /// Start the login child. `Err` if one is already running.
-    pub fn start(&self) -> Result<(), String> {
-        {
-            let g = self.child.lock().map_err(|_| "login lock poisoned".to_string())?;
-            if g.is_some() {
-                return Err("login already in progress".to_string());
-            }
-        }
-
-        let bin = crate::server::resolve_bin(None);
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/home/defaultuser".to_string());
-        let mut cmd = std::process::Command::new(&bin);
-        cmd.arg("console")
-            .arg("login")
-            .env("HOME", &home)
-            .env("XDG_CONFIG_HOME", format!("{home}/.config"))
-            .env("XDG_DATA_HOME", format!("{home}/.local/share"))
-            .env("XDG_CACHE_HOME", format!("{home}/.cache"))
-            .env("XDG_STATE_HOME", format!("{home}/.local/state"))
-            .env(
-                "PATH",
-                std::env::var("PATH").unwrap_or_else(|_| "/usr/local/bin:/usr/bin:/bin".to_string()),
-            )
-            // The TUI would otherwise try to launch a browser; the app opens the
-            // verification URL itself via Qt.openUrlExternally.
-            .env("BROWSER", "/bin/true")
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped());
-
-        let mut child = cmd
-            .spawn()
-            .map_err(|e| format!("failed to start `{}`: {e}", bin.display()))?;
-        let stdout = child.stdout.take();
-        let stderr = child.stderr.take();
-        if let Ok(mut g) = self.child.lock() {
-            *g = Some(child);
-        }
-        if let Ok(mut g) = self.status.lock() {
-            *g = LoginStatus { state: "waiting".to_string(), ..Default::default() };
-        }
-
-        if let Some(out) = stdout {
-            let this = self.clone();
-            std::thread::spawn(move || this.read_stream(out));
-        }
-        if let Some(err) = stderr {
-            let this = self.clone();
-            std::thread::spawn(move || this.read_stream(err));
-        }
-        let this = self.clone();
-        std::thread::spawn(move || this.wait_for_exit());
-        Ok(())
-    }
-
-    /// Kill the child (user pressed Cancel). Resets to "idle".
-    pub fn cancel(&self) {
-        let child = self.child.lock().ok().and_then(|mut g| g.take());
-        if let Some(mut child) = child {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
-        if let Ok(mut g) = self.status.lock() {
-            if g.state == "waiting" {
-                *g = LoginStatus::default();
-            }
-        }
+    /// Last detail message (for the failure notice).
+    pub fn message(&self) -> String {
+        self.status.lock().map(|g| g.message.clone()).unwrap_or_default()
     }
 
     /// Take the finish flag once (`Some(true)` = success, `Some(false)` = error).
@@ -181,103 +128,179 @@ impl ConsoleLogin {
             .unwrap_or(None)
     }
 
-    /// Last detail message (for the failure notice).
-    pub fn message(&self) -> String {
-        self.status.lock().map(|g| g.message.clone()).unwrap_or_default()
+    fn set(&self, state: &str, message: &str) {
+        if let Ok(mut g) = self.status.lock() {
+            g.state = state.to_string();
+            g.message = message.to_string();
+        }
     }
 
-    fn read_stream<R: std::io::Read>(&self, r: R) {
-        use std::io::BufRead;
-        for line in std::io::BufReader::new(r).lines().map_while(Result::ok) {
-            let clean = strip_ansi(&line);
-            if let Some(i) = clean.find("Go to:") {
-                let url = clean[i + "Go to:".len()..].trim().split_whitespace().next().unwrap_or("");
-                if !url.is_empty() {
-                    self.set_device(Some(url), None);
+    fn finish(&self, ok: bool, state: &str, message: &str) {
+        self.set(state, message);
+        if let Ok(mut a) = self.attempt.lock() {
+            *a = None;
+        }
+        if let Ok(mut f) = self.finished.lock() {
+            *f = Some(ok);
+        }
+    }
+
+    /// Start the device login: ask the server for an attempt and publish the
+    /// verification URL/code. `Err` if one is already running or the server
+    /// refuses (`GET /api/integration` missing → too old a server).
+    pub async fn begin<A: OpenCodeApi>(&self, client: &A) -> Result<(), String> {
+        if self.status.lock().map(|g| g.is_waiting()).unwrap_or(false) {
+            return Err("login already in progress".to_string());
+        }
+        self.cancelled.store(false, Ordering::Relaxed);
+        if let Ok(mut f) = self.finished.lock() {
+            *f = None;
+        }
+        if let Ok(mut a) = self.attempt.lock() {
+            *a = None;
+        }
+        // Show the spinner immediately: the connect call takes a round trip.
+        self.set("waiting", "");
+
+        match client
+            .integration_oauth_connect(CONSOLE_INTEGRATION, CONSOLE_METHOD)
+            .await
+        {
+            Ok(attempt) => {
+                if let Ok(mut g) = self.status.lock() {
+                    g.state = "waiting".to_string();
+                    g.message.clear();
+                    g.url = attempt.url.clone();
+                    g.code = attempt.code();
                 }
+                if let Ok(mut g) = self.last_poll.lock() {
+                    *g = now_ms();
+                }
+                if let Ok(mut g) = self.attempt.lock() {
+                    *g = Some(attempt);
+                }
+                Ok(())
             }
-            if let Some(i) = clean.find("Enter code:") {
-                let code =
-                    clean[i + "Enter code:".len()..].trim().split_whitespace().next().unwrap_or("");
-                if !code.is_empty() {
-                    self.set_device(None, Some(code));
-                }
+            Err(e) => {
+                self.finish(false, "error", &e);
+                Err(e)
             }
         }
     }
 
-    fn wait_for_exit(&self) {
-        loop {
-            let outcome: Option<Result<bool, String>> = {
-                let mut g = match self.child.lock() {
-                    Ok(g) => g,
-                    Err(_) => return,
-                };
-                match g.as_mut() {
-                    Some(child) => match child.try_wait() {
-                        Ok(Some(status)) => {
-                            *g = None;
-                            Some(Ok(status.success()))
-                        }
-                        Ok(None) => None,
-                        Err(e) => {
-                            *g = None;
-                            Some(Err(e.to_string()))
-                        }
-                    },
-                    None => return, // cancelled
-                }
-            };
-            match outcome {
-                Some(Ok(true)) => {
-                    self.set_state("success", "");
-                    if let Ok(mut f) = self.finished.lock() {
-                        *f = Some(true);
-                    }
-                    return;
-                }
-                Some(Ok(false)) => {
-                    self.set_state("error", "authorization failed or expired");
-                    if let Ok(mut f) = self.finished.lock() {
-                        *f = Some(false);
-                    }
-                    return;
-                }
-                Some(Err(e)) => {
-                    self.set_state("error", &e);
-                    if let Ok(mut f) = self.finished.lock() {
-                        *f = Some(false);
-                    }
-                    return;
-                }
-                None => std::thread::sleep(std::time::Duration::from_millis(200)),
+    /// Advance a pending login: one throttled status poll.
+    ///
+    /// Reads the server's own answer — `pending` keeps waiting, `complete`
+    /// persists the credential, `failed`/`expired` end with an error. Called on
+    /// every worker tick; a no-op when nothing is pending.
+    pub async fn poll<A: OpenCodeApi>(&self, client: &A) {
+        let Some(attempt) = self.attempt.lock().ok().and_then(|g| g.clone()) else {
+            return;
+        };
+        if self.cancelled.load(Ordering::Relaxed) {
+            if let Err(e) = client
+                .integration_oauth_cancel(CONSOLE_INTEGRATION, &attempt.attempt_id)
+                .await
+            {
+                log::warn!("console login: cancel failed: {e}");
             }
+            self.set("idle", "");
+            if let Ok(mut a) = self.attempt.lock() {
+                *a = None;
+            }
+            return;
+        }
+
+        let now = now_ms();
+        {
+            let Ok(mut last) = self.last_poll.lock() else { return };
+            if now < last.saturating_add(POLL_MS) {
+                return;
+            }
+            *last = now;
+        }
+
+        // Local deadline first: an expired code needs no round trip, and the
+        // server may keep answering `pending` for a while after it died.
+        if let Some(expires) = attempt.time.expires {
+            if expires > 0.0 && now as f64 > expires {
+                self.finish(false, "error", "sign-in code expired — start again");
+                return;
+            }
+        }
+
+        match client
+            .integration_oauth_status(CONSOLE_INTEGRATION, &attempt.attempt_id)
+            .await
+        {
+            Ok(AttemptStatus::Pending { .. }) => {}
+            Ok(AttemptStatus::Complete { .. }) => {
+                // The attempt is authorized; this is what persists the
+                // credential on the server. A failure here is only logged: for
+                // `mode: "auto"` the server has usually stored it already, and
+                // the model refresh after the login shows the truth.
+                if let Err(e) = client
+                    .integration_oauth_complete(CONSOLE_INTEGRATION, &attempt.attempt_id)
+                    .await
+                {
+                    log::warn!("console login: complete failed: {e}");
+                }
+                self.finish(true, "success", "");
+            }
+            Ok(AttemptStatus::Failed { message, .. }) => {
+                self.finish(false, "error", &message);
+            }
+            Ok(AttemptStatus::Expired { .. }) => {
+                self.finish(false, "error", "sign-in code expired — start again");
+            }
+            Err(e) => {
+                // A transient poll failure (daemon restart, timeout) must not
+                // kill the login: keep the attempt and retry on the next tick.
+                log::warn!("console login: status: {e}");
+            }
+        }
+    }
+
+    /// Cancel a pending login (user pressed Cancel). The attempt is dropped
+    /// server-side by the next `poll`.
+    pub fn cancel(&self) {
+        self.cancelled.store(true, Ordering::Relaxed);
+        if self.status.lock().map(|g| g.is_waiting()).unwrap_or(false) {
+            self.set("idle", "");
         }
     }
 }
 
-/// Remove ECMA-48 CSI escape sequences (`ESC [ … <final>`), carriage returns
-/// and other control bytes the TUI sprinkles over its output.
-fn strip_ansi(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut it = s.chars().peekable();
-    while let Some(c) = it.next() {
-        if c == '\u{1b}' {
-            if it.peek() == Some(&'[') {
-                it.next();
-                while let Some(n) = it.next() {
-                    if ('@'..='~').contains(&n) {
-                        break;
-                    }
-                }
-            }
-            continue;
-        }
-        if c == '\r' || c == '\u{0}' {
-            continue;
-        }
-        out.push(c);
-    }
-    out
-}
+/// The `mode` of the Console attempt must stay `auto`: the client never asks
+/// the user to paste a code back (`code` mode integrations would need it).
+#[cfg(test)]
+mod tests {
+    use super::*;
 
+    #[test]
+    fn cancel_resets_a_waiting_login() {
+        let l = ConsoleLogin::default();
+        {
+            let mut g = l.status.lock().unwrap();
+            g.state = "waiting".to_string();
+        }
+        l.cancel();
+        assert_eq!(l.status.lock().unwrap().state, "idle");
+        assert!(l.cancelled.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn status_json_carries_the_ui_fields() {
+        let l = ConsoleLogin::default();
+        {
+            let mut g = l.status.lock().unwrap();
+            g.state = "waiting".to_string();
+            g.url = "https://example.org/device?user_code=AB".to_string();
+            g.code = "AB".to_string();
+        }
+        let v: serde_json::Value = serde_json::from_str(&l.status_json()).unwrap();
+        assert_eq!(v["state"], "waiting");
+        assert_eq!(v["code"], "AB");
+        assert_eq!(v["url"], "https://example.org/device?user_code=AB");
+    }
+}

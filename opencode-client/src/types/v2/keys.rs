@@ -4,14 +4,14 @@
 //! string literal, because a typo in a bare `"..."` is invisible to the
 //! compiler while a typo in a `keys::` constant is a compile error. Keep these
 //! in sync with the `serde` attributes in `types/v2/*` and with the live
-//! server (opencode 2.0.32 bundles the exact event names — see
+//! server (opencode 2.1.4 bundles the exact event names — see
 //! `vault/Разведка-v2.md` §10).
 //!
 //! Event-type constants are `&str` so they can be used directly as `match`
 //! patterns in `event::dispatcher::dispatch_v2`.
 //!
-//! Target server: opencode **2.0.32** (the real OpenCode 2; see
-//! `vault/Разведка-v2.md` §10). 2.0.32 emits the plain `session.*` event names
+//! Target server: opencode **2.1.4** (the real OpenCode 2; see
+//! `vault/Разведка-v2.md` §10). 2.1.x emits the plain `session.*` event names
 //! below, with no `session.next.` bridge prefix and no v1 routes.
 
 // ── `EventEnvelope` fields (`vault/Разведка-v2.md` §3) ───────────────────
@@ -56,6 +56,10 @@ pub const AGENT: &str = "agent";
 pub const DECISION: &str = "decision";
 pub const BEFORE: &str = "before";
 pub const REASON: &str = "reason";
+/// `{methodID}` of an integration connect request.
+pub const METHOD_ID: &str = "methodID";
+/// `{code}` of an integration OAuth `complete` request (`null` = none needed).
+pub const CODE: &str = "code";
 
 // ── form field names (`Form.*` / the `{answer:{…}}` reply body) ───────────
 pub const KEY: &str = "key";
@@ -88,7 +92,7 @@ pub const SOURCE_UNKNOWN: &str = "unknown";
 /// known (mirrors the v1 dispatcher's default).
 pub const DEFAULT_TOOL_TITLE: &str = "tool";
 
-// ── Event types: live agent-loop stream. opencode 2.0.32 emits these plain
+// ── Event types: live agent-loop stream. opencode 2.1.x emits these plain
 // `session.*` names (no `session.next.` bridge prefix). ───────────────────
 pub const STEP_STARTED: &str = "session.step.started";
 pub const STEP_ENDED: &str = "session.step.ended";
@@ -134,7 +138,7 @@ pub const DELETED: &str = "session.deleted";
 pub const IDLE: &str = "session.idle";
 pub const STATUS: &str = "session.status";
 
-// ── Catalog / config invalidation events (2.0.32) ───────────────────────
+// ── Catalog / config invalidation events (2.1.x) ─────────────────────────
 // The server emits these when a config-backed catalog changes (a new model,
 // provider, agent, skill, …). We recognise them so they are not reported as
 // unknown; the UI re-reads the affected list lazily (no live-accumulator
@@ -171,10 +175,10 @@ pub const FIELD_EXTERNAL: &str = "external";
 pub const COND_EQ: &str = "eq";
 pub const COND_NEQ: &str = "neq";
 
-// ── Full 2.0.32 registry: events we consciously recognise (handled by an arm
+// ── Full 2.1.4 registry: events we consciously recognise (handled by an arm
 // or ignored on purpose). The completeness test
-// (`types::v2::tests::every_2_0_32_event_is_recognised`) asserts that every
-// name in `tests/fixtures/v2-events-2.0.32.txt` is listed in
+// (`types::v2::tests::every_2_1_4_event_is_recognised`) asserts that every
+// name in `tests/fixtures/v2-events-2.1.4.txt` is listed in
 // `event::dispatcher::RECOGNISED_V2`, so a NEW upstream event fails the build
 // instead of silently logging. See `scripts/gen-v2-fixtures.sh`.
 //
@@ -183,7 +187,10 @@ pub const SESSION_CREATED: &str = "session.created";
 pub const SESSION_UPDATED: &str = "session.updated";
 pub const SESSION_FORKED: &str = "session.forked";
 pub const SESSION_VIEWED: &str = "session.viewed";
-pub const SESSION_COMPACTED: &str = "session.compacted";
+/// 2.1.4 replaced the old `session.compacted` with an archive flag on the
+/// session (the compaction *job* events below are unchanged).
+pub const SESSION_ARCHIVED: &str = "session.archived";
+pub const SESSION_UNARCHIVED: &str = "session.unarchived";
 pub const SESSION_DIFF: &str = "session.diff";
 pub const SESSION_ERROR: &str = "session.error";
 pub const SESSION_PERMISSIONS: &str = "session.permissions";

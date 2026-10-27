@@ -10,7 +10,7 @@ use tokio::time::sleep;
 
 use crate::api::{OpenCodeApi, V2Adapter};
 
-/// HTTP Basic username opencode 2.0.32 requires on its v2 API (paired with the
+/// HTTP Basic username opencode 2.1.x requires on its v2 API (paired with the
 /// startup-printed password; see `parse_server_password`).
 const BASIC_AUTH_USER: &str = "opencode";
 
@@ -38,9 +38,9 @@ impl Default for ServerConfig {
         Self {
             port: 0,
             bin: None,
-            // No `--pure`: opencode 2.0.32 dropped that flag (`serve` rejects it
+            // No `--pure`: the 2.x line dropped that flag (`serve` rejects it
             // with "Unrecognized flag: --pure" and exits 1 — the server never
-            // came up). 1.19.0 accepted it to run without plugins; 2.0.32 has no
+            // came up). 1.19.0 accepted it to run without plugins; 2.x has no
             // equivalent and does not need one to start.
             args: Vec::new(),
             cwd: None,
@@ -155,7 +155,7 @@ impl ServerGuard {
             }
         };
         let base = format!("http://127.0.0.1:{port}");
-        // opencode 2.0.32 guards the v2 API with HTTP Basic auth. The username
+        // opencode 2.x guards the v2 API with HTTP Basic auth. The username
         // is the fixed literal `opencode`; the password is the one the server
         // printed on startup. Absent (older builds that print none) → no auth
         // header, same as before.
@@ -403,7 +403,7 @@ fn parse_listening_port(line: &str) -> Option<u16> {
         .ok()
 }
 
-/// "server password <pw>" → Some("<pw>"). opencode 2.0.32 protects the v2 API
+/// "server password <pw>" → Some("<pw>"). opencode 2.x protects the v2 API
 /// with HTTP Basic auth (user `opencode`) and prints the password once on
 /// startup. We feed it into `ServerGuard::auth` so every request/SSE carries
 /// `Authorization: Basic`.

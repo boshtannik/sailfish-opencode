@@ -93,30 +93,6 @@
         <translation>Голосовые модели</translation>
     </message>
     <message>
-        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="109"/>
-        <source>Recognition:
-%1
-Synthesiser:
-%2</source>
-        <translation>Распознавание:
-%1
-Синтез:
-%2</translation>
-    </message>
-    <message>
-        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="120"/>
-        <source>↓ download
-→ start using
-✓ selected
-✕ cancel
-long press — remove</source>
-        <translation>↓ скачать
-→ использовать
-✓ выбрано
-✕ отмена
-долгое нажатие — удалить</translation>
-    </message>
-    <message>
         <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="126"/>
         <source>Voice answers</source>
         <translation>Голосовые ответы</translation>
@@ -419,6 +395,29 @@ long press — remove</source>
 <context>
     <name>VoiceModelsPage</name>
     <message>
+        <location filename="../../i18n/qml-src/pages/VoiceModelsPage.qml" line="158"/>
+        <source>Downloaded · Recognition</source>
+        <translation>Скачанные · Распознавание</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/VoiceModelsPage.qml" line="161"/>
+        <source>Downloaded · Synthesis</source>
+        <translation>Скачанные · Синтез</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/VoiceModelsPage.qml" line="286"/>
+        <source>↓ download
+→ start using
+✓ selected
+✕ cancel
+long press — remove</source>
+        <translation>↓ скачать
+→ использовать
+✓ выбрано
+✕ отмена
+долгое нажатие — удалить</translation>
+    </message>
+    <message>
         <location filename="../../i18n/qml-src/pages/VoiceModelsPage.qml" line="43"/>
         <source>Multilingual</source>
         <translation>Мультиязычные</translation>
@@ -437,11 +436,6 @@ long press — remove</source>
         <location filename="../../i18n/qml-src/pages/VoiceModelsPage.qml" line="129"/>
         <source>Downloading… %1% (%2 / %3)</source>
         <translation>Скачивание… %1% (%2 / %3)</translation>
-    </message>
-    <message>
-        <location filename="../../i18n/qml-src/pages/VoiceModelsPage.qml" line="152"/>
-        <source>Downloaded models</source>
-        <translation>Скачанные модели</translation>
     </message>
     <message>
         <location filename="../../i18n/qml-src/pages/VoiceModelsPage.qml" line="161"/>
