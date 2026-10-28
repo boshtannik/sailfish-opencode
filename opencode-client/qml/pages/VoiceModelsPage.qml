@@ -306,10 +306,14 @@ Page {
         anchors.fill: parent
         model: voiceModel
 
-        header: Item {
+        header: Column {
             width: parent.width
-            height: hintsLabel.height + Theme.paddingMedium
-                    + filterCombo.height + summaryLabel.height + Theme.paddingMedium
+            spacing: Theme.paddingSmall
+
+            Item {
+                width: parent.width
+                height: Theme.paddingMedium
+            }
 
             // Icon legend — first thing on the page, before the language filter.
             Label {
@@ -325,8 +329,6 @@ Page {
             ComboBox {
                 id: filterCombo
                 width: parent.width
-                anchors.top: hintsLabel.bottom
-                anchors.topMargin: Theme.paddingMedium
                 label: qsTr("Language")
                 currentIndex: vmPage.filterIndex()
                 menu: ContextMenu {
@@ -346,8 +348,6 @@ Page {
 
             Label {
                 id: summaryLabel
-                anchors.top: filterCombo.bottom
-                anchors.topMargin: Theme.paddingSmall
                 x: Theme.horizontalPageMargin
                 width: parent.width - 2 * Theme.horizontalPageMargin
                 text: qsTr("On device: %1 of %2 models, %3")
@@ -357,6 +357,11 @@ Page {
                 color: Theme.secondaryColor
                 font.pixelSize: Theme.fontSizeExtraSmall
                 wrapMode: Text.Wrap
+            }
+
+            Item {
+                width: parent.width
+                height: Theme.paddingMedium
             }
         }
 
