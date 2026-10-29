@@ -294,15 +294,12 @@ Page {
     // filter are the first thing the user needs to see.
     function scrollToTop() {
         if (list) {
-            list.contentY = 0
             list.positionViewAtBeginning()
         }
     }
     Component.onCompleted: Qt.callLater(vmPage.scrollToTop)
-    onStatusChanged: if (status === PageStatus.Active) {
-        list.contentY = 0
+    onStatusChanged: if (status === PageStatus.Active)
         Qt.callLater(vmPage.scrollToTop)
-    }
 
     RemorseItem { id: remorse }
 
@@ -313,12 +310,7 @@ Page {
 
         header: Column {
             width: parent.width
-            spacing: 0
-
-            Item {
-                width: parent.width
-                height: Theme.paddingSmall
-            }
+            spacing: Theme.paddingMedium
 
             // Icon legend — first thing on the page, before the language filter.
             Label {
@@ -329,11 +321,6 @@ Page {
                 wrapMode: Text.Wrap
                 color: Theme.secondaryColor
                 font.pixelSize: Theme.fontSizeExtraSmall
-            }
-
-            Item {
-                width: parent.width
-                height: Theme.paddingSmall
             }
 
             ComboBox {
@@ -367,11 +354,6 @@ Page {
                 color: Theme.secondaryColor
                 font.pixelSize: Theme.fontSizeExtraSmall
                 wrapMode: Text.Wrap
-            }
-
-            Item {
-                width: parent.width
-                height: Theme.paddingSmall
             }
         }
 

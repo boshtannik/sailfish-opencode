@@ -4,7 +4,6 @@ import QtMultimedia 5.4
 import Nemo.Notifications 1.0
 import Nemo.KeepAlive 1.2
 import Nemo.Configuration 1.0
-import QtFeedback 5.0
 import "pages"
 
 ApplicationWindow {
@@ -1011,11 +1010,7 @@ ApplicationWindow {
         }
     }
 
-    HapticsEffect {
-        id: pttVibra
-        intensity: 0.5
-        duration: 40
-    }
+
 
     // Base status independent of the retry detail token (`retry|…` counts as
     // busy). The worker sets `retry|<next_ms>|<attempt>|<message>` while the
@@ -1086,8 +1081,6 @@ ApplicationWindow {
             // (locally, for instant feedback) and let the worker drop its own
             // queue — VoiceRecordStart makes Rust stop all speech and
             // invalidate anything still synthesising.
-            if (app.pttVibrate && typeof pttVibra !== "undefined")
-                pttVibra.play()
             app.stopTtsPlayer()
             app.recognizing = false
             app.recording = true
@@ -1100,8 +1093,6 @@ ApplicationWindow {
             // recognizing FIRST, then recording=false: the worker only resumes
             // speech after recognition finishes, so playback cannot start in
             // the gap before STT begins.
-            if (app.pttVibrate && typeof pttVibra !== "undefined")
-                pttVibra.play()
             app.recognizing = true
             app.recording = false
             app.voiceCmd(app.cmdRecordStop, "")
