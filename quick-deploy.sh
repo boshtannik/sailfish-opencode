@@ -8,7 +8,8 @@
 #
 set -e
 
-HOST="${SFOS_HOST:-172.28.172.1}"
+#HOST="${SFOS_HOST:-172.28.172.1}"
+HOST="${SFOS_HOST:-192.168.76.232}"
 USER="${SFOS_USER:-defaultuser}"
 SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10"
 

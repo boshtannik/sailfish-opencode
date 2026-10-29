@@ -37,6 +37,16 @@
 <context>
     <name>GlobalSettingsPage</name>
     <message>
+        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="132"/>
+        <source>Vibrate on PTT</source>
+        <translation>Värinä PTT:llä</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="133"/>
+        <source>Vibrate when pressing and releasing the PTT button</source>
+        <translation>Värise PTT-painikkeen painallessa ja vapauttaessa</translation>
+    </message>
+    <message>
         <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="26"/>
         <source>Settings</source>
         <translation>Asetukset</translation>

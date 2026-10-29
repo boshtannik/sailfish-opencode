@@ -1080,17 +1080,14 @@ ApplicationWindow {
     function voiceCmd(cmd, val) {
         bridge.voice_command(cmd, val === undefined ? "" : val)
     }
-    function vibratePtt() {
-        if (app.pttVibrate && typeof pttVibra !== "undefined")
-            pttVibra.play()
-    }
     function startPttHold() {
         if (!app.recording) {
             // The mic and the speaker must never fight: silence playback now
             // (locally, for instant feedback) and let the worker drop its own
             // queue — VoiceRecordStart makes Rust stop all speech and
             // invalidate anything still synthesising.
-            app.vibratePtt()
+            if (app.pttVibrate && typeof pttVibra !== "undefined")
+                pttVibra.play()
             app.stopTtsPlayer()
             app.recognizing = false
             app.recording = true
@@ -1103,7 +1100,8 @@ ApplicationWindow {
             // recognizing FIRST, then recording=false: the worker only resumes
             // speech after recognition finishes, so playback cannot start in
             // the gap before STT begins.
-            app.vibratePtt()
+            if (app.pttVibrate && typeof pttVibra !== "undefined")
+                pttVibra.play()
             app.recognizing = true
             app.recording = false
             app.voiceCmd(app.cmdRecordStop, "")

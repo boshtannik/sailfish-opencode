@@ -291,13 +291,18 @@ Page {
     }
 
     // Always open the page at the very top: the icon legend and the language
-    // filter are the first thing the user needs to see (the list used to open
-    // scrolled just past the filter).
+    // filter are the first thing the user needs to see.
     function scrollToTop() {
-        list.positionViewAtBeginning()
+        if (list) {
+            list.contentY = 0
+            list.positionViewAtBeginning()
+        }
     }
     Component.onCompleted: Qt.callLater(vmPage.scrollToTop)
-    onStatusChanged: if (status === PageStatus.Active) Qt.callLater(vmPage.scrollToTop)
+    onStatusChanged: if (status === PageStatus.Active) {
+        list.contentY = 0
+        Qt.callLater(vmPage.scrollToTop)
+    }
 
     RemorseItem { id: remorse }
 
@@ -308,11 +313,11 @@ Page {
 
         header: Column {
             width: parent.width
-            spacing: Theme.paddingSmall
+            spacing: 0
 
             Item {
                 width: parent.width
-                height: Theme.paddingMedium
+                height: Theme.paddingSmall
             }
 
             // Icon legend — first thing on the page, before the language filter.
@@ -324,6 +329,11 @@ Page {
                 wrapMode: Text.Wrap
                 color: Theme.secondaryColor
                 font.pixelSize: Theme.fontSizeExtraSmall
+            }
+
+            Item {
+                width: parent.width
+                height: Theme.paddingSmall
             }
 
             ComboBox {
@@ -361,7 +371,7 @@ Page {
 
             Item {
                 width: parent.width
-                height: Theme.paddingMedium
+                height: Theme.paddingSmall
             }
         }
 
