@@ -94,15 +94,10 @@ fn humantime_since_epoch() -> String {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     init_logging();
-    // Ensure opencode asks for permissions by default
-    if let Some(home) = std::env::var_os("HOME") {
-        let cfg_dir = std::path::Path::new(&home).join(".config").join("opencode");
-        let cfg_path = cfg_dir.join("opencode.jsonc");
-        if !cfg_path.exists() {
-            let _ = std::fs::create_dir_all(&cfg_dir);
-            let _ = std::fs::write(&cfg_path, "{\n  \"$schema\": \"https://opencode.ai/config.json\",\n  \"permission\": {\n    \"*\": \"ask\"\n  }\n}\n");
-        }
-    }
+    // Do not force-create opencode.jsonc with {"permission":{"*":"ask"}} on first
+    // run: that made the agent ask for every action and annoyed users. If the
+    // user wants strict permissions they can create the config themselves; the
+    // server's defaults remain.
     // Drop leftover temp files from a previous run (old /tmp WAVs, half-written
     // TTS cache entries) so they don't accumulate.
     voice::cleanup_tmp();

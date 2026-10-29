@@ -4,6 +4,7 @@ import QtMultimedia 5.4
 import Nemo.Notifications 1.0
 import Nemo.KeepAlive 1.2
 import Nemo.Configuration 1.0
+import QtFeedback 5.0
 import "pages"
 
 ApplicationWindow {
@@ -392,6 +393,12 @@ ApplicationWindow {
         id: dingSetting
         key: "/apps/harbour-opencode/dingSound"
     }
+    ConfigurationValue {
+        id: pttVibrateSetting
+        key: "/apps/harbour-opencode/pttVibrate"
+        defaultValue: true
+    }
+    property bool pttVibrate: pttVibrateSetting.value !== false
 
     ConfigurationValue {
         id: inputModeSetting
@@ -1004,6 +1011,12 @@ ApplicationWindow {
         }
     }
 
+    HapticsEffect {
+        id: pttVibra
+        intensity: 0.5
+        duration: 40
+    }
+
     // Base status independent of the retry detail token (`retry|…` counts as
     // busy). The worker sets `retry|<next_ms>|<attempt>|<message>` while the
     // server is retrying a failed model call (see main.rs `session.status`).
@@ -1067,12 +1080,17 @@ ApplicationWindow {
     function voiceCmd(cmd, val) {
         bridge.voice_command(cmd, val === undefined ? "" : val)
     }
+    function vibratePtt() {
+        if (app.pttVibrate && typeof pttVibra !== "undefined")
+            pttVibra.play()
+    }
     function startPttHold() {
         if (!app.recording) {
             // The mic and the speaker must never fight: silence playback now
             // (locally, for instant feedback) and let the worker drop its own
             // queue — VoiceRecordStart makes Rust stop all speech and
             // invalidate anything still synthesising.
+            app.vibratePtt()
             app.stopTtsPlayer()
             app.recognizing = false
             app.recording = true
@@ -1085,6 +1103,7 @@ ApplicationWindow {
             // recognizing FIRST, then recording=false: the worker only resumes
             // speech after recognition finishes, so playback cannot start in
             // the gap before STT begins.
+            app.vibratePtt()
             app.recognizing = true
             app.recording = false
             app.voiceCmd(app.cmdRecordStop, "")
@@ -1967,6 +1986,51 @@ ApplicationWindow {
                             font.pixelSize: Theme.fontSizeSmall
                         }
 
+                        Item {
+                            width: parent.width
+                            height: Theme.paddingSmall
+                        }
+
+                        Button {
+                            text: qsTr("Allow once")
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            enabled: app.currentPermission !== null
+                            onClicked: {
+                                if (app.currentPermission) {
+                                    app.answerPermission(
+                                        app.currentPermission.sessionID,
+                                        app.currentPermission.id,
+                                        app.replyOnce)
+                                }
+                            }
+                        }
+                        Button {
+                            text: qsTr("Always allow")
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            enabled: app.currentPermission !== null
+                            onClicked: {
+                                if (app.currentPermission) {
+                                    app.answerPermission(
+                                        app.currentPermission.sessionID,
+                                        app.currentPermission.id,
+                                        app.replyAlways)
+                                }
+                            }
+                        }
+                        Button {
+                            text: qsTr("Deny")
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            enabled: app.currentPermission !== null
+                            onClicked: {
+                                if (app.currentPermission) {
+                                    app.answerPermission(
+                                        app.currentPermission.sessionID,
+                                        app.currentPermission.id,
+                                        app.replyReject)
+                                }
+                            }
+                        }
+
                         // The rules the server remembers ("always allow") — they
                         // can be revoked here.
                         Column {
@@ -2014,51 +2078,6 @@ ApplicationWindow {
                             horizontalAlignment: Text.AlignHCenter
                             wrapMode: Text.Wrap
                             font.pixelSize: Theme.fontSizeSmall
-                        }
-
-                        Item {
-                            width: parent.width
-                            height: Theme.paddingSmall
-                        }
-
-                        Button {
-                            text: qsTr("Allow once")
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            enabled: app.currentPermission !== null
-                            onClicked: {
-                                if (app.currentPermission) {
-                                    app.answerPermission(
-                                        app.currentPermission.sessionID,
-                                        app.currentPermission.id,
-                                        app.replyOnce)
-                                }
-                            }
-                        }
-                        Button {
-                            text: qsTr("Always allow")
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            enabled: app.currentPermission !== null
-                            onClicked: {
-                                if (app.currentPermission) {
-                                    app.answerPermission(
-                                        app.currentPermission.sessionID,
-                                        app.currentPermission.id,
-                                        app.replyAlways)
-                                }
-                            }
-                        }
-                        Button {
-                            text: qsTr("Deny")
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            enabled: app.currentPermission !== null
-                            onClicked: {
-                                if (app.currentPermission) {
-                                    app.answerPermission(
-                                        app.currentPermission.sessionID,
-                                        app.currentPermission.id,
-                                        app.replyReject)
-                                }
-                            }
                         }
                     }
                 }

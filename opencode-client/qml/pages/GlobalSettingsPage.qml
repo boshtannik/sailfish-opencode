@@ -128,6 +128,17 @@ Item {
                 Component.onCompleted: globalSettingsPage.syncPttCombo()
             }
 
+            TextSwitch {
+                text: qsTr("Vibrate on PTT")
+                description: qsTr("Vibrate when pressing and releasing the PTT button")
+                checked: appWindow.pttVibrate
+                onClicked: {
+                    appWindow.pttVibrateSetting.value = checked
+                    appWindow.pttVibrateSetting.sync()
+                    appWindow.pttVibrate = checked
+                }
+            }
+
             SectionHeader { text: qsTr("Voice") }
 
             BackgroundItem {
