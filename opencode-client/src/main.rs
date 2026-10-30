@@ -17,10 +17,10 @@ use opencode_client::i18n::{self, err_line, now_ms, svc_line};
 use opencode_client::markers::{self, *};
 use opencode_client::server;
 use opencode_client::settings::Settings;
-use opencode_client::types::v2::permission::PermissionReplyKind;
 use opencode_client::types::keys;
 use opencode_client::types::tool::ToolState;
 use opencode_client::types::v2::keys as v2keys;
+use opencode_client::types::v2::permission::PermissionReplyKind;
 use opencode_client::voice;
 
 /// The only QML file of the application (located in /usr/share/harbour-opencode/qml).
@@ -47,9 +47,8 @@ impl std::io::Write for Tee {
 fn init_logging() {
     // Default `warn`: `info` logged every SSE event (~1 s) and grew app.log
     // tens of MB. Set `RUST_LOG=info` / `debug` for verbose troubleshooting.
-    let mut builder = env_logger::Builder::from_env(
-        env_logger::Env::default().default_filter_or("warn"),
-    );
+    let mut builder =
+        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn"));
     if let Some(home) = std::env::var_os("HOME") {
         let dir = std::path::PathBuf::from(home).join(".cache/harbour-opencode");
         let _ = std::fs::create_dir_all(&dir);
@@ -59,12 +58,19 @@ fn init_logging() {
         if path.exists() {
             let _ = std::fs::rename(&path, dir.join("app.log.1"));
         }
-        if let Ok(file) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        if let Ok(file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+        {
             builder.target(env_logger::Target::Pipe(Box::new(Tee(file))));
         }
     }
     let _ = builder.try_init();
-    log::info!("--- harbour-opencode starting (pid={}) ---", std::process::id());
+    log::info!(
+        "--- harbour-opencode starting (pid={}) ---",
+        std::process::id()
+    );
 }
 
 /// Routed to the file — the launcher does not capture the app's stderr, so a
@@ -74,9 +80,18 @@ fn install_panic_log(dir: &std::path::Path) {
     let path = dir.join("panic.log");
     std::panic::set_hook(Box::new(move |info| {
         let bt = std::backtrace::Backtrace::force_capture();
-        let msg = format!("\n[{} PANIC] thread={:?}\n{}\n{}",
-                          humantime_since_epoch(), std::thread::current().id(), info, bt);
-        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        let msg = format!(
+            "\n[{} PANIC] thread={:?}\n{}\n{}",
+            humantime_since_epoch(),
+            std::thread::current().id(),
+            info,
+            bt
+        );
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+        {
             let _ = f.write_all(msg.as_bytes());
             let _ = f.flush();
         }
@@ -132,7 +147,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let forms = bridge_pinned.borrow().forms_handle();
     let settings = bridge_pinned.borrow().settings_handle();
     let console_login = bridge_pinned.borrow().console_login_handle();
-    bridge_pinned.borrow().set_status_shared(markers::STATUS_CONNECTING);
+    bridge_pinned
+        .borrow()
+        .set_status_shared(markers::STATUS_CONNECTING);
 
     let dispatcher: event::dispatcher::SharedState = Arc::new(Mutex::new(Default::default()));
 
@@ -181,7 +198,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if let Err(e) = std::fs::create_dir_all(&cwd) {
                     log::warn!("failed to create workdir {cwd:?}: {e}");
                 }
-                let guard = server::ServerGuard::start(server::ServerConfig { cwd: Some(cwd), ..Default::default() }).await;
+                let guard = server::ServerGuard::start(server::ServerConfig {
+                    cwd: Some(cwd),
+                    ..Default::default()
+                })
+                .await;
                 // Auth for the connection the worker will use. Our own server
                 // (2.1.x) prints a Basic-auth password on startup → take it
                 // from the guard; the env auth only matters for a pre-existing
@@ -220,17 +241,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             worker_sounds,
                             worker_voice,
                             worker_tools,
-                        worker_permissions,
-                        worker_permission_error,
-                        worker_saved_permissions,
-                        worker_forms,
-                        worker_settings,
-                        console_login,
-                        worker_stop_rx,
-                    )
-                    .await
+                            worker_permissions,
+                            worker_permission_error,
+                            worker_saved_permissions,
+                            worker_forms,
+                            worker_settings,
+                            console_login,
+                            worker_stop_rx,
+                        )
+                        .await
                     }
-                    None => set_server_status(&worker_status, &markers::ServerConnectionStatus::Error),
+                    None => {
+                        set_server_status(&worker_status, &markers::ServerConnectionStatus::Error)
+                    }
                 }
                 // Guard drop happens here: after the stop signal.
                 drop(guard);
@@ -270,6 +293,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 enum StreamEnd {
     /// The server closed the stream (or the session was dropped) — reconnect.
     Reconnect,
+    // FIXME: Only one variant? Why this enum was created, maybe some other variants still required
+    // when it's used?
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -368,9 +393,27 @@ async fn run_stream_adapter(
 ) -> Result<StreamEnd, String> {
     let client = api::V2Adapter::new(base.clone(), auth.clone());
     run_stream(
-        client, dispatcher, worker_pending, worker_prompts, status, sessions,
-        commands, current_session, compacting, nav, todos, models, sounds, voice, tools,
-        permissions, permission_error, saved_permissions, forms, settings, console_login,
+        client,
+        dispatcher,
+        worker_pending,
+        worker_prompts,
+        status,
+        sessions,
+        commands,
+        current_session,
+        compacting,
+        nav,
+        todos,
+        models,
+        sounds,
+        voice,
+        tools,
+        permissions,
+        permission_error,
+        saved_permissions,
+        forms,
+        settings,
+        console_login,
     )
     .await
 }
@@ -400,7 +443,11 @@ impl<'a> TurnState<'a> {
     /// v2 terminal streaming events: `session.text.ended` / `session.reasoning.ended`
     /// carry the final text of one block (v1 delivered the same at
     /// `message.part.updated`; hence the shared accumulator semantics).
-    async fn on_v2_event(&mut self, env: &opencode_client::types::v2::EventEnvelope, _client: &impl api::OpenCodeApi) {
+    async fn on_v2_event(
+        &mut self,
+        env: &opencode_client::types::v2::EventEnvelope,
+        _client: &impl api::OpenCodeApi,
+    ) {
         use opencode_client::types::v2::event as v2;
         match env.kind.as_str() {
             "session.text.ended" => {
@@ -438,6 +485,7 @@ impl<'a> TurnState<'a> {
                     }
                 }
             }
+            // FIXME: Maybe better enum with str values to let compiler help us?
             "session.reasoning.ended" => {
                 let Ok(d): Result<v2::TextEndedData, _> = serde_json::from_value(env.data.clone())
                 else {
@@ -448,7 +496,11 @@ impl<'a> TurnState<'a> {
                 }
                 let key = v2_reasoning_key(&d.assistant_message_id, d.ordinal);
                 self.reasoning_part_ids.insert(key.clone());
-                if self.reasonings.insert(key.clone(), d.text.clone()).is_none() {
+                if self
+                    .reasonings
+                    .insert(key.clone(), d.text.clone())
+                    .is_none()
+                {
                     self.reasoning_order.push(key.clone());
                 }
                 if self.live_reasoned_ids.contains(&key) && !d.text.trim().is_empty() {
@@ -680,7 +732,16 @@ async fn run_stream<A: api::OpenCodeApi>(
     refresh_models(&client, &models).await;
     refresh_sounds(&sounds);
     // Resume the last session on startup — the chat shows its history.
-    resume_last_session(&client, &mut current_session, &current_session_shared, &worker_pending, &todos, &dispatcher, &sessions).await;
+    resume_last_session(
+        &client,
+        &mut current_session,
+        &current_session_shared,
+        &worker_pending,
+        &todos,
+        &dispatcher,
+        &sessions,
+    )
+    .await;
     // Repair the turn state from the server's own answer: frames sent while
     // we were disconnected are gone from the stream, and a turn may have
     // started or ended in that window. No timeout is involved — this is the
@@ -715,6 +776,12 @@ async fn run_stream<A: api::OpenCodeApi>(
     loop {
         tokio::select! {
             item = stream.next() => {
+                // FIXME: As i get - this is the main place of soring out anything that goes out of
+                // server or GUI (doesnt matter too much). But i guess insteard of making this
+                // match statement - monster-like, maybe subdivide those arms into separate
+                // functions moved into their own files, like module handlers/rename.rs,
+                // handlers/...rs, etc?? It may allow also to have tests right in there? Do you
+                // agree?
                 match item {
                     Some(Ok(env)) => {
                         {
@@ -843,6 +910,9 @@ async fn run_stream<A: api::OpenCodeApi>(
                             Ok(sess) => match sess["id"].as_str() {
                                 Some(id) => {
                                     log::info!("new session: {id}");
+                                        // FIXME: Batches of similar calls - maybe move centralize
+                                        // into function like clean(vec![PARTS, REASONINGS,
+                                        // REASONING_ORDER, TEXT_LIVE, TEXT_ORDER])?
                                     current_session = Some(id.to_string());
                                     persist_last_session(Some(id));
                                     parts.clear();
@@ -1593,7 +1663,10 @@ async fn refresh_sessions(
                                 .get(keys::COST)
                                 .cloned()
                                 .unwrap_or(serde_json::Value::Number(0.into()));
-                            let tokens = s.get(keys::TOKENS).cloned().unwrap_or(serde_json::Value::Null);
+                            let tokens = s
+                                .get(keys::TOKENS)
+                                .cloned()
+                                .unwrap_or(serde_json::Value::Null);
                             Some(serde_json::json!({
                                 "id": id,
                                 "title": title,
@@ -1633,10 +1706,7 @@ async fn refresh_todo(
 }
 
 /// Load providers/models and flatten for QML.
-async fn refresh_models(
-    client: &impl api::OpenCodeApi,
-    models: &Arc<std::sync::Mutex<String>>,
-) {
+async fn refresh_models(client: &impl api::OpenCodeApi, models: &Arc<std::sync::Mutex<String>>) {
     let v = match client.providers().await {
         Ok(v) => v,
         Err(e) => {
@@ -1707,7 +1777,11 @@ fn refresh_sounds(sounds: &Arc<std::sync::Mutex<String>>) {
                     .chars()
                     .enumerate()
                     .map(|(i, c)| {
-                        if i == 0 { c.to_uppercase().collect::<String>() } else { c.to_string() }
+                        if i == 0 {
+                            c.to_uppercase().collect::<String>()
+                        } else {
+                            c.to_string()
+                        }
                     })
                     .collect::<String>();
                 in_dir.push((pretty, format!("file://{disp}")));
@@ -1739,7 +1813,9 @@ fn history_lines_v2(
     arr: &[serde_json::Value],
     revert_id: Option<&str>,
 ) -> (Vec<String>, Option<(String, String)>) {
-    use opencode_client::types::v2::message::{CompactionStatus, Content, MessageBody, MessageInfo};
+    use opencode_client::types::v2::message::{
+        CompactionStatus, Content, MessageBody, MessageInfo,
+    };
     let mut msgs: Vec<MessageInfo> = Vec::new();
     for raw in arr {
         match serde_json::from_value::<MessageInfo>(raw.clone()) {
@@ -1851,7 +1927,9 @@ async fn load_history(
     // filter is ours. The presence of a boundary also drives the QML "Restore"
     // banner (control line `[[reverted]]1`).
     let revert_id = match client.get_session(session_id).await {
-        Ok(s) => s[keys::REVERT][keys::MESSAGE_ID].as_str().map(str::to_string),
+        Ok(s) => s[keys::REVERT][keys::MESSAGE_ID]
+            .as_str()
+            .map(str::to_string),
         Err(e) => {
             log::warn!("get_session (revert state): {e}");
             None
@@ -1891,7 +1969,8 @@ async fn load_history(
                 }
                 return;
             }
-            let mut items: Vec<&serde_json::Value> = v.as_array().map(|a| a.iter().collect()).unwrap_or_default();
+            let mut items: Vec<&serde_json::Value> =
+                v.as_array().map(|a| a.iter().collect()).unwrap_or_default();
             items.sort_by_key(|e| {
                 e[keys::INFO][keys::TIME][keys::CREATED]
                     .as_u64()
@@ -2069,7 +2148,9 @@ fn last_session_path() -> Option<std::path::PathBuf> {
 
 /// Remember current session (`None` — clear record).
 fn persist_last_session(session: Option<&str>) {
-    let Some(path) = last_session_path() else { return };
+    let Some(path) = last_session_path() else {
+        return;
+    };
     match session {
         Some(id) => {
             if let Err(e) = std::fs::write(&path, id) {
@@ -2424,4 +2505,3 @@ async fn refresh_forms(
     }
     refresh_forms_json(dispatcher, forms).await;
 }
-

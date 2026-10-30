@@ -32,7 +32,9 @@ const POLL_MS: u64 = 1_500;
 pub fn auth_json_path() -> Option<std::path::PathBuf> {
     let data_home = std::env::var_os("XDG_DATA_HOME")
         .map(std::path::PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/share")))?;
+        .or_else(|| {
+            std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/share"))
+        })?;
     Some(data_home.join("opencode").join("auth.json"))
 }
 
@@ -117,15 +119,15 @@ impl ConsoleLogin {
 
     /// Last detail message (for the failure notice).
     pub fn message(&self) -> String {
-        self.status.lock().map(|g| g.message.clone()).unwrap_or_default()
+        self.status
+            .lock()
+            .map(|g| g.message.clone())
+            .unwrap_or_default()
     }
 
     /// Take the finish flag once (`Some(true)` = success, `Some(false)` = error).
     pub fn take_finished(&self) -> Option<bool> {
-        self.finished
-            .lock()
-            .map(|mut f| f.take())
-            .unwrap_or(None)
+        self.finished.lock().map(|mut f| f.take()).unwrap_or(None)
     }
 
     fn set(&self, state: &str, message: &str) {
@@ -135,6 +137,8 @@ impl ConsoleLogin {
         }
     }
 
+    // FIXME: State shall be enum with str values. Compiler shall help us to restict behaviour of
+    // variety of data.
     fn finish(&self, ok: bool, state: &str, message: &str) {
         self.set(state, message);
         if let Ok(mut a) = self.attempt.lock() {
@@ -213,7 +217,9 @@ impl ConsoleLogin {
 
         let now = now_ms();
         {
-            let Ok(mut last) = self.last_poll.lock() else { return };
+            let Ok(mut last) = self.last_poll.lock() else {
+                return;
+            };
             if now < last.saturating_add(POLL_MS) {
                 return;
             }
