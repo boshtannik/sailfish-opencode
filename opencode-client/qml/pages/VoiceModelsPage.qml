@@ -27,14 +27,26 @@ Page {
     readonly property string secRecognition: "recognition"
     readonly property string secSynthesis: "synthesis"
 
-    onVoiceFpChanged: vmPage.fillModel()
+    onVoiceFpChanged: {
+        vmPage.fillModel()
+        if (!vmPage.userScrolled) {
+            list.contentY = 0
+            list.positionViewAtBeginning()
+        }
+    }
 
     // The page must open at the very top so the icon legend and the language
     // filter are fully visible. Instead of a timer (a race with layout), the
     // list is held at contentY = 0 by a declarative Binding until the user
     // performs a real scroll gesture. No clocks, no guesswork about timing.
     property bool userScrolled: false
-    onStatusChanged: if (status === PageStatus.Active) userScrolled = false
+    onStatusChanged: {
+        if (status === PageStatus.Active) {
+            userScrolled = false
+            list.contentY = 0
+            list.positionViewAtBeginning()
+        }
+    }
 
     ListModel { id: voiceModel }
 
@@ -310,6 +322,11 @@ Page {
 
         // Release the top-pin as soon as the user actually scrolls.
         onMovementStarted: vmPage.userScrolled = true
+
+        Component.onCompleted: {
+            list.contentY = 0
+            list.positionViewAtBeginning()
+        }
 
         header: Column {
             width: parent.width
