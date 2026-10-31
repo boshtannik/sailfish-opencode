@@ -29,6 +29,13 @@ Page {
 
     onVoiceFpChanged: vmPage.fillModel()
 
+    // The page must open at the very top so the icon legend and the language
+    // filter are fully visible. Instead of a timer (a race with layout), the
+    // list is held at contentY = 0 by a declarative Binding until the user
+    // performs a real scroll gesture. No clocks, no guesswork about timing.
+    property bool userScrolled: false
+    onStatusChanged: if (status === PageStatus.Active) userScrolled = false
+
     ListModel { id: voiceModel }
 
     function fingerprint() {
@@ -290,23 +297,19 @@ Page {
         return b
     }
 
-    // Always open the page at the very top: the icon legend and the language
-    // filter are the first thing the user needs to see.
-    function scrollToTop() {
-        if (list) {
-            list.positionViewAtBeginning()
-        }
-    }
-    Component.onCompleted: Qt.callLater(vmPage.scrollToTop)
-    onStatusChanged: if (status === PageStatus.Active)
-        Qt.callLater(vmPage.scrollToTop)
-
+    // The legend/filter/summary scroll WITH the list so the PullDownMenu stays
+    // at the very top of the page. Until the user actually scrolls, a Binding
+    // below holds contentY at 0 (deterministic — no timer) so the legend is
+    // always visible on open.
     RemorseItem { id: remorse }
 
     SilicaListView {
         id: list
         anchors.fill: parent
         model: voiceModel
+
+        // Release the top-pin as soon as the user actually scrolls.
+        onMovementStarted: vmPage.userScrolled = true
 
         header: Column {
             width: parent.width
@@ -501,5 +504,15 @@ textCol.height
         }
 
         VerticalScrollDecorator {}
+    }
+
+    // Hold the list at the very top until the user scrolls it themselves. This
+    // is declarative (no timers): the moment a real scroll gesture starts,
+    // onMovementStarted flips userScrolled and this Binding goes inactive.
+    Binding {
+        target: list
+        property: "contentY"
+        value: 0
+        when: !vmPage.userScrolled
     }
 }

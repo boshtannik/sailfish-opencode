@@ -132,11 +132,7 @@ Item {
                 text: qsTr("Vibrate on PTT")
                 description: qsTr("Vibrate when pressing and releasing the PTT button")
                 checked: appWindow.pttVibrate
-                onClicked: {
-                    appWindow.pttVibrateSetting.value = checked
-                    appWindow.pttVibrateSetting.sync()
-                    appWindow.pttVibrate = checked
-                }
+                onCheckedChanged: appWindow.pttVibrate = checked
             }
 
             SectionHeader { text: qsTr("Voice") }

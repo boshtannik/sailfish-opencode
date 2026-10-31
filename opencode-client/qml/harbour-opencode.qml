@@ -4,6 +4,7 @@ import QtMultimedia 5.4
 import Nemo.Notifications 1.0
 import Nemo.KeepAlive 1.2
 import Nemo.Configuration 1.0
+import Nemo.Ngf 1.0
 import "pages"
 
 ApplicationWindow {
@@ -398,6 +399,17 @@ ApplicationWindow {
         defaultValue: true
     }
     property bool pttVibrate: pttVibrateSetting.value !== false
+
+    // PTT haptics via NGF (the same path the system keyboard uses). "strong"
+    // is 66 ms on this device's vibrator — clearly perceptible, unlike the
+    // ~10 ms PressWeak tick that ThemeEffect mapped to.
+    NonGraphicalFeedback {
+        id: pttFeedback
+        event: "vibra"
+        properties: [
+            NgfProperty { name: "haptic.effect"; value: "strong" }
+        ]
+    }
 
     ConfigurationValue {
         id: inputModeSetting
@@ -1075,6 +1087,18 @@ ApplicationWindow {
     function voiceCmd(cmd, val) {
         bridge.voice_command(cmd, val === undefined ? "" : val)
     }
+    // Strong haptic tick for PTT press/release, via NGF (NonGraphicalFeedback).
+    // This is the same mechanism the system keyboard uses and it reaches the
+    // vibrator directly; ThemeEffect's PressWeak stayed silent on this device.
+    function pttHaptic() {
+        if (!app.pttVibrate)
+            return
+        try {
+            pttFeedback.play()
+        } catch (e) {
+            // Haptics are cosmetic — never let them break PTT.
+        }
+    }
     function startPttHold() {
         if (!app.recording) {
             // The mic and the speaker must never fight: silence playback now
@@ -1085,6 +1109,7 @@ ApplicationWindow {
             app.recognizing = false
             app.recording = true
             app.voiceCmd(app.cmdRecordStart, "")
+            app.pttHaptic()
         }
     }
     function stopPttHold() {
@@ -1096,6 +1121,7 @@ ApplicationWindow {
             app.recognizing = true
             app.recording = false
             app.voiceCmd(app.cmdRecordStop, "")
+            app.pttHaptic()
         }
     }
 
@@ -1276,6 +1302,7 @@ ApplicationWindow {
     onSoundOnPermissionChanged: { soundOnPermissionSetting.value = app.soundOnPermission; soundOnPermissionSetting.sync() }
     onSendImmediatelyChanged: { sendImmediatelySetting.value = app.sendImmediately; sendImmediatelySetting.sync() }
     onShowReasoningChanged: { showReasoningSetting.value = app.showReasoning; showReasoningSetting.sync() }
+    onPttVibrateChanged: { pttVibrateSetting.value = app.pttVibrate; pttVibrateSetting.sync() }
     onDingSoundChanged: { if (app.dingSound) dingSetting.value = app.dingSound; dingSetting.sync() }
 
     // At startup we sync the saved TTS mode (auto/button/off)
