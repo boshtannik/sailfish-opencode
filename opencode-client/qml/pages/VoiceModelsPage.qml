@@ -56,8 +56,7 @@ Page {
         for (var i = 0; i < arr.length; i++)
             out += arr[i].model_id + "|" + arr[i].downloaded + "|"
                    + arr[i].state + ";"
-        return out + "@" + appWindow.chosenStt + "#" + appWindow.chosenTts
-               + "$" + vmPage.filterLang + "%" + vmPage.recExpanded
+        return out + "$" + vmPage.filterLang + "%" + vmPage.recExpanded
                + "!" + vmPage.ttsExpanded + "^" + vmPage.dlRecExpanded
                + "&" + vmPage.dlTtsExpanded
     }
