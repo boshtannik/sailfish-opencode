@@ -33,6 +33,11 @@ pub struct V2Adapter {
     pub http: Client,
     pub base: String,
     pub auth: Option<(String, String)>,
+    /// Working directory of the server the app runs in. The session list is
+    /// limited to it: `GET /api/session` returns the sessions of EVERY
+    /// directory in opencode's database, and a session of another (or deleted)
+    /// directory answers 404 to prompt/model calls on this server.
+    pub directory: Option<String>,
 }
 
 impl V2Adapter {
@@ -41,7 +46,15 @@ impl V2Adapter {
             http: Client::new(),
             base,
             auth,
+            directory: None,
         }
+    }
+
+    /// Limit the session list to `directory` (ignored when empty).
+    pub fn with_directory(mut self, directory: String) -> Self {
+        let d = directory.trim().trim_end_matches('/').to_string();
+        self.directory = if d.is_empty() { None } else { Some(d) };
+        self
     }
 
     fn authed(&self, req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
@@ -157,7 +170,10 @@ impl OpenCodeApi for V2Adapter {
     /// the array, so expose the plain array in place of the envelope.
     fn list_sessions(&self) -> impl Future<Output = Result<serde_json::Value, String>> + Send {
         async move {
-            let url = format!("{}/api/session", self.base);
+            let url = match &self.directory {
+                Some(d) => format!("{}/api/session?directory={}", self.base, urlencode(d)),
+                None => format!("{}/api/session", self.base),
+            };
             let resp = self
                 .authed(self.http.get(&url))
                 .send()
@@ -461,18 +477,24 @@ impl OpenCodeApi for V2Adapter {
         async move { Ok(serde_json::Value::Array(Vec::new())) }
     }
 
-    /// POST /api/session/{id}/model `{model: Model.Ref}` → 204.
+    /// POST /api/session/{id}/model `{model: Model.Ref}` → 204. A ref without
+    /// `variant` resets the session to the server's default variant
+    /// (verified on 2.1.4), so the caller passes the one to keep.
     fn set_model(
         &self,
         session_id: &str,
         provider_id: &str,
         model_id: &str,
+        variant: Option<&str>,
     ) -> impl Future<Output = Result<(), String>> + Send {
+        let variant = variant.filter(|v| !v.is_empty()).map(str::to_string);
         async move {
             let url = format!("{}/api/session/{}/model", self.base, session_id);
-            let body = serde_json::json!({
-                k::MODEL: { k::PROVIDER_ID: provider_id, k::ID: model_id }
-            });
+            let mut model_ref = serde_json::json!({ k::PROVIDER_ID: provider_id, k::ID: model_id });
+            if let Some(v) = variant {
+                model_ref[k::VARIANT] = serde_json::Value::String(v);
+            }
+            let body = serde_json::json!({ k::MODEL: model_ref });
             let resp = self
                 .authed(self.http.post(&url).json(&body))
                 .send()
@@ -792,16 +814,70 @@ impl OpenCodeApi for V2Adapter {
 
     /// auth moved to credentials/integrations in v2 (see `vault/Разведка-v2.md`
     /// §5); the replacement is step 6 work.
+    /// POST /api/integration/{id}/connect/key `{key}` → 204. The server
+    /// persists the credential and the provider's models show up in
+    /// `/api/model` right away (verified on 2.1.4 with `anthropic`).
+    ///
+    /// Right after `serve` starts the integrations are still loading and the
+    /// route answers 404 `IntegrationNotFoundError` (seen on the phone), so a
+    /// 404 is retried a few times before it is reported.
     fn set_api_key(
         &self,
-        _provider_id: &str,
-        _key: &str,
+        provider_id: &str,
+        key: &str,
     ) -> impl Future<Output = Result<(), String>> + Send {
         async move {
-            Err(
-                "auth moved to credentials/integrations in opencode v2 — not implemented yet"
-                    .to_string(),
-            )
+            const ATTEMPTS: u32 = 6;
+            const RETRY_DELAY_MS: u64 = 1_000;
+            let url = format!(
+                "{}/api/integration/{}/connect/key",
+                self.base,
+                urlencode(provider_id)
+            );
+            let body = serde_json::json!({ k::KEY: key });
+            let mut attempt = 1;
+            loop {
+                let resp = self
+                    .authed(self.http.post(&url).json(&body))
+                    .send()
+                    .await
+                    .map_err(|e| e.to_string())?;
+                let status = resp.status();
+                if status.is_success() {
+                    return Ok(());
+                }
+                if status == reqwest::StatusCode::NOT_FOUND && attempt < ATTEMPTS {
+                    log::warn!(
+                        "set_api_key: integration {provider_id:?} not loaded yet (attempt {attempt}/{ATTEMPTS}), retrying"
+                    );
+                    attempt += 1;
+                    tokio::time::sleep(std::time::Duration::from_millis(RETRY_DELAY_MS)).await;
+                    continue;
+                }
+                let detail = resp.text().await.unwrap_or_default();
+                return Err(if detail.is_empty() {
+                    format!("HTTP {status}")
+                } else {
+                    format!("HTTP {status}: {detail}")
+                });
+            }
+        }
+    }
+
+    /// GET /api/credential → `{data:[{id, integrationID, label, active}]}`.
+    fn connected_providers(&self) -> impl Future<Output = Result<Vec<String>, String>> + Send {
+        async move {
+            let url = format!("{}/api/credential", self.base);
+            let resp = self
+                .authed(self.http.get(&url))
+                .send()
+                .await
+                .map_err(|e| e.to_string())?;
+            if !resp.status().is_success() {
+                return Err(format!("HTTP {}", resp.status()));
+            }
+            let v: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+            Ok(active_credential_providers(&v))
         }
     }
 
@@ -869,7 +945,26 @@ fn parse_saved_permission_list(v: serde_json::Value) -> Option<Vec<SavedPermissi
     Some(out)
 }
 
-/// Percent-encode a query-parameter value (the form cancel reason).
+/// Provider ids with an active credential, from a `/api/credential` response
+/// (`{data:[{integrationID, active}]}`), deduplicated in first-seen order.
+/// Free so it can be unit-tested without an HTTP server.
+fn active_credential_providers(v: &serde_json::Value) -> Vec<String> {
+    let empty = Vec::new();
+    let mut out: Vec<String> = Vec::new();
+    for c in v[k::DATA].as_array().unwrap_or(&empty) {
+        if !c[k::ACTIVE].as_bool().unwrap_or(false) {
+            continue;
+        }
+        if let Some(id) = c[k::INTEGRATION_ID].as_str() {
+            if !id.is_empty() && !out.iter().any(|o| o == id) {
+                out.push(id.to_string());
+            }
+        }
+    }
+    out
+}
+
+/// Percent-encode a URL component (the form cancel reason, a provider id).
 fn urlencode(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.as_bytes() {
@@ -887,8 +982,8 @@ fn urlencode(s: &str) -> String {
 /// from a v2 `/api/model` response (`{location, data:[{id, providerID, name}]}`).
 ///
 /// Models are grouped by `providerID` (providers in first-seen order, models
-/// within a provider sorted by id via the `BTreeMap`); each model carries only
-/// the `name` field `refresh_models` reads. A model without `id`/`providerID`
+/// within a provider sorted by id via the `BTreeMap`); each model carries the
+/// `name` and the ids of its reasoning `variants`, which `refresh_models` reads. A model without `id`/`providerID`
 /// is skipped. Kept free so it can be unit-tested without an HTTP server.
 fn fold_models_into_providers(v: &serde_json::Value) -> serde_json::Value {
     let empty = Vec::new();
@@ -907,8 +1002,21 @@ fn fold_models_into_providers(v: &serde_json::Value) -> serde_json::Value {
             by_provider.insert(pid.to_string(), serde_json::Map::new());
         }
         let name = m[k::NAME].as_str().unwrap_or(id);
+        // Reasoning/effort presets, by id only (the settings stay server-side).
+        let variants: Vec<serde_json::Value> = m[k::VARIANTS]
+            .as_array()
+            .map(|vs| {
+                vs.iter()
+                    .filter_map(|v| v[k::ID].as_str())
+                    .map(|v| serde_json::Value::String(v.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default();
         if let Some(ms) = by_provider.get_mut(pid) {
-            ms.insert(id.to_string(), serde_json::json!({ k::NAME: name }));
+            ms.insert(
+                id.to_string(),
+                serde_json::json!({ k::NAME: name, k::VARIANTS: variants }),
+            );
         }
     }
     let providers: Vec<serde_json::Value> = order
@@ -997,6 +1105,26 @@ mod tests {
         assert_eq!(t.updated, 2.0);
     }
 
+    /// `/api/credential` → providers with an *active* credential, each once
+    /// (shape captured from opencode 2.1.4 after `connect/key` for anthropic).
+    #[test]
+    fn active_credentials_list_providers() {
+        let v = json!({
+            "data": [
+                { "id": "cred_1", "integrationID": "anthropic", "label": "Claude", "active": true },
+                { "id": "cred_2", "integrationID": "anthropic", "label": "old", "active": true },
+                { "id": "cred_3", "integrationID": "openai", "label": "off", "active": false },
+                { "id": "cred_4", "integrationID": "opencode", "active": true },
+                { "id": "cred_5", "active": true }
+            ]
+        });
+        assert_eq!(
+            active_credential_providers(&v),
+            vec!["anthropic".to_string(), "opencode".to_string()]
+        );
+        assert!(active_credential_providers(&json!({})).is_empty());
+    }
+
     #[test]
     fn fold_models_groups_by_provider() {
         let v = json!({
@@ -1017,6 +1145,28 @@ mod tests {
         let keys: Vec<&String> = opencode.keys().collect();
         assert_eq!(keys, vec!["a-model", "b-model"]);
         assert_eq!(opencode["a-model"]["name"], "A");
+    }
+
+    /// Variant ids are carried per model (shape of opencode 2.1.4's
+    /// `claude-haiku-5-5`); a model without `variants` gets an empty list.
+    #[test]
+    fn fold_models_keeps_variant_ids() {
+        let v = json!({ "data": [
+            { "id": "claude-haiku-5-5", "providerID": "anthropic", "name": "Claude Haiku 5.5",
+              "variants": [
+                { "id": "none", "settings": { "thinking": { "type": "disabled" } } },
+                { "id": "low", "settings": { "effort": "low" } },
+                { "settings": {} }
+              ] },
+            { "id": "big-pickle", "providerID": "opencode", "name": "Big Pickle" }
+        ] });
+        let out = fold_models_into_providers(&v);
+        let provs = out["providers"].as_array().unwrap();
+        assert_eq!(
+            provs[0]["models"]["claude-haiku-5-5"]["variants"],
+            json!(["none", "low"])
+        );
+        assert_eq!(provs[1]["models"]["big-pickle"]["variants"], json!([]));
     }
 
     #[test]

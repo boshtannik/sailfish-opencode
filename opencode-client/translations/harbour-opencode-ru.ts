@@ -673,20 +673,48 @@ long press — remove</source>
         <translation>Каталог не обновился: %1</translation>
     </message>
     <message>
-        <source>OpenCode API key saved</source>
-        <translation>Ключ OpenCode сохранён</translation>
+        <source>API key saved for %1</source>
+        <translation>API-ключ для %1 сохранён</translation>
     </message>
     <message>
         <source>Enter the API key first</source>
         <translation>Сначала введите API-ключ</translation>
     </message>
     <message>
-        <source>Failed to save the OpenCode API key: %1</source>
-        <translation>Не удалось сохранить API-ключ OpenCode: %1</translation>
+        <source>Failed to save the API key for %1: %2</source>
+        <translation>Не удалось сохранить API-ключ для %1: %2</translation>
     </message>
     <message>
         <source>Signed in to OpenCode</source>
         <translation>Вход в OpenCode выполнен</translation>
+    </message>
+    <message>
+        <source>This session is no longer available on the server, so a new session was started.</source>
+        <translation>Эта сессия больше недоступна на сервере, поэтому начата новая сессия.</translation>
+    </message>
+    <message>
+        <source>this session no longer exists. Open another session or start a new one</source>
+        <translation>этой сессии больше нет. Откройте другую сессию или начните новую</translation>
+    </message>
+    <message>
+        <source>Could not switch the model: %1</source>
+        <translation>Не удалось сменить модель: %1</translation>
+    </message>
+    <message>
+        <source>The %1 API key was rejected (%2). Check the key and try again.</source>
+        <translation>API-ключ %1 отклонён (%2). Проверьте ключ и попробуйте снова.</translation>
+    </message>
+    <message>
+        <source>API key saved for %1, but it could not be verified (%2)</source>
+        <translation>API-ключ для %1 сохранён, но проверить его не удалось (%2)</translation>
+    </message>
+    <message>
+        <source>The API key was rejected: %1. Enter a valid key in Settings to unlock these models.</source>
+        <translation>API-ключ отклонён: %1. Введите действующий ключ в настройках, чтобы открыть эти модели.</translation>
+    </message>
+    <message>
+        <source>%1. Add the provider&apos;s API key in Settings or pick another model.</source>
+        <translation>%1. Добавьте API-ключ провайдера в настройках или выберите другую модель.</translation>
     </message>
     <message>
         <source>OpenCode sign-in failed: %1</source>

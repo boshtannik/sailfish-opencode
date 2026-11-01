@@ -51,5 +51,7 @@ pub const TITLE: &str = "title";
 pub const UPDATED: &str = "updated";
 pub const MODEL: &str = "model";
 pub const PROVIDER_ID: &str = "providerID";
+/// `model.variant` of a session: the reasoning/effort preset in use.
+pub const VARIANT: &str = "variant";
 pub const COST: &str = "cost";
 pub const TOKENS: &str = "tokens";

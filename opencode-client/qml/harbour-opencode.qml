@@ -133,6 +133,9 @@ ApplicationWindow {
     // `[[tool]]<callID>\u001f<name>\u001f<status>\u001f<text>`, replaced in
     // place as the call moves running → completed/error (TUI-style).
     readonly property string kToolTag: "[[tool]]"
+    // Model switch divider `[[modelswitch]]<provider>\u001f<model>\u001f<variant>`
+    // (mirror of opencode-proto MODEL_SWITCH_TAG).
+    readonly property string kModelSwitchTag: "[[modelswitch]]"
     // Server daemon connection statuses (mirror of markers.rs STATUS_*).
     readonly property string kServerStatusConnecting: "connecting"
     readonly property string kServerStatusIdle: "idle"
@@ -208,6 +211,19 @@ ApplicationWindow {
         return i < 0 ? rest : rest.substring(0, i)
     }
     // Field `idx` of an inline tool line body (0=callID, 1=name, 2=status, 3=text).
+    // "Switched to Claude Opus 4.8 · Anthropic · High" for a divider line.
+    function modelSwitchText(line) {
+        var b = app.stripTs(line)
+        if (!app.lineIs(b, app.kModelSwitchTag))
+            return ""
+        var f = b.substring(app.kModelSwitchTag.length).split(app.kArgSep)
+        var pid = f[0] || "", mid = f[1] || "", variant = f[2] || ""
+        var info = app.modelInfo(pid, mid)
+        var s = (info ? info.modelName : mid) + " · " + app.providerTitle(pid)
+        if (variant !== "" && variant !== app.kVariantDefault)
+            s += " · " + app.variantLabel(variant)
+        return qsTr("Switched to %1").arg(s)
+    }
     function toolField(line, idx) {
         var b = app.stripTs(line)
         if (!app.lineIs(b, app.kToolTag))
@@ -275,6 +291,31 @@ ApplicationWindow {
     // not in the settings of a particular session.
     property bool showReasoning: showReasoningSetting.value !== undefined
                                  ? showReasoningSetting.value : true
+
+    // App-wide text size: every explicit font size in our pages goes through
+    // fs(), so one factor (80–160 %) scales the chat, lists and settings.
+    readonly property real fontScaleMin: 0.8
+    readonly property real fontScaleMax: 1.6
+    property real fontScale: {
+        var v = Number(fontScaleSetting.value)
+        if (isNaN(v) || v <= 0)
+            return 1.0
+        return Math.max(fontScaleMin, Math.min(fontScaleMax, v))
+    }
+    function fs(px) { return Math.round(px * app.fontScale) }
+    function setFontScale(v) {
+        fontScaleSetting.value = Math.max(fontScaleMin, Math.min(fontScaleMax, v))
+        fontScaleSetting.sync()
+    }
+    // Per-bubble buttons and the thinking/answer captions.
+    property bool showCopyButton: showCopyButtonSetting.value !== false
+    property bool showSpeakButton: showSpeakButtonSetting.value !== false
+    property bool labelRoles: labelRolesSetting.value !== false
+    property bool expandThinking: expandThinkingSetting.value === true
+    function setShowCopyButton(v) { showCopyButtonSetting.value = !!v; showCopyButtonSetting.sync() }
+    function setShowSpeakButton(v) { showSpeakButtonSetting.value = !!v; showSpeakButtonSetting.sync() }
+    function setLabelRoles(v) { labelRolesSetting.value = !!v; labelRolesSetting.sync() }
+    function setExpandThinking(v) { expandThinkingSetting.value = !!v; expandThinkingSetting.sync() }
     // Per-session chat mode: `{ "<sessionID>": "build"|"plan" }`. The mode is a
     // property of each session (agent: build — active work, plan —
     // planning); the choice is stored per session and applied when it is
@@ -393,6 +434,32 @@ ApplicationWindow {
         id: dingSetting
         key: "/apps/harbour-opencode/dingSound"
     }
+    // ── Chat display settings (Settings → Chat display) ──
+    ConfigurationValue {
+        id: fontScaleSetting
+        key: "/apps/harbour-opencode/fontScale"
+        defaultValue: 1.0
+    }
+    ConfigurationValue {
+        id: showCopyButtonSetting
+        key: "/apps/harbour-opencode/showCopyButton"
+        defaultValue: true
+    }
+    ConfigurationValue {
+        id: showSpeakButtonSetting
+        key: "/apps/harbour-opencode/showSpeakButton"
+        defaultValue: true
+    }
+    ConfigurationValue {
+        id: labelRolesSetting
+        key: "/apps/harbour-opencode/labelThinkingAndAnswers"
+        defaultValue: true
+    }
+    ConfigurationValue {
+        id: expandThinkingSetting
+        key: "/apps/harbour-opencode/expandThinking"
+        defaultValue: false
+    }
     ConfigurationValue {
         id: pttVibrateSetting
         key: "/apps/harbour-opencode/pttVibrate"
@@ -492,7 +559,7 @@ ApplicationWindow {
             anchors.centerIn: parent
             text: copyToast.bannerText
             color: Theme.highlightColor
-            font.pixelSize: Theme.fontSizeSmall
+            font.pixelSize: app.fs(Theme.fontSizeSmall)
         }
         property string bannerText: ""
         Timer {
@@ -517,9 +584,44 @@ ApplicationWindow {
         copyToastTimer.restart()
     }
 
+    // ── Battery: adaptive polling ─────────────────────────────────────────
+    // The feed is pulled from the worker by this poll. It used to run every
+    // 300 ms forever, also in the background and with nothing happening. Now:
+    // fast while something is going on (agent working, a reply streaming in,
+    // speech, dictation, the user just acted), slower when idle, and slow in
+    // the background (the worker keeps collecting; nothing is lost, it is
+    // only shown later). The worker is told too, so it re-polls the server
+    // less often while the app is not on screen.
+    readonly property bool appActive: Qt.application.state === Qt.ApplicationActive
+    onAppActiveChanged: {
+        bridge.set_app_active(appActive)
+        if (appActive)
+            app.pokePoll()
+    }
+    // Set by activity (new feed lines, user actions); drops after a few quiet seconds.
+    property bool pollFast: true
+    Timer {
+        id: pollFastHold
+        interval: 4000
+        onTriggered: app.pollFast = false
+    }
+    function pokePoll() {
+        app.pollFast = true
+        pollFastHold.restart()
+        if (!pollTimer.running)
+            pollTimer.start()
+    }
+    readonly property bool pollBusy: app.statusBase(app.statusText) === app.kServerStatusBusy
+                                     || app.ttsPlaying || app.ttsSynth
+                                     || app.recording || app.recognizing
+    readonly property int pollInterval: {
+        if (!app.appActive)
+            return app.pollBusy ? 1000 : 2000
+        return (app.pollBusy || app.pollFast) ? 300 : 900
+    }
     Timer {
         id: pollTimer
-        interval: 300
+        interval: app.pollInterval
         running: true
         repeat: true
         onTriggered: app.poll()
@@ -627,6 +729,8 @@ ApplicationWindow {
             app.notifyAgentFinished()
         }
         var msgs = bridge.drain_messages()
+        if (msgs !== "" && msgs !== undefined && msgs !== null)
+            app.pokePoll()
         if (msgs !== "" && msgs !== undefined) {
             bridge.gui_mark("feed-parse")
             var lines = msgs.split("\u001e")
@@ -838,7 +942,7 @@ ApplicationWindow {
         }
         bridge.gui_mark("sessions")
         var sess = bridge.sessions_json()
-        if (sess !== "" && sess !== undefined) {
+        if (app.pollChanged("sessions", sess)) {
             try {
                 app.sessions = JSON.parse(sess)
             } catch (e) {
@@ -847,7 +951,7 @@ ApplicationWindow {
         }
         bridge.gui_mark("todos")
         var t = bridge.todo_json()
-        if (t !== "" && t !== undefined) {
+        if (app.pollChanged("todos", t)) {
             try {
                 app.todos = JSON.parse(t)
             } catch (e) {
@@ -856,7 +960,7 @@ ApplicationWindow {
         }
         bridge.gui_mark("models")
         var md = bridge.models_json()
-        if (md !== "" && md !== undefined) {
+        if (app.pollChanged("models", md)) {
             try {
                 app.models = JSON.parse(md)
             } catch (e) {
@@ -896,7 +1000,7 @@ ApplicationWindow {
             app.requestPage(nav)
         bridge.gui_mark("voice")
         var v = bridge.voice_status_json()
-        if (v !== "" && v !== undefined) {
+        if (app.pollChanged("voice", v)) {
             try {
                 var vo = JSON.parse(v)
                 app.voiceModels = vo.models || []
@@ -947,7 +1051,7 @@ ApplicationWindow {
         if (perr !== undefined && perr !== null)
             app.permissionError = perr
         var spj = bridge.saved_permissions_json()
-        if (spj !== "" && spj !== undefined) {
+        if (app.pollChanged("savedPermissions", spj)) {
             try {
                 app.savedPermissions = JSON.parse(spj)
             } catch (e) {
@@ -981,7 +1085,7 @@ ApplicationWindow {
         }
         bridge.gui_mark("settings")
         var sj = bridge.settings_json()
-        if (sj !== "" && sj !== undefined) {
+        if (app.pollChanged("settings", sj)) {
             try {
                 var sjson = JSON.parse(sj)
                 if (sjson.workdir !== undefined && sjson.workdir !== "")
@@ -992,7 +1096,7 @@ ApplicationWindow {
         }
         bridge.gui_mark("login")
         var lj = bridge.console_login_json()
-        if (lj !== "" && lj !== undefined) {
+        if (app.pollChanged("login", lj)) {
             try {
                 var lo = JSON.parse(lj)
                 app.consoleLogin = lo
@@ -1048,6 +1152,7 @@ ApplicationWindow {
     }
 
     function send(text) {
+        app.pokePoll()
         var t = ("" + text).trim()
         if (t === "")
             return
@@ -1273,7 +1378,134 @@ ApplicationWindow {
         app.requestPage(2)
     }
     function abortSession(id) { bridge.abort_session(id) }
-    function setModel(id, provider, model) { bridge.set_model(id, provider, model) }
+    // `variant` (optional): reasoning preset to keep/apply; "" or omitted =
+    // the server default (the server resets the variant when none is sent).
+    function setModel(id, provider, model, variant) {
+        app.pokePoll()
+        bridge.set_model_variant(id, provider, model, variant ? variant : "")
+    }
+
+    // Session `model.variant` value meaning "no preset chosen" (mirrors the
+    // server's Model.Ref default).
+    readonly property string kVariantDefault: "default"
+
+    // Catalog entry {providerID, providerName, modelID, modelName, variants}
+    // of a model, or null when the catalog does not list it.
+    function modelInfo(provider, model) {
+        var list = app.models || []
+        for (var i = 0; i < list.length; i++) {
+            if (list[i].providerID === provider && list[i].modelID === model)
+                return list[i]
+        }
+        return null
+    }
+
+    // Brand spellings a plain capitalisation gets wrong.
+    readonly property var kProviderTitles: ({ "opencode": "OpenCode", "openai": "OpenAI",
+                                              "xai": "xAI", "deepseek": "DeepSeek",
+                                              "openrouter": "OpenRouter",
+                                              "github-copilot": "GitHub Copilot" })
+    // Display name of a provider id ("anthropic" → "Anthropic",
+    // "google-vertex" → "Google Vertex").
+    function providerTitle(pid) {
+        if (!pid)
+            return ""
+        if (pid in app.kProviderTitles)
+            return app.kProviderTitles[pid]
+        var words = pid.split("-")
+        for (var i = 0; i < words.length; i++)
+            words[i] = words[i].charAt(0).toUpperCase() + words[i].substring(1)
+        return words.join(" ")
+    }
+
+    // Human label of a reasoning variant id (ids come from the server's
+    // Model.Info.variants; unknown ids are shown as-is).
+    function variantLabel(v) {
+        if (!v || v === app.kVariantDefault) return qsTr("Default")
+        switch (v) {
+        case "none":    return qsTr("Off")
+        case "minimal": return qsTr("Minimal")
+        case "low":     return qsTr("Low")
+        case "medium":  return qsTr("Medium")
+        case "high":    return qsTr("High")
+        case "xhigh":   return qsTr("Extra high")
+        case "max":     return qsTr("Max")
+        }
+        return v
+    }
+
+    // ── Current session's model (shared by the chat bar and session settings) ──
+    property var currentSession: {
+        var id = app.currentSessionId
+        var list = app.sessions || []
+        for (var i = 0; i < list.length; i++) {
+            if (list[i].id === id)
+                return list[i]
+        }
+        return null
+    }
+    property var currentModelInfo: (currentSession && currentSession.modelID)
+                                   ? app.modelInfo(currentSession.providerID, currentSession.modelID)
+                                   : null
+    // "Claude Haiku 5.5 · Anthropic".
+    property string currentModelText: {
+        if (!currentSession || !currentSession.modelID)
+            return qsTr("No model selected")
+        var name = currentModelInfo ? currentModelInfo.modelName : currentSession.modelID
+        return name + " · " + app.providerTitle(currentSession.providerID)
+    }
+    property var currentVariants: (currentModelInfo && currentModelInfo.variants)
+                                  ? currentModelInfo.variants : []
+    property string currentVariant: (currentSession && currentSession.variant)
+                                    ? currentSession.variant : app.kVariantDefault
+    // Reasoning choices: the server default first, then the model's own.
+    property var variantChoices: [app.kVariantDefault].concat(currentVariants)
+
+    // Apply a reasoning level to the current session.
+    function setCurrentVariant(v) {
+        var s = app.currentSession
+        if (!s || !s.modelID)
+            return
+        app.setModel(s.id, s.providerID, s.modelID, v === app.kVariantDefault ? "" : v)
+    }
+
+    // Open the model picker for the current session.
+    function openModelPicker() {
+        var s = app.currentSession
+        var sid = app.currentSessionId
+        if (s)
+            sid = s.id
+        pageStack.push(Qt.resolvedUrl("pages/ModelPickerPage.qml"), {
+            appWindow: app,
+            sessionId: sid,
+            currentProvider: s ? s.providerID : "",
+            currentModel: s ? s.modelID : "",
+            currentVariant: app.currentVariant
+        })
+    }
+
+    // Jump to the API-key field of `provider` in Settings (locked models).
+    signal providerKeyRequested(string provider)
+    function openProviderKeySettings(provider) {
+        if (pageStack.depth > 1)
+            pageStack.pop()
+        app.requestPage(0)
+        app.providerKeyRequested(provider)
+    }
+
+    // Last raw JSON seen per poll channel. The bridge returns the same string
+    // on every 300 ms poll; re-parsing and re-assigning it rebuilt every view
+    // bound to the list (sessions, pickers, settings) three times a second and
+    // made the chat scroll stutter. Only a changed payload is applied now.
+    property var lastPollJson: ({})
+    function pollChanged(channel, s) {
+        if (s === "" || s === undefined || s === null)
+            return false
+        if (app.lastPollJson[channel] === s)
+            return false
+        app.lastPollJson[channel] = s
+        return true
+    }
 
     // The `bridge` object is a dynamic property of this root window, visible only
     // as a bare identifier in THIS file. Pages must go through these wrappers.
@@ -1281,6 +1513,10 @@ ApplicationWindow {
     function authUrl() { return bridge.auth_url() }
     function providerKeySet() { return bridge.provider_key_set() }
     function saveProviderKey(key) { bridge.save_provider_key(key) }
+    function providerKeySetFor(provider) { return bridge.provider_key_set_for(provider) }
+    function providerKeyRejectedFor(provider) { return bridge.provider_key_rejected(provider) }
+    function saveProviderKeyFor(provider, key) { bridge.save_provider_key_for(provider, key) }
+    function anthropicKeysUrl() { return bridge.anthropic_keys_url() }
     function startConsoleLogin() { bridge.start_console_login() }
     function cancelConsoleLogin() { bridge.cancel_console_login() }
 
@@ -1910,7 +2146,7 @@ ApplicationWindow {
                             width: parent.width
                             horizontalAlignment: Text.AlignHCenter
                             color: Theme.primaryColor
-                            font.pixelSize: Theme.fontSizeLarge
+                            font.pixelSize: app.fs(Theme.fontSizeLarge)
                             font.bold: true
                             wrapMode: Text.WordWrap
                         }
@@ -1929,7 +2165,7 @@ ApplicationWindow {
                             horizontalAlignment: Text.AlignHCenter
                             color: Theme.highlightColor
                             wrapMode: Text.WordWrap
-                            font.pixelSize: Theme.fontSizeMedium
+                            font.pixelSize: app.fs(Theme.fontSizeMedium)
                         }
 
                         // The server's own explanation ("Run `rm -rf /`?").
@@ -1942,7 +2178,7 @@ ApplicationWindow {
                             horizontalAlignment: Text.AlignHCenter
                             color: Theme.secondaryColor
                             wrapMode: Text.WordWrap
-                            font.pixelSize: Theme.fontSizeSmall
+                            font.pixelSize: app.fs(Theme.fontSizeSmall)
                         }
 
                         // What will be remembered if the answer is "always".
@@ -1960,7 +2196,7 @@ ApplicationWindow {
                             width: parent.width
                             horizontalAlignment: Text.AlignHCenter
                             wrapMode: Text.Wrap
-                            font.pixelSize: Theme.fontSizeSmall
+                            font.pixelSize: app.fs(Theme.fontSizeSmall)
                         }
 
                         // Which tool asked.
@@ -1977,7 +2213,7 @@ ApplicationWindow {
                             width: parent.width
                             horizontalAlignment: Text.AlignHCenter
                             wrapMode: Text.Wrap
-                            font.pixelSize: Theme.fontSizeSmall
+                            font.pixelSize: app.fs(Theme.fontSizeSmall)
                         }
 
                         // The optional reason: the model sees it with the answer.
@@ -1999,7 +2235,7 @@ ApplicationWindow {
                             width: parent.width
                             horizontalAlignment: Text.AlignHCenter
                             wrapMode: Text.Wrap
-                            font.pixelSize: Theme.fontSizeSmall
+                            font.pixelSize: app.fs(Theme.fontSizeSmall)
                         }
 
                         Item {
@@ -2057,7 +2293,7 @@ ApplicationWindow {
                             Label {
                                 text: qsTr("Always allowed:")
                                 color: Theme.secondaryColor
-                                font.pixelSize: Theme.fontSizeSmall
+                                font.pixelSize: app.fs(Theme.fontSizeSmall)
                                 font.bold: true
                             }
 
@@ -2073,7 +2309,7 @@ ApplicationWindow {
                                               + (modelData.resource
                                                  ? " / " + modelData.resource : "")
                                         color: Theme.highlightColor
-                                        font.pixelSize: Theme.fontSizeSmall
+                                        font.pixelSize: app.fs(Theme.fontSizeSmall)
                                         wrapMode: Text.Wrap
                                     }
 
@@ -2093,7 +2329,7 @@ ApplicationWindow {
                             width: parent.width
                             horizontalAlignment: Text.AlignHCenter
                             wrapMode: Text.Wrap
-                            font.pixelSize: Theme.fontSizeSmall
+                            font.pixelSize: app.fs(Theme.fontSizeSmall)
                         }
                     }
                 }
@@ -2142,7 +2378,7 @@ ApplicationWindow {
                                       ? app.pendingForms[0].title
                                       : qsTr("Model asks a question")
                                 color: Theme.primaryColor
-                                font.pixelSize: Theme.fontSizeLarge
+                                font.pixelSize: app.fs(Theme.fontSizeLarge)
                                 font.bold: true
                                 wrapMode: Text.Wrap
                             }
@@ -2167,7 +2403,7 @@ ApplicationWindow {
                                                ? fieldCol.field.title : fieldCol.field.key)
                                               + (fieldCol.field.required === true ? " *" : "")
                                         color: Theme.primaryColor
-                                        font.pixelSize: Theme.fontSizeMedium
+                                        font.pixelSize: app.fs(Theme.fontSizeMedium)
                                         font.bold: true
                                         wrapMode: Text.Wrap
                                     }
@@ -2177,7 +2413,7 @@ ApplicationWindow {
                                                  && fieldCol.field.description !== ""
                                         text: fieldCol.field.description !== undefined
                                               ? fieldCol.field.description : ""
-                                        font.pixelSize: Theme.fontSizeSmall
+                                        font.pixelSize: app.fs(Theme.fontSizeSmall)
                                         color: Theme.secondaryColor
                                         wrapMode: Text.Wrap
                                     }
@@ -2212,7 +2448,7 @@ ApplicationWindow {
                                                              && modelData.description !== ""
                                                     text: modelData.description !== undefined
                                                           ? modelData.description : ""
-                                                    font.pixelSize: Theme.fontSizeSmall
+                                                    font.pixelSize: app.fs(Theme.fontSizeSmall)
                                                     color: Theme.secondaryColor
                                                     wrapMode: Text.Wrap
                                                 }
@@ -2302,7 +2538,7 @@ ApplicationWindow {
                                 visible: app.formError !== ""
                                 text: app.formError
                                 color: "#f44336"
-                                font.pixelSize: Theme.fontSizeSmall
+                                font.pixelSize: app.fs(Theme.fontSizeSmall)
                                 wrapMode: Text.Wrap
                             }
 
@@ -2376,13 +2612,13 @@ ApplicationWindow {
 
                 Label {
                     text: "opencode"
-                    font.pixelSize: Theme.fontSizeMedium
+                    font.pixelSize: app.fs(Theme.fontSizeMedium)
                     color: Theme.highlightColor
                 }
                 Label {
                     text: app.statusBase(app.statusText) === "busy"
                           ? qsTr("Working…") : qsTr("Ready")
-                    font.pixelSize: Theme.fontSizeSmall
+                    font.pixelSize: app.fs(Theme.fontSizeSmall)
                     color: app.statusBase(app.statusText) === "busy"
                            ? Theme.highlightColor : Theme.secondaryColor
                 }
@@ -2390,7 +2626,7 @@ ApplicationWindow {
                     id: answerLbl
                     width: parent.width
                     wrapMode: Text.Wrap
-                    font.pixelSize: Theme.fontSizeExtraSmall
+                    font.pixelSize: app.fs(Theme.fontSizeExtraSmall)
                     color: Theme.secondaryColor
                     text: coverRoot.lastAnswer()
                     horizontalAlignment: Text.AlignLeft

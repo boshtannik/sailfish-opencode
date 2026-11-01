@@ -21,7 +21,6 @@ Item {
     property string modelLabel: (session && session.modelID)
                                 ? (session.providerID + " / " + session.modelID)
                                 : qsTr("no data")
-
     // Protection against a double tap (the action takes ~a second).
     property bool actionBusy: false
     Timer {
@@ -169,22 +168,30 @@ Item {
             }
 
             BackgroundItem {
+                id: switchModelItem
                 width: parent.width
-                contentHeight: Theme.itemSizeSmall
-                Label {
+                contentHeight: Theme.itemSizeMedium
+                Column {
                     x: Theme.horizontalPageMargin
+                    width: parent.width - 2 * Theme.horizontalPageMargin
                     anchors.verticalCenter: parent.verticalCenter
-                    text: qsTr("Switch model")
-                    color: parent.highlighted ? Theme.highlightColor : Theme.primaryColor
+                    Label {
+                        width: parent.width
+                        text: qsTr("Switch model")
+                        color: switchModelItem.highlighted ? Theme.highlightColor : Theme.primaryColor
+                    }
+                    // The model the session uses now, with its provider.
+                    Label {
+                        width: parent.width
+                        truncationMode: TruncationMode.Fade
+                        text: appWindow.currentModelText
+                        color: switchModelItem.highlighted
+                               ? Theme.secondaryHighlightColor : Theme.highlightColor
+                        font.pixelSize: appWindow.fs(Theme.fontSizeExtraSmall)
+                    }
                 }
-                onClicked: appWindow.pageStack.push(modelPicker, {
-                    sessionId: sessionSettingsPage.sessionId,
-                    appWindow: sessionSettingsPage.appWindow,
-                    currentProvider: sessionSettingsPage.session
-                                     ? sessionSettingsPage.session.providerID : "",
-                    currentModel: sessionSettingsPage.session
-                                  ? sessionSettingsPage.session.modelID : ""
-                })
+                // Reasoning is tuned from the bar above the chat input.
+                onClicked: appWindow.openModelPicker()
             }
 
             BackgroundItem {
@@ -227,7 +234,7 @@ Item {
                 visible: appWindow.todos.length === 0
                 text: qsTr("No tasks")
                 color: Theme.secondaryColor
-                font.pixelSize: Theme.fontSizeSmall
+                font.pixelSize: appWindow.fs(Theme.fontSizeSmall)
             }
 
             Repeater {
@@ -243,7 +250,7 @@ Item {
                         anchors.verticalCenter: parent.verticalCenter
                         text: sessionSettingsPage.todoMark(modelData.status)
                         color: sessionSettingsPage.todoColor(modelData.status)
-                        font.pixelSize: Theme.fontSizeMedium
+                        font.pixelSize: appWindow.fs(Theme.fontSizeMedium)
                     }
 
                     Label {
@@ -254,7 +261,7 @@ Item {
                         text: modelData.content
                         wrapMode: Text.Wrap
                         color: sessionSettingsPage.todoColor(modelData.status)
-                        font.pixelSize: Theme.fontSizeSmall
+                        font.pixelSize: appWindow.fs(Theme.fontSizeSmall)
                     }
                 }
             }
@@ -319,7 +326,7 @@ Item {
                     wrapMode: Text.Wrap
                     text: dlg.title.length > 0 ? dlg.title : qsTr("(untitled)")
                     color: Theme.primaryColor
-                    font.pixelSize: Theme.fontSizeMedium
+                    font.pixelSize: appWindow.fs(Theme.fontSizeMedium)
                 }
                 Label {
                     x: Theme.horizontalPageMargin
@@ -327,7 +334,7 @@ Item {
                     wrapMode: Text.Wrap
                     text: dlg.sid
                     color: Theme.secondaryColor
-                    font.pixelSize: Theme.fontSizeExtraSmall
+                    font.pixelSize: appWindow.fs(Theme.fontSizeExtraSmall)
                 }
                 Label {
                     x: Theme.horizontalPageMargin
@@ -335,7 +342,7 @@ Item {
                     wrapMode: Text.Wrap
                     text: qsTr("Model: ") + dlg.model
                     color: Theme.secondaryColor
-                    font.pixelSize: Theme.fontSizeSmall
+                    font.pixelSize: appWindow.fs(Theme.fontSizeSmall)
                 }
                 Label {
                     x: Theme.horizontalPageMargin
@@ -343,7 +350,7 @@ Item {
                     wrapMode: Text.Wrap
                     text: qsTr("Cost: $") + dlg.cost.toFixed(4)
                     color: Theme.secondaryColor
-                    font.pixelSize: Theme.fontSizeSmall
+                    font.pixelSize: appWindow.fs(Theme.fontSizeSmall)
                 }
                 Label {
                     x: Theme.horizontalPageMargin
@@ -351,78 +358,8 @@ Item {
                     wrapMode: Text.Wrap
                     text: qsTr("Tokens: ") + dlg.tokens
                     color: Theme.secondaryColor
-                    font.pixelSize: Theme.fontSizeSmall
+                    font.pixelSize: appWindow.fs(Theme.fontSizeSmall)
                 }
-            }
-        }
-    }
-
-    Component {
-        id: modelPicker
-
-        Page {
-            id: pickerPage
-            property string sessionId
-            property var appWindow
-            property string currentProvider
-            property string currentModel
-
-            SilicaListView {
-                id: modelList
-                anchors.fill: parent
-                model: pickerPage.appWindow.models
-
-                header: PageHeader {
-                    title: qsTr("Model")
-                }
-
-                delegate: ListItem {
-                    id: modelItem
-                    contentHeight: Theme.itemSizeSmall
-
-                    Label {
-                        x: Theme.horizontalPageMargin
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: (modelData.providerID === pickerPage.currentProvider
-                               && modelData.modelID === pickerPage.currentModel)
-                              ? "✓" : ""
-                        color: Theme.highlightColor
-                    }
-
-                    Column {
-                        x: Theme.itemSizeSmall
-                        width: parent.width - x - Theme.horizontalPageMargin
-                        anchors.verticalCenter: parent.verticalCenter
-
-                        Label {
-                            width: parent.width
-                            truncationMode: TruncationMode.Fade
-                            text: modelData.modelName
-                            color: modelItem.highlighted ? Theme.highlightColor : Theme.primaryColor
-                        }
-                        Label {
-                            width: parent.width
-                            truncationMode: TruncationMode.Fade
-                            text: modelData.providerName
-                            color: Theme.secondaryColor
-                            font.pixelSize: Theme.fontSizeExtraSmall
-                        }
-                    }
-
-                    onClicked: {
-                        pickerPage.appWindow.setModel(pickerPage.sessionId,
-                                                      modelData.providerID,
-                                                      modelData.modelID)
-                        pageStack.pop()
-                    }
-                }
-
-                ViewPlaceholder {
-                    enabled: modelList.count === 0
-                    text: qsTr("No available models")
-                }
-
-                VerticalScrollDecorator {}
             }
         }
     }

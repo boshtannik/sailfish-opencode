@@ -38,13 +38,13 @@ Item {
         Label {
             text: "●"
             color: appWindow.statusColor(appWindow.statusText)
-            font.pixelSize: Theme.fontSizeSmall
+            font.pixelSize: appWindow ? appWindow.fs(Theme.fontSizeSmall) : Theme.fontSizeSmall
             anchors.verticalCenter: parent.verticalCenter
         }
         Label {
             text: "opencode"
             color: Theme.primaryColor
-            font.pixelSize: Theme.fontSizeMedium
+            font.pixelSize: appWindow ? appWindow.fs(Theme.fontSizeMedium) : Theme.fontSizeMedium
             anchors.verticalCenter: parent.verticalCenter
         }
         Label {
@@ -52,7 +52,7 @@ Item {
             width: Math.min(implicitWidth, statusHeader.width * 0.65)
             elide: Text.ElideRight
             color: appWindow.statusColor(appWindow.statusText)
-            font.pixelSize: Theme.fontSizeExtraSmall
+            font.pixelSize: appWindow ? appWindow.fs(Theme.fontSizeExtraSmall) : Theme.fontSizeExtraSmall
             anchors.verticalCenter: parent.verticalCenter
         }
     }

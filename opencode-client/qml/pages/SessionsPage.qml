@@ -27,6 +27,7 @@ Item {
                 text: (modelData && modelData.title && modelData.title.length > 0)
                       ? modelData.title
                       : (modelData ? modelData.id : "")
+                font.pixelSize: appWindow.fs(Theme.fontSizeMedium)
                 color: item.highlighted ? Theme.highlightColor : Theme.primaryColor
             }
 

@@ -140,12 +140,14 @@ pub trait OpenCodeApi: Clone + Send + Sync + 'static {
         session_id: &str,
     ) -> impl Future<Output = Result<serde_json::Value, String>> + Send;
 
-    /// POST /api/session/{id}/model — switch the session model.
+    /// POST /api/session/{id}/model — switch the session model and, when
+    /// given, its reasoning variant (`None` = server default).
     fn set_model(
         &self,
         session_id: &str,
         provider_id: &str,
         model_id: &str,
+        variant: Option<&str>,
     ) -> impl Future<Output = Result<(), String>> + Send;
 
     /// POST /api/session/{id}/agent — switch the session agent (build/plan).
@@ -249,11 +251,16 @@ pub trait OpenCodeApi: Clone + Send + Sync + 'static {
         session_id: &str,
     ) -> impl Future<Output = Result<Option<Vec<FormInfo>>, String>> + Send;
 
-    /// PUT /auth/{provider_id} — store an API-key credential for a provider.
+    /// POST /api/integration/{provider_id}/connect/key — store an API-key
+    /// credential for a provider (e.g. `anthropic` for Claude).
     fn set_api_key(
         &self,
         provider_id: &str,
         key: &str,
     ) -> impl Future<Output = Result<(), String>> + Send;
+
+    /// GET /api/credential — ids of the providers that have an active stored
+    /// credential (an API key or an account sign-in).
+    fn connected_providers(&self) -> impl Future<Output = Result<Vec<String>, String>> + Send;
 }
 

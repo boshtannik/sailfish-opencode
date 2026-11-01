@@ -14,6 +14,11 @@ pub struct GuiMark {
     pub t: u64,
 }
 
+/// Whether the app window is on screen, as reported by QML. The worker reads
+/// it to space out its safety-net server polls while the app is in the
+/// background (battery). Starts `true`: the app opens in the foreground.
+pub static APP_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
 /// Bridge Rust-core ←→ QML.
 ///
 /// Threads: the QML engine lives in the main thread and calls the `drain_messages`
@@ -261,7 +266,26 @@ pub struct AppBridge {
         let model = model.to_string();
         log::info!("QML set_model {id:?} -> {provider}/{model}");
         if !id.is_empty() && !provider.is_empty() && !model.is_empty() {
-            self.push_command(Cmd::SetModel { id, provider, model }.to_value());
+            self.push_command(Cmd::SetModel { id, provider, model, variant: None }.to_value());
+        }
+    }),
+    /// QML: whether the app window is on screen (Qt.application.state). The
+    /// worker re-polls the server less often while it is not.
+    set_app_active: qt_method!(fn set_app_active(&self, active: bool) {
+        log::info!("QML set_app_active {active}");
+        APP_ACTIVE.store(active, std::sync::atomic::Ordering::Relaxed);
+    }),
+    /// QML: switch the session model together with its reasoning variant
+    /// (`Model.Info.variants[].id`; empty = the server default).
+    set_model_variant: qt_method!(fn set_model_variant(&self, id: QString, provider: QString, model: QString, variant: QString) {
+        let id = id.to_string();
+        let provider = provider.to_string();
+        let model = model.to_string();
+        let variant = variant.to_string();
+        log::info!("QML set_model_variant {id:?} -> {provider}/{model} variant={variant:?}");
+        if !id.is_empty() && !provider.is_empty() && !model.is_empty() {
+            let variant = if variant.is_empty() { None } else { Some(variant) };
+            self.push_command(Cmd::SetModel { id, provider, model, variant }.to_value());
         }
     }),
     /// QML: switch the session mode/agent (Build | Plan).
@@ -402,6 +426,27 @@ pub struct AppBridge {
                 .to_value(),
             );
         }
+    }),
+    /// QML: whether a credential is stored for `provider` (e.g. "anthropic").
+    provider_key_set_for: qt_method!(fn provider_key_set_for(&self, provider: QString) -> bool {
+        crate::auth::has_api_key(&provider.to_string())
+    }),
+    /// QML: whether the stored key of `provider` was refused by the provider.
+    provider_key_rejected: qt_method!(fn provider_key_rejected(&self, provider: QString) -> bool {
+        crate::auth::is_rejected(&provider.to_string())
+    }),
+    /// QML: store an API key for `provider` (via the server's connect/key).
+    save_provider_key_for: qt_method!(fn save_provider_key_for(&self, provider: QString, key: QString) {
+        let provider = provider.to_string().trim().to_string();
+        let key = key.to_string().trim().to_string();
+        log::info!("QML save_provider_key_for {provider:?} (len={})", key.len());
+        if !provider.is_empty() && !key.is_empty() {
+            self.push_command(Cmd::SetProviderKey { provider, key }.to_value());
+        }
+    }),
+    /// QML: URL of the Anthropic API-key page (for `Qt.openUrlExternally`).
+    anthropic_keys_url: qt_method!(fn anthropic_keys_url(&self) -> QString {
+        QString::from(crate::auth::ANTHROPIC_KEYS_URL)
     }),
     /// QML: current OpenCode Console device-login state as JSON
     /// (`{state,url,code,message}`).

@@ -49,6 +49,12 @@ pub const AGENTS: &str = "agents";
 pub const ERR_ABORTED: &str = "aborted";
 /// `error.type` of the benign "nothing to compact yet" compaction failure.
 pub const ERR_COMPACTION_UNAVAILABLE: &str = "compaction.unavailable";
+/// `error.type` when the provider refused the stored key (HTTP 401,
+/// "invalid x-api-key"), seen on `session.step.failed`.
+pub const ERR_PROVIDER_AUTH: &str = "provider.auth";
+/// `error.type` when the session's model is not reachable ("Model unavailable:
+/// anthropic/…"), e.g. its provider has no key.
+pub const ERR_PROVIDER_NO_ROUTE: &str = "provider.no-route";
 
 // ── request-body fields ──────────────────────────────────────────────────
 pub const TITLE: &str = "title";
@@ -61,7 +67,14 @@ pub const METHOD_ID: &str = "methodID";
 /// `{code}` of an integration OAuth `complete` request (`null` = none needed).
 pub const CODE: &str = "code";
 
+// ── credentials (`GET /api/credential` → `{data:[Credential.Info]}`) ──────
+/// Integration (= provider) a stored credential belongs to.
+pub const INTEGRATION_ID: &str = "integrationID";
+/// Whether the credential is the one in use for its integration.
+pub const ACTIVE: &str = "active";
+
 // ── form field names (`Form.*` / the `{answer:{…}}` reply body) ───────────
+/// Also the `{key}` body of `POST /api/integration/{id}/connect/key`.
 pub const KEY: &str = "key";
 pub const FIELDS: &str = "fields";
 pub const OPTIONS: &str = "options";
@@ -83,6 +96,10 @@ pub const DECISION_REJECT: &str = "reject";
 // ── v1-shaped provider/model catalog (built for the v1 UI) ────────────────
 pub const PROVIDERS: &str = "providers";
 pub const MODELS: &str = "models";
+/// `Model.Info.variants` (`[{id, settings}]`) — reasoning/effort presets.
+pub const VARIANTS: &str = "variants";
+/// `Model.Ref.variant` — the preset a session uses (`"default"` = none chosen).
+pub const VARIANT: &str = "variant";
 
 // ── Permission source discriminators ─────────────────────────────────────
 pub const SOURCE_TOOL: &str = "tool";

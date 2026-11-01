@@ -659,7 +659,7 @@ long press — remove</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>OpenCode API key saved</source>
+        <source>API key saved for %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -667,11 +667,39 @@ long press — remove</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Failed to save the OpenCode API key: %1</source>
+        <source>Failed to save the API key for %1: %2</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Signed in to OpenCode</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This session is no longer available on the server, so a new session was started.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>this session no longer exists. Open another session or start a new one</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Could not switch the model: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The %1 API key was rejected (%2). Check the key and try again.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>API key saved for %1, but it could not be verified (%2)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The API key was rejected: %1. Enter a valid key in Settings to unlock these models.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1. Add the provider&apos;s API key in Settings or pick another model.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
