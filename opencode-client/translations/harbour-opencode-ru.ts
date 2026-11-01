@@ -37,6 +37,16 @@
 <context>
     <name>GlobalSettingsPage</name>
     <message>
+        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="132"/>
+        <source>Vibrate on PTT</source>
+        <translation>Вибрация при PTT</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="133"/>
+        <source>Vibrate when pressing and releasing the PTT button</source>
+        <translation>Вибрировать при нажатии и отпускании кнопки PTT</translation>
+    </message>
+    <message>
         <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="26"/>
         <source>Settings</source>
         <translation>Настройки</translation>
@@ -91,30 +101,6 @@
         <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="96"/>
         <source>Voice models</source>
         <translation>Голосовые модели</translation>
-    </message>
-    <message>
-        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="109"/>
-        <source>Recognition:
-%1
-Synthesiser:
-%2</source>
-        <translation>Распознавание:
-%1
-Синтез:
-%2</translation>
-    </message>
-    <message>
-        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="120"/>
-        <source>↓ download
-→ start using
-✓ selected
-✕ cancel
-long press — remove</source>
-        <translation>↓ скачать
-→ использовать
-✓ выбрано
-✕ отмена
-долгое нажатие — удалить</translation>
     </message>
     <message>
         <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="126"/>
@@ -221,18 +207,22 @@ long press — remove</source>
 <context>
     <name>SessionSettingsPage</name>
     <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml" line="103"/>
         <source>Working mode</source>
         <translation>Режим работы</translation>
     </message>
     <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml" line="104"/>
         <source>Server agent used by this session</source>
         <translation>Агент сервера для этой сессии</translation>
     </message>
     <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml" line="106"/>
         <source>Build — active work</source>
         <translation>Build — активная работа</translation>
     </message>
     <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml" line="107"/>
         <source>Plan — planning</source>
         <translation>Plan — планирование</translation>
     </message>
@@ -253,24 +243,9 @@ long press — remove</source>
         <translation>Форк (ветка)</translation>
     </message>
     <message>
-        <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="117"/>
-        <source>Refresh link</source>
-        <translation>Обновить ссылку</translation>
-    </message>
-    <message>
-        <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="118"/>
-        <source>Share</source>
-        <translation>Поделиться</translation>
-    </message>
-    <message>
-        <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="133"/>
-        <source>Open link</source>
-        <translation>Открыть ссылку</translation>
-    </message>
-    <message>
-        <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="146"/>
-        <source>Copy link</source>
-        <translation>Скопировать ссылку</translation>
+        <location filename="../qml/pages/SessionSettingsPage.qml" line="139"/>
+        <source>Rename</source>
+        <translation>Переименовать</translation>
     </message>
     <message>
         <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="168"/>
@@ -313,9 +288,29 @@ long press — remove</source>
         <translation>Прочее</translation>
     </message>
     <message>
-        <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="276"/>
-        <source>Show tool calls</source>
-        <translation>Показывать вызовы инструментов</translation>
+        <location filename="../qml/pages/SessionSettingsPage.qml" line="268"/>
+        <source>Tool calls</source>
+        <translation>Вызовы инструментов</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml" line="269"/>
+        <source>How tool calls are shown in the transcript</source>
+        <translation>Как отображать вызовы инструментов в диалоге</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml" line="273"/>
+        <source>Show (name + argument)</source>
+        <translation>Показывать (имя + аргумент)</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml" line="274"/>
+        <source>Minimal (name only)</source>
+        <translation>Минимально (только имя)</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml" line="275"/>
+        <source>Hide</source>
+        <translation>Скрыть</translation>
     </message>
     <message>
         <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="305"/>
@@ -341,11 +336,6 @@ long press — remove</source>
         <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="345"/>
         <source>Tokens: </source>
         <translation>Токены: </translation>
-    </message>
-    <message>
-        <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="354"/>
-        <source>Link: </source>
-        <translation>Ссылка: </translation>
     </message>
     <message>
         <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="378"/>
@@ -411,14 +401,32 @@ long press — remove</source>
         <source>Pull down to create a new session</source>
         <translation>Потяните вниз, чтобы создать новую сессию</translation>
     </message>
-    <message>
-        <location filename="../../i18n/qml-src/pages/SessionsPage.qml" line="113"/>
-        <source>Session name</source>
-        <translation>Название сессии</translation>
-    </message>
 </context>
 <context>
     <name>VoiceModelsPage</name>
+    <message>
+        <location filename="../../i18n/qml-src/pages/VoiceModelsPage.qml" line="158"/>
+        <source>Downloaded · Recognition</source>
+        <translation>Скачанные · Распознавание</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/VoiceModelsPage.qml" line="161"/>
+        <source>Downloaded · Synthesis</source>
+        <translation>Скачанные · Синтез</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/VoiceModelsPage.qml" line="286"/>
+        <source>↓ download
+→ start using
+✓ selected
+✕ cancel
+long press — remove</source>
+        <translation>↓ скачать
+→ использовать
+✓ выбрано
+✕ отмена
+долгое нажатие — удалить</translation>
+    </message>
     <message>
         <location filename="../../i18n/qml-src/pages/VoiceModelsPage.qml" line="43"/>
         <source>Multilingual</source>
@@ -438,11 +446,6 @@ long press — remove</source>
         <location filename="../../i18n/qml-src/pages/VoiceModelsPage.qml" line="129"/>
         <source>Downloading… %1% (%2 / %3)</source>
         <translation>Скачивание… %1% (%2 / %3)</translation>
-    </message>
-    <message>
-        <location filename="../../i18n/qml-src/pages/VoiceModelsPage.qml" line="152"/>
-        <source>Downloaded models</source>
-        <translation>Скачанные модели</translation>
     </message>
     <message>
         <location filename="../../i18n/qml-src/pages/VoiceModelsPage.qml" line="161"/>
@@ -700,6 +703,66 @@ long press — remove</source>
     <message>
         <source>Context compacted</source>
         <translation>Контекст сжат</translation>
+    </message>
+    <message>
+        <location filename="../qml/harbour-opencode.qml" line="1889"/>
+        <source>Will be remembered: %1</source>
+        <translation>Будет запомнено: %1</translation>
+    </message>
+    <message>
+        <location filename="../qml/harbour-opencode.qml" line="1907"/>
+        <source>Tool: %1</source>
+        <translation>Инструмент: %1</translation>
+    </message>
+    <message>
+        <location filename="../qml/harbour-opencode.qml" line="1921"/>
+        <source>Reason (optional)</source>
+        <translation>Причина (необязательно)</translation>
+    </message>
+    <message>
+        <location filename="../qml/harbour-opencode.qml" line="1947"/>
+        <source>Always allowed:</source>
+        <translation>Всегда разрешено:</translation>
+    </message>
+    <message>
+        <location filename="../qml/harbour-opencode.qml" line="1970"/>
+        <source>Revoke</source>
+        <translation>Отозвать</translation>
+    </message>
+    <message>
+        <location filename="../qml/harbour-opencode.qml" line="1980"/>
+        <source>+%1 more waiting</source>
+        <translation>+%1 ещё ожидают</translation>
+    </message>
+    <message>
+        <location filename="../qml/harbour-opencode.qml" line="2366"/>
+        <source>Create</source>
+        <translation>Создать</translation>
+    </message>
+    <message>
+        <location filename="../qml/harbour-opencode.qml" line="2367"/>
+        <source>Rename</source>
+        <translation>Переименовать</translation>
+    </message>
+    <message>
+        <location filename="../qml/harbour-opencode.qml" line="2387"/>
+        <source>New session</source>
+        <translation>Новая сессия</translation>
+    </message>
+    <message>
+        <location filename="../qml/harbour-opencode.qml" line="2388"/>
+        <source>Session name</source>
+        <translation>Название сессии</translation>
+    </message>
+    <message>
+        <location filename="../qml/harbour-opencode.qml" line="2393"/>
+        <source>Session name (optional)</source>
+        <translation>Название сессии (необязательно)</translation>
+    </message>
+    <message>
+        <location filename="../qml/harbour-opencode.qml" line="2396"/>
+        <source>Leave empty to name automatically</source>
+        <translation>Оставьте пустым, чтобы назвать автоматически</translation>
     </message>
 </context>
 </TS>

@@ -94,6 +94,55 @@ pub const ARG_SEP: char = '\u{1f}';
 /// the worker never sends it — it sends `[["e":…]]` tokens instead.
 pub const ERR_TAG: &str = "[[e]]";
 
+// ── Connection / Server daemon status ──────────────────────────────────────
+/// Daemon connecting / negotiating SSE stream.
+pub const STATUS_CONNECTING: &str = "connecting";
+/// Daemon connected, SSE stream active, session idle.
+pub const STATUS_IDLE: &str = "idle";
+pub const STATUS_BUSY: &str = "busy";
+/// Daemon / SSE connection broken.
+pub const STATUS_ERROR: &str = "error";
+/// Prefix for retry state: `retry|<next_ms>|<attempt>|<message>`.
+pub const STATUS_RETRY_PREFIX: &str = "retry|";
+
+/// Strongly-typed connection lifecycle state of the background daemon / SSE stream.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ServerConnectionStatus {
+    Connecting,
+    Idle,
+    Busy,
+    Error,
+    Retry {
+        next: u64,
+        attempt: u32,
+        message: String,
+    },
+}
+
+impl ServerConnectionStatus {
+    pub fn as_base_str(&self) -> &str {
+        match self {
+            ServerConnectionStatus::Connecting => STATUS_CONNECTING,
+            ServerConnectionStatus::Idle => STATUS_IDLE,
+            ServerConnectionStatus::Busy => STATUS_BUSY,
+            ServerConnectionStatus::Error => STATUS_ERROR,
+            ServerConnectionStatus::Retry { .. } => STATUS_BUSY,
+        }
+    }
+
+    pub fn to_status_string(&self) -> String {
+        match self {
+            ServerConnectionStatus::Connecting => STATUS_CONNECTING.to_string(),
+            ServerConnectionStatus::Idle => STATUS_IDLE.to_string(),
+            ServerConnectionStatus::Busy => STATUS_BUSY.to_string(),
+            ServerConnectionStatus::Error => STATUS_ERROR.to_string(),
+            ServerConnectionStatus::Retry { next, attempt, message } => {
+                format!("{STATUS_RETRY_PREFIX}{next}|{attempt}|{message}")
+            }
+        }
+    }
+}
+
 /// Build a feed line with a timestamp: `[[t:<ts>]]<body>`.
 pub fn proto_line(ts: u64, body: &str) -> String {
     format!("{TS_OPEN}{ts}{TS_CLOSE}{body}")
@@ -179,5 +228,22 @@ mod tests {
         assert!(line.starts_with("[[t:3]][[tool]]call_1\u{1f}bash\u{1f}running\u{1f}"));
         assert!(line.ends_with("ls -a x"));
         assert!(!line.contains('\n'));
+    }
+
+    #[test]
+    fn server_connection_status_serialization() {
+        assert_eq!(ServerConnectionStatus::Connecting.to_status_string(), STATUS_CONNECTING);
+        assert_eq!(ServerConnectionStatus::Idle.to_status_string(), STATUS_IDLE);
+        assert_eq!(ServerConnectionStatus::Busy.to_status_string(), STATUS_BUSY);
+        assert_eq!(ServerConnectionStatus::Error.to_status_string(), STATUS_ERROR);
+        assert_eq!(
+            ServerConnectionStatus::Retry {
+                next: 1000,
+                attempt: 2,
+                message: "quota exceeded".to_string(),
+            }
+            .to_status_string(),
+            "retry|1000|2|quota exceeded"
+        );
     }
 }

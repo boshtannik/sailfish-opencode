@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use crate::cmd::Cmd;
 use crate::i18n::{err_line, now_ms};
 use crate::settings::Settings;
-use crate::types::event::PermissionReplyKind;
+use crate::types::v2::permission::PermissionReplyKind;
 
 /// Diagnostic marker written by the QML main thread: which poll() phase is
 /// running right now. `t` is `now_ms()` at the moment of the last write.
@@ -76,9 +76,16 @@ pub struct AppBridge {
     /// Queue of permission requests for the dialog (JSON), written by the worker.
     #[allow(dead_code)]
     permissions_shared: Arc<Mutex<String>>,
-    /// Pending model questions for the dialog (JSON), written by the worker.
+    /// The last failed permission answer (text) — the card stays on screen and
+    /// the UI shows the reason, written by the worker.
     #[allow(dead_code)]
-    questions_shared: Arc<Mutex<String>>,
+    permission_error_shared: Arc<Mutex<String>>,
+    /// Saved ("always allow") permission rules (JSON), written by the worker.
+    #[allow(dead_code)]
+    saved_permissions_shared: Arc<Mutex<String>>,
+    /// Pending forms from the model (JSON), written by the worker.
+    #[allow(dead_code)]
+    forms_shared: Arc<Mutex<String>>,
     /// JSON settings status (directory handling, etc.), written by the worker/backend.
     #[allow(dead_code)]
     settings_shared: Arc<Mutex<String>>,
@@ -201,22 +208,6 @@ pub struct AppBridge {
             self.push_command(Cmd::Unrevert { id }.to_value());
         }
     }),
-    /// QML: share a session (get a link).
-    share_session: qt_method!(fn share_session(&self, id: QString) {
-        let id = id.to_string();
-        log::info!("QML share_session {id:?}");
-        if !id.is_empty() {
-            self.push_command(Cmd::Share { id }.to_value());
-        }
-    }),
-    /// QML: revoke link access.
-    unshare_session: qt_method!(fn unshare_session(&self, id: QString) {
-        let id = id.to_string();
-        log::info!("QML unshare_session {id:?}");
-        if !id.is_empty() {
-            self.push_command(Cmd::Unshare { id }.to_value());
-        }
-    }),
     /// QML: summarize (compact) the session history.
     summarize_session: qt_method!(fn summarize_session(&self, id: QString) {
         let id = id.to_string();
@@ -312,31 +303,56 @@ pub struct AppBridge {
         let v = self.tools_shared.lock().map(|s| s.clone()).unwrap_or_default();
         QString::from(v)
     }),
-    /// QML: permission requests as JSON `[{id,sessionID,action,resources,options}]`.
+    /// QML: permission requests as JSON `[{id,sessionID,action,resources,message,save,source,options}]`.
     permissions_json: qt_method!(fn permissions_json(&self) -> QString {
         let v = self.permissions_shared.lock().map(|s| s.clone()).unwrap_or_default();
         QString::from(v)
     }),
-    /// QML: pending questions from the model as JSON (read-only).
-    questions_json: qt_method!(fn questions_json(&self) -> QString {
-        let v = self.questions_shared.lock().map(|s| s.clone()).unwrap_or_default();
+    /// QML: the last failed permission answer (empty — no error).
+    permission_error: qt_method!(fn permission_error(&self) -> QString {
+        let v = self.permission_error_shared.lock().map(|s| s.clone()).unwrap_or_default();
         QString::from(v)
     }),
-    /// QML: answer a question (`id` = requestID). `answers` is JSON
-    /// `[[label,…],…]` in question order; empty string means "reject".
-    answer_question: qt_method!(fn answer_question(&self, id: QString, answers: QString) {
+    /// QML: saved ("always allow") permission rules as JSON
+    /// `[{id,action,resource,projectID}]`.
+    saved_permissions_json: qt_method!(fn saved_permissions_json(&self) -> QString {
+        let v = self.saved_permissions_shared.lock().map(|s| s.clone()).unwrap_or_default();
+        QString::from(v)
+    }),
+    /// QML: pending forms from the model as JSON (read-only).
+    ///
+    /// The list holds the forms the server still waits an answer for (the
+    /// worker reconciles it with the server on every poll), each one in the
+    /// server's own shape: `{id, sessionID, title, fields:[…]}`.
+    forms_json: qt_method!(fn forms_json(&self) -> QString {
+        let v = self.forms_shared.lock().map(|s| s.clone()).unwrap_or_default();
+        QString::from(v)
+    }),
+
+    /// QML: answer a form. `session` is the session the form belongs to (the
+    /// v2 route is session-scoped), `id` the form id and `answer` the JSON
+    /// object `{fieldKey: value}`. An empty `answer` cancels the form.
+    answer_form: qt_method!(fn answer_form(&self, session: QString, id: QString, answer: QString) {
+        let session = session.to_string();
         let id = id.to_string();
-        let answers = answers.to_string();
-        log::info!("QML answer_question {id:?}");
-        if id.is_empty() {
+        let answer = answer.to_string();
+        log::info!("QML answer_form {session:?}/{id:?}");
+        if session.is_empty() || id.is_empty() {
             return;
         }
-        if answers.is_empty() {
-            self.push_command(Cmd::Question { id, answers: Vec::new(), reject: true }.to_value());
+        // An empty answer means "cancel" — the user dismissed the form.
+        let parsed = if answer.trim().is_empty() {
+            None
         } else {
-            let parsed: Vec<Vec<String>> = serde_json::from_str(&answers).unwrap_or_default();
-            self.push_command(Cmd::Question { id, answers: parsed, reject: false }.to_value());
-        }
+            match serde_json::from_str::<serde_json::Value>(&answer) {
+                Ok(v) => Some(v),
+                Err(e) => {
+                    log::warn!("QML answer_form: неверный JSON ответа: {e}");
+                    return;
+                }
+            }
+        };
+        self.push_command(Cmd::Form { session, id, answer: parsed }.to_value());
     }),
     /// QML: app settings as JSON `{"workdir":"...","..."}`.
     settings_json: qt_method!(fn settings_json(&self) -> QString {
@@ -403,18 +419,29 @@ pub struct AppBridge {
         self.push_command(Cmd::ConsoleLoginCancel.to_value());
     }),
     /// QML: answer a permission request (`response`: once | always | reject).
-    answer_permission: qt_method!(fn answer_permission(&self, session: QString, id: QString, response: QString) {
+    /// `message` is the optional reason shown to the model.
+    answer_permission: qt_method!(fn answer_permission(&self, session: QString, id: QString, response: QString, message: QString) {
         let session = session.to_string();
         let id = id.to_string();
         let response = response.to_string();
+        let message = message.to_string();
         log::info!("QML answer_permission {session:?} {id:?} -> {response:?}");
         if !session.is_empty() && !id.is_empty() && !response.is_empty() {
             match PermissionReplyKind::from_name(&response) {
                 Some(response) => {
-                    self.push_command(Cmd::Permission { session, id, response }.to_value());
+                    let message = if message.is_empty() { None } else { Some(message) };
+                    self.push_command(Cmd::Permission { session, id, response, message }.to_value());
                 }
                 None => log::warn!("QML answer_permission: неизвестный ответ {response:?}"),
             }
+        }
+    }),
+    /// QML: revoke a saved ("always allow") permission rule.
+    remove_saved_permission: qt_method!(fn remove_saved_permission(&self, id: QString) {
+        let id = id.to_string();
+        log::info!("QML remove_saved_permission {id:?}");
+        if !id.is_empty() {
+            self.push_command(Cmd::RemoveSavedPermission { id }.to_value());
         }
     }),
     /// QML (dev): generate a mock server error into the feed, as if a
@@ -575,9 +602,19 @@ impl AppBridge {
         self.permissions_shared.clone()
     }
 
-    /// Question queue handle for the worker.
-    pub fn questions_handle(&self) -> Arc<Mutex<String>> {
-        self.questions_shared.clone()
+    /// Handle of the last failed permission answer (the worker writes it).
+    pub fn permission_error_handle(&self) -> Arc<Mutex<String>> {
+        self.permission_error_shared.clone()
+    }
+
+    /// Handle of the saved permission rules (the worker writes them).
+    pub fn saved_permissions_handle(&self) -> Arc<Mutex<String>> {
+        self.saved_permissions_shared.clone()
+    }
+
+    /// Form queue handle for the worker.
+    pub fn forms_handle(&self) -> Arc<Mutex<String>> {
+        self.forms_shared.clone()
     }
 
     /// Settings handle for the worker.

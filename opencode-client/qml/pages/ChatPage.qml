@@ -209,6 +209,83 @@ Item {
         anchors.top: parent.top
     }
 
+    // Server-reported retry/rate-limit notice (token quota / retryable errors).
+    // Mirrors parsing from StatusHeader.qml and stays visible on scroll.
+    readonly property var retryInfo: {
+        var aw = chatPage.appWindow
+        if (!aw) return null
+        var s = aw.statusText ? aw.statusText : ""
+        var prefix = aw.kServerStatusRetryPrefix ? aw.kServerStatusRetryPrefix : "retry|"
+        if (s.indexOf(prefix) !== 0) return null
+        var p = s.substring(prefix.length).split("|")
+        if (p.length < 2) return null
+        return {
+            next: parseInt(p[0], 10),
+            attempt: parseInt(p[1], 10),
+            message: p.slice(2).join("|")
+        }
+    }
+    property int retryTick: 0
+    Timer {
+        interval: 1000
+        repeat: true
+        running: retryInfo !== null
+        onTriggered: retryTick++
+    }
+    readonly property int retrySecondsLeft: {
+        if (!retryInfo) return 0
+        retryTick
+        return Math.max(0, Math.ceil((retryInfo.next - Date.now()) / 1000))
+    }
+    readonly property string retryRemainingText: {
+        if (!retryInfo) return ""
+        var aw = chatPage.appWindow
+        if (aw && aw.formatRemainingTime)
+            return aw.formatRemainingTime(retrySecondsLeft)
+        return retrySecondsLeft + "s"
+    }
+    readonly property string retryBannerText: {
+        if (!retryInfo) return ""
+        var line = qsTr("retrying")
+        if (retrySecondsLeft > 0)
+            line += " " + qsTr("in %1").arg(retryRemainingText)
+        var tail = qsTr("attempt #%1").arg(retryInfo.attempt)
+        var msg = retryInfo.message
+        if (msg !== "")
+            return msg + " — " + line + " - " + tail
+        return line + " - " + tail
+    }
+
+    Rectangle {
+        id: retryBanner
+        anchors {
+            top: header.bottom
+            left: parent.left
+            right: parent.right
+        }
+        height: visible ? Theme.itemSizeSmall : 0
+        visible: retryInfo !== null
+        // Warm amber tint with transparency so text stays readable on any theme.
+        color: Qt.rgba(1.0, 0.7, 0.25, 0.16)
+        border.color: Qt.rgba(1.0, 0.7, 0.25, 0.55)
+        border.width: 1
+        z: 7
+
+        Label {
+            text: retryBannerText
+            font.pixelSize: Theme.fontSizeSmall
+            color: Theme.primaryColor
+            elide: Text.ElideRight
+            anchors {
+                left: parent.left
+                leftMargin: Theme.horizontalPageMargin
+                right: parent.right
+                rightMargin: Theme.horizontalPageMargin
+                verticalCenter: parent.verticalCenter
+            }
+        }
+    }
+
     // Compaction activity banner. While the shown session is compacted (manual
     // "Compact" or auto on context overflow) the summary streams as a normal
     // growing bubble; this banner marks the operation (spinner + label) until
@@ -216,12 +293,12 @@ Item {
     Rectangle {
         id: compactionBanner
         anchors {
-            top: header.bottom
+            top: retryBanner.visible ? retryBanner.bottom : header.bottom
             left: parent.left
             right: parent.right
         }
         height: visible ? Theme.itemSizeSmall : 0
-        visible: chatPage.appWindow ? chatPage.appWindow.compactionActive : false
+        visible: !retryBanner.visible && (chatPage.appWindow ? chatPage.appWindow.compactionActive : false)
         color: Theme.rgba(Theme.highlightBackgroundColor, 0.9)
         z: 5
 
@@ -250,10 +327,10 @@ Item {
     SilicaListView {
         id: chatList
         anchors {
-            top: compactionBanner.bottom
+            top: compactionBanner.visible ? compactionBanner.bottom : (retryBanner.visible ? retryBanner.bottom : header.bottom)
             left: parent.left
             right: parent.right
-            bottom: revertStrip.top
+            bottom: revertStrip.visible ? revertStrip.top : inputPanel.top
         }
         model: appWindow.chatModel
         clip: true
@@ -400,9 +477,10 @@ Item {
             // hides/shows already rendered [[think]] lines at once, without
             // reopening the session (new ones are not accumulated when the setting is off —
             // poll() in the root QML filters them out).
-            // Inline tool rows obey the "Show tool calls" switch the same way.
+            // Inline tool rows obey the "Tool calls" setting the same way
+            // (hide mode drops them immediately).
             visible: (appWindow.showReasoning || !line.isThink)
-                     && (appWindow.showTools || !line.isTool)
+                     && (appWindow.toolCalls !== "hide" || !line.isTool)
             // The long-press menu is pinned to the item's bottom; Silica clips
             // it to the item's height (layer sourceRect, see private/ViewItem.qml).
             // Grow the item by the menu height while it is open so every menu
@@ -448,7 +526,7 @@ Item {
             // Bold tool name + its argument, both HTML-escaped (RichText).
             property string toolHtml: {
                 var h = "<b>" + chatPage.htmlEsc(line.toolName) + "</b>"
-                if (line.toolText !== "")
+                if (appWindow.toolCalls !== "minimal" && line.toolText !== "")
                     h += " " + chatPage.htmlEsc(line.toolText)
                 return h
             }
@@ -980,7 +1058,9 @@ Item {
 
         IconButton {
             id: send
-            visible: !chatPage.busy
+            // During a retry the agent is "busy" but nothing is generating:
+            // show the (disabled) send button instead of an unusable stop.
+            visible: !chatPage.busy || chatPage.retryInfo !== null
             width: Theme.itemSizeMedium
             height: Theme.itemSizeMedium
             anchors {
@@ -989,7 +1069,10 @@ Item {
                 verticalCenter: inputPanel.verticalCenter
             }
             icon.source: "image://theme/icon-m-enter-accept"
-            enabled: input.text.length > 0
+            // A pending retry is "busy" for the agent but not for the user: the
+            // button stays visible (disabled) so it does not turn into a useless
+            // stop button, and the composer keeps accepting text (see `input`).
+            enabled: input.text.length > 0 && header.retry === null
             onClicked: {
                 appWindow.send(input.text)
                 input.text = ""
@@ -998,7 +1081,7 @@ Item {
 
         IconButton {
             id: stop
-            visible: chatPage.busy
+            visible: chatPage.busy && header.retry === null
             width: Theme.itemSizeMedium
             height: Theme.itemSizeMedium
             anchors {
@@ -1013,7 +1096,11 @@ Item {
         TextArea {
             id: input
             visible: appWindow.inputMode !== "voice"
-            enabled: !chatPage.busy
+            // Typing stays possible while the server retries: only sending is
+            // blocked. Previously a broken binding (`statusHeader` is the
+            // component's internal id, not visible here) silently left this
+            // `false` forever, which locked the user out of the composer.
+            enabled: !chatPage.busy || chatPage.retryInfo !== null
             background: null
             // We draw the placeholder inside the field, not as a layer on top — otherwise
             // the field looks two-level.

@@ -59,6 +59,12 @@ impl ToolStore {
             .unwrap_or(serde_json::Value::Null)
     }
 
+    /// Current state of an existing call (to render a feed row after a
+    /// transition), or `None` if the call is unknown.
+    pub fn state_of(&self, call_id: &str) -> Option<&ToolState> {
+        self.states.get(call_id).map(|e| &e.state)
+    }
+
     /// Drop everything (new user turn / session switch).
     pub fn clear(&mut self) {
         self.states.clear();

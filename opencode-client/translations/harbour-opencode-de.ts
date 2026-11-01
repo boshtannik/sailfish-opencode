@@ -37,6 +37,16 @@
 <context>
     <name>GlobalSettingsPage</name>
     <message>
+        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="132"/>
+        <source>Vibrate on PTT</source>
+        <translation>Vibration bei PTT</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="133"/>
+        <source>Vibrate when pressing and releasing the PTT button</source>
+        <translation>Bei Drücken und Loslassen der PTT-Taste vibrieren</translation>
+    </message>
+    <message>
         <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="26"/>
         <source>Settings</source>
         <translation>Einstellungen</translation>
@@ -91,30 +101,6 @@
         <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="96"/>
         <source>Voice models</source>
         <translation>Sprachmodelle</translation>
-    </message>
-    <message>
-        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="109"/>
-        <source>Recognition:
-%1
-Synthesiser:
-%2</source>
-        <translation>Erkennung:
-%1
-Synthese:
-%2</translation>
-    </message>
-    <message>
-        <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="120"/>
-        <source>↓ download
-→ start using
-✓ selected
-✕ cancel
-long press — remove</source>
-        <translation>↓ herunterladen
-→ verwenden
-✓ ausgewählt
-✕ abbrechen
-lang drücken — entfernen</translation>
     </message>
     <message>
         <location filename="../../i18n/qml-src/pages/GlobalSettingsPage.qml" line="126"/>
@@ -211,6 +197,26 @@ lang drücken — entfernen</translation>
 <context>
     <name>SessionSettingsPage</name>
     <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml" line="103"/>
+        <source>Working mode</source>
+        <translation>Arbeitsmodus</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml" line="104"/>
+        <source>Server agent used by this session</source>
+        <translation>Server-Agent für diese Sitzung</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml" line="106"/>
+        <source>Build — active work</source>
+        <translation>Build — aktive Arbeit</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml" line="107"/>
+        <source>Plan — planning</source>
+        <translation>Plan — Planung</translation>
+    </message>
+    <message>
         <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="24"/>
         <source>no data</source>
         <translation>keine Daten</translation>
@@ -227,24 +233,9 @@ lang drücken — entfernen</translation>
         <translation>Abzweigen (Branch)</translation>
     </message>
     <message>
-        <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="117"/>
-        <source>Refresh link</source>
-        <translation>Link aktualisieren</translation>
-    </message>
-    <message>
-        <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="118"/>
-        <source>Share</source>
-        <translation>Teilen</translation>
-    </message>
-    <message>
-        <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="133"/>
-        <source>Open link</source>
-        <translation>Link öffnen</translation>
-    </message>
-    <message>
-        <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="146"/>
-        <source>Copy link</source>
-        <translation>Link kopieren</translation>
+        <location filename="../qml/pages/SessionSettingsPage.qml" line="139"/>
+        <source>Rename</source>
+        <translation>Umbenennen</translation>
     </message>
     <message>
         <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="168"/>
@@ -287,9 +278,29 @@ lang drücken — entfernen</translation>
         <translation>Sonstiges</translation>
     </message>
     <message>
-        <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="276"/>
-        <source>Show tool calls</source>
-        <translation>Werkzeugaufrufe anzeigen</translation>
+        <location filename="../qml/pages/SessionSettingsPage.qml" line="268"/>
+        <source>Tool calls</source>
+        <translation>Werkzeugaufrufe</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml" line="269"/>
+        <source>How tool calls are shown in the transcript</source>
+        <translation>Wie Werkzeugaufrufe im Transkript angezeigt werden</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml" line="273"/>
+        <source>Show (name + argument)</source>
+        <translation>Anzeigen (Name + Argument)</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml" line="274"/>
+        <source>Minimal (name only)</source>
+        <translation>Minimal (nur Name)</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/SessionSettingsPage.qml" line="275"/>
+        <source>Hide</source>
+        <translation>Ausblenden</translation>
     </message>
     <message>
         <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="305"/>
@@ -315,11 +326,6 @@ lang drücken — entfernen</translation>
         <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="345"/>
         <source>Tokens: </source>
         <translation>Tokens: </translation>
-    </message>
-    <message>
-        <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="354"/>
-        <source>Link: </source>
-        <translation>Link: </translation>
     </message>
     <message>
         <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="378"/>
@@ -385,14 +391,32 @@ lang drücken — entfernen</translation>
         <source>Pull down to create a new session</source>
         <translation>Nach unten ziehen, um eine neue Sitzung zu erstellen</translation>
     </message>
-    <message>
-        <location filename="../../i18n/qml-src/pages/SessionsPage.qml" line="113"/>
-        <source>Session name</source>
-        <translation>Sitzungsname</translation>
-    </message>
 </context>
 <context>
     <name>VoiceModelsPage</name>
+    <message>
+        <location filename="../../i18n/qml-src/pages/VoiceModelsPage.qml" line="158"/>
+        <source>Downloaded · Recognition</source>
+        <translation>Heruntergeladen · Erkennung</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/VoiceModelsPage.qml" line="161"/>
+        <source>Downloaded · Synthesis</source>
+        <translation>Heruntergeladen · Synthese</translation>
+    </message>
+    <message>
+        <location filename="../../i18n/qml-src/pages/VoiceModelsPage.qml" line="286"/>
+        <source>↓ download
+→ start using
+✓ selected
+✕ cancel
+long press — remove</source>
+        <translation>↓ herunterladen
+→ verwenden
+✓ ausgewählt
+✕ abbrechen
+lang drücken — entfernen</translation>
+    </message>
     <message>
         <location filename="../../i18n/qml-src/pages/VoiceModelsPage.qml" line="43"/>
         <source>Multilingual</source>
@@ -412,11 +436,6 @@ lang drücken — entfernen</translation>
         <location filename="../../i18n/qml-src/pages/VoiceModelsPage.qml" line="129"/>
         <source>Downloading… %1% (%2 / %3)</source>
         <translation>Wird heruntergeladen… %1% (%2 / %3)</translation>
-    </message>
-    <message>
-        <location filename="../../i18n/qml-src/pages/VoiceModelsPage.qml" line="152"/>
-        <source>Downloaded models</source>
-        <translation>Heruntergeladene Modelle</translation>
     </message>
     <message>
         <location filename="../../i18n/qml-src/pages/VoiceModelsPage.qml" line="161"/>
@@ -642,6 +661,66 @@ lang drücken — entfernen</translation>
     <message>
         <source>Context compacted</source>
         <translation>Kontext komprimiert</translation>
+    </message>
+    <message>
+        <location filename="../qml/harbour-opencode.qml" line="1889"/>
+        <source>Will be remembered: %1</source>
+        <translation>Wird gespeichert: %1</translation>
+    </message>
+    <message>
+        <location filename="../qml/harbour-opencode.qml" line="1907"/>
+        <source>Tool: %1</source>
+        <translation>Werkzeug: %1</translation>
+    </message>
+    <message>
+        <location filename="../qml/harbour-opencode.qml" line="1921"/>
+        <source>Reason (optional)</source>
+        <translation>Grund (optional)</translation>
+    </message>
+    <message>
+        <location filename="../qml/harbour-opencode.qml" line="1947"/>
+        <source>Always allowed:</source>
+        <translation>Immer erlaubt:</translation>
+    </message>
+    <message>
+        <location filename="../qml/harbour-opencode.qml" line="1970"/>
+        <source>Revoke</source>
+        <translation>Widerrufen</translation>
+    </message>
+    <message>
+        <location filename="../qml/harbour-opencode.qml" line="1980"/>
+        <source>+%1 more waiting</source>
+        <translation>+%1 warten noch</translation>
+    </message>
+    <message>
+        <location filename="../qml/harbour-opencode.qml" line="2366"/>
+        <source>Create</source>
+        <translation>Erstellen</translation>
+    </message>
+    <message>
+        <location filename="../qml/harbour-opencode.qml" line="2367"/>
+        <source>Rename</source>
+        <translation>Umbenennen</translation>
+    </message>
+    <message>
+        <location filename="../qml/harbour-opencode.qml" line="2387"/>
+        <source>New session</source>
+        <translation>Neue Sitzung</translation>
+    </message>
+    <message>
+        <location filename="../qml/harbour-opencode.qml" line="2388"/>
+        <source>Session name</source>
+        <translation>Sitzungsname</translation>
+    </message>
+    <message>
+        <location filename="../qml/harbour-opencode.qml" line="2393"/>
+        <source>Session name (optional)</source>
+        <translation>Sitzungsname (optional)</translation>
+    </message>
+    <message>
+        <location filename="../qml/harbour-opencode.qml" line="2396"/>
+        <source>Leave empty to name automatically</source>
+        <translation>Leer lassen, um automatisch zu benennen</translation>
     </message>
 </context>
 </TS>

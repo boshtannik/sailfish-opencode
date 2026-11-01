@@ -82,6 +82,19 @@ opencode project — it is a community client that speaks the opencode server pr
 <b>Sailfish OS 5.1</b> (Sony Xperia 10 IV). Other architectures are not built yet.</p>
 ```
 
+## Changelog (0.2.77)
+
+```
+Second release: switched to the opencode v2 protocol (bundled engine 2.1.4).
+- Account sign-in: "Sign in with OpenCode" device flow over the v2 integration API
+  (browser + one-time code), no CLI dependency.
+- Composer state now driven by server events (generation / retry / reconnect),
+  no local timeouts.
+- Engine updated to opencode 2.1.4 (v2 HTTP + SSE protocol, archive events,
+  slimmer compaction payloads).
+- Fixes: rename session, forms/permissions over v2, i18n contexts.
+```
+
 ## Changelog (0.1.0)
 
 ```
@@ -96,7 +109,7 @@ First public release.
 
 ## Attachments to upload
 
-- `harbour-opencode-0.1.0-1.aarch64.rpm` (release build — from `mbuild.sh --release`)
+- `harbour-opencode-0.2.77-1.aarch64.rpm` (release build — from `mbuild.sh --release`)
 - `screenshots/photo_*_2026-10-18_01-46-12.jpg` (4 screenshots, English UI)
 - `harbour-opencode.png` (86×86 icon)
 
@@ -110,6 +123,7 @@ First public release.
 
 1. [ ] Fix spec `URL:` → `https://github.com/boshtannik/sailfish-opencode` (done)
 2. [ ] Bump `Version` → `0.1.0` in `rpm/harbour-opencode.spec` (done)
+2a. [x] Bump `Version` → **`0.2.77`** and rebuild `--release` (2026-10-27)
 3. [ ] **Rename the GitHub repo** `boshtannik/mason` → `boshtannik/sailfish-opencode`
 4. [ ] Build the release RPM: `sg docker -c "./mbuild.sh --release"`
 5. [ ] Create the OpenRepos account and the app page (this file)

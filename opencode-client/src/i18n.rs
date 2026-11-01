@@ -43,6 +43,7 @@ pub const K_AUTH_SIGNED_IN: &str = "Signed in to OpenCode";
 pub const K_AUTH_SIGNIN_FAILED: &str = "OpenCode sign-in failed: %1";
 pub const K_COMPACTING: &str = "Compacting history…";
 pub const K_COMPACTED: &str = "Context compacted";
+pub const K_COMPACTION_UNAVAILABLE: &str = "Nothing to compact: %1";
 
 /// Current time in unix milliseconds.
 pub fn now_ms() -> u64 {

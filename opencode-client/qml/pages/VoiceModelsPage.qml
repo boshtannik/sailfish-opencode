@@ -1,15 +1,18 @@
 import QtQuick 2.6
 import Sailfish.Silica 1.0
 
-// Voice model management: two collapsible sections
-// (recognition / synthesis), a language filter, live progress,
-// icon actions and deletion with confirmation (RemorseItem).
+// Voice model management: collapsible sections, a language filter, live
+// progress, icon actions and deletion with confirmation (RemorseItem).
+// Downloaded models are split by engine (recognition / synthesis) so it is
+// obvious which model does what; the remaining catalog entries follow, also
+// per engine.
 Page {
     id: vmPage
 
     property var appWindow
     property string filterLang: "auto"
-    property bool dlExpanded: true
+    property bool dlRecExpanded: true
+    property bool dlTtsExpanded: true
     property bool recExpanded: true
     property bool ttsExpanded: true
 
@@ -19,11 +22,31 @@ Page {
     property string voiceFp: appWindow !== undefined ? vmPage.fingerprint() : ""
 
     // Section identifiers (local to the page).
-    readonly property string secOndevice: "ondevice"
+    readonly property string secDlRec: "ondevice_recognition"
+    readonly property string secDlTts: "ondevice_synthesis"
     readonly property string secRecognition: "recognition"
     readonly property string secSynthesis: "synthesis"
 
-    onVoiceFpChanged: vmPage.fillModel()
+    onVoiceFpChanged: {
+        vmPage.fillModel()
+        if (!vmPage.userScrolled) {
+            list.contentY = 0
+            list.positionViewAtBeginning()
+        }
+    }
+
+    // The page must open at the very top so the icon legend and the language
+    // filter are fully visible. Instead of a timer (a race with layout), the
+    // list is held at contentY = 0 by a declarative Binding until the user
+    // performs a real scroll gesture. No clocks, no guesswork about timing.
+    property bool userScrolled: false
+    onStatusChanged: {
+        if (status === PageStatus.Active) {
+            userScrolled = false
+            list.contentY = 0
+            list.positionViewAtBeginning()
+        }
+    }
 
     ListModel { id: voiceModel }
 
@@ -33,9 +56,9 @@ Page {
         for (var i = 0; i < arr.length; i++)
             out += arr[i].model_id + "|" + arr[i].downloaded + "|"
                    + arr[i].state + ";"
-        return out + "@" + appWindow.chosenStt + "#" + appWindow.chosenTts
-               + "$" + vmPage.filterLang + "%" + vmPage.recExpanded
-               + "!" + vmPage.ttsExpanded + "^" + vmPage.dlExpanded
+        return out + "$" + vmPage.filterLang + "%" + vmPage.recExpanded
+               + "!" + vmPage.ttsExpanded + "^" + vmPage.dlRecExpanded
+               + "&" + vmPage.dlTtsExpanded
     }
 
     function langName(id) {
@@ -146,16 +169,15 @@ Page {
         voiceModel.clear()
         var arr = appWindow.voiceModels || []
 
-        // 1. Downloaded models (both engines) — always without a language filter.
-        var ondev = vmPage.downloadedArr(arr)
-        voiceModel.append({ isHeader: true, kind: vmPage.secOndevice,
-                            title: qsTr("Downloaded models"),
-                            total: ondev.length, done: ondev.length,
-                            name: "", sub: "", dlstate: "", modelId: "",
-                            engine: "", downloaded: false })
-        if (vmPage.dlExpanded)
-            for (var i = 0; i < ondev.length; i++)
-                vmPage.appendRow(ondev[i])
+        // 1. Downloaded models, split by engine: the section titles say which
+        //    model is for recognition and which is for synthesis.
+        //    Always without a language filter.
+        vmPage.appendDownloaded(arr, appWindow.engineStt,
+                                qsTr("Downloaded · Recognition"),
+                                vmPage.secDlRec, vmPage.dlRecExpanded)
+        vmPage.appendDownloaded(arr, appWindow.engineTts,
+                                qsTr("Downloaded · Synthesis"),
+                                vmPage.secDlTts, vmPage.dlTtsExpanded)
 
         // 2. Recognition, 3. Synthesis — only not-yet-downloaded, with a language filter.
         vmPage.appendStore(arr, appWindow.engineStt, qsTr("Recognition"),
@@ -164,17 +186,27 @@ Page {
                            vmPage.secSynthesis, vmPage.ttsExpanded)
     }
 
-    function downloadedArr(arr) {
+    function downloadedRows(arr, engine) {
         var out = []
-        for (var i = 0; i < arr.length; i++) {
-            if (!arr[i].downloaded)
-                continue
-            var d = {}
-            for (var k in arr[i])
-                d[k] = arr[i][k]
-            out.push(d)
-        }
+        for (var i = 0; i < arr.length; i++)
+            if (arr[i].downloaded && arr[i].engine === engine)
+                out.push(arr[i])
         return out
+    }
+
+    function appendDownloaded(arr, engine, title, kind, expanded) {
+        var rows = vmPage.downloadedRows(arr, engine)
+        // No empty sections: a downloaded group appears only once something
+        // of that kind is actually on the device.
+        if (rows.length === 0)
+            return
+        voiceModel.append({ isHeader: true, kind: kind,
+                            title: title, total: rows.length, done: rows.length,
+                            name: "", sub: "", dlstate: "", modelId: "",
+                            engine: "", downloaded: false })
+        if (expanded)
+            for (var i = 0; i < rows.length; i++)
+                vmPage.appendRow(rows[i])
     }
 
     function appendStore(arr, engine, title, kind, expanded) {
@@ -202,13 +234,25 @@ Page {
                             engine: m.engine, downloaded: !!m.downloaded })
     }
 
+    function sectionExpanded(kind) {
+        if (kind === vmPage.secRecognition)
+            return vmPage.recExpanded
+        if (kind === vmPage.secSynthesis)
+            return vmPage.ttsExpanded
+        if (kind === vmPage.secDlRec)
+            return vmPage.dlRecExpanded
+        return vmPage.dlTtsExpanded
+    }
+
     function toggleSection(kind) {
         if (kind === vmPage.secRecognition)
             vmPage.recExpanded = !vmPage.recExpanded
         else if (kind === vmPage.secSynthesis)
             vmPage.ttsExpanded = !vmPage.ttsExpanded
+        else if (kind === vmPage.secDlRec)
+            vmPage.dlRecExpanded = !vmPage.dlRecExpanded
         else
-            vmPage.dlExpanded = !vmPage.dlExpanded
+            vmPage.dlTtsExpanded = !vmPage.dlTtsExpanded
     }
 
     function onRowTap(isHeader, kind, modelId, engine, dlstate, downloaded) {
@@ -264,6 +308,10 @@ Page {
         return b
     }
 
+    // The legend/filter/summary scroll WITH the list so the PullDownMenu stays
+    // at the very top of the page. Until the user actually scrolls, a Binding
+    // below holds contentY at 0 (deterministic — no timer) so the legend is
+    // always visible on open.
     RemorseItem { id: remorse }
 
     SilicaListView {
@@ -271,9 +319,28 @@ Page {
         anchors.fill: parent
         model: voiceModel
 
-        header: Item {
+        // Release the top-pin as soon as the user actually scrolls.
+        onMovementStarted: vmPage.userScrolled = true
+
+        Component.onCompleted: {
+            list.contentY = 0
+            list.positionViewAtBeginning()
+        }
+
+        header: Column {
             width: parent.width
-            height: filterCombo.height + summaryLabel.height + Theme.paddingMedium
+            spacing: Theme.paddingMedium
+
+            // Icon legend — first thing on the page, before the language filter.
+            Label {
+                id: hintsLabel
+                x: Theme.horizontalPageMargin
+                width: parent.width - 2 * Theme.horizontalPageMargin
+                text: qsTr("↓ download\n→ start using\n✓ selected\n✕ cancel\nlong press — remove")
+                wrapMode: Text.Wrap
+                color: Theme.secondaryColor
+                font.pixelSize: Theme.fontSizeExtraSmall
+            }
 
             ComboBox {
                 id: filterCombo
@@ -297,8 +364,6 @@ Page {
 
             Label {
                 id: summaryLabel
-                anchors.top: filterCombo.bottom
-                anchors.topMargin: Theme.paddingSmall
                 x: Theme.horizontalPageMargin
                 width: parent.width - 2 * Theme.horizontalPageMargin
                 text: qsTr("On device: %1 of %2 models, %3")
@@ -331,11 +396,7 @@ textCol.height
                 width: Theme.itemSizeSmall
                 x: Theme.horizontalPageMargin
                 anchors.verticalCenter: parent.verticalCenter
-                text: kind === vmPage.secRecognition
-                      ? (vmPage.recExpanded ? "▾" : "▸")
-                      : kind === vmPage.secSynthesis
-                        ? (vmPage.ttsExpanded ? "▾" : "▸")
-                        : (vmPage.dlExpanded ? "▾" : "▸")
+                text: vmPage.sectionExpanded(kind) ? "▾" : "▸"
                 color: parent.highlighted ? Theme.highlightColor : Theme.secondaryColor
                 font.pixelSize: Theme.fontSizeSmall
             }
@@ -459,5 +520,15 @@ textCol.height
         }
 
         VerticalScrollDecorator {}
+    }
+
+    // Hold the list at the very top until the user scrolls it themselves. This
+    // is declarative (no timers): the moment a real scroll gesture starts,
+    // onMovementStarted flips userScrolled and this Binding goes inactive.
+    Binding {
+        target: list
+        property: "contentY"
+        value: 0
+        when: !vmPage.userScrolled
     }
 }

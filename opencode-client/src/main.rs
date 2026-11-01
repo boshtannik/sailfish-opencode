@@ -14,12 +14,13 @@ use opencode_client::bridge::app::AppBridge;
 use opencode_client::cmd::Cmd;
 use opencode_client::event;
 use opencode_client::i18n::{self, err_line, now_ms, svc_line};
-use opencode_client::markers::*;
+use opencode_client::markers::{self, *};
 use opencode_client::server;
 use opencode_client::settings::Settings;
-use opencode_client::types::event::PermissionReplyKind;
 use opencode_client::types::keys;
 use opencode_client::types::tool::ToolState;
+use opencode_client::types::v2::keys as v2keys;
+use opencode_client::types::v2::permission::PermissionReplyKind;
 use opencode_client::voice;
 
 /// The only QML file of the application (located in /usr/share/harbour-opencode/qml).
@@ -46,9 +47,8 @@ impl std::io::Write for Tee {
 fn init_logging() {
     // Default `warn`: `info` logged every SSE event (~1 s) and grew app.log
     // tens of MB. Set `RUST_LOG=info` / `debug` for verbose troubleshooting.
-    let mut builder = env_logger::Builder::from_env(
-        env_logger::Env::default().default_filter_or("warn"),
-    );
+    let mut builder =
+        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn"));
     if let Some(home) = std::env::var_os("HOME") {
         let dir = std::path::PathBuf::from(home).join(".cache/harbour-opencode");
         let _ = std::fs::create_dir_all(&dir);
@@ -58,12 +58,19 @@ fn init_logging() {
         if path.exists() {
             let _ = std::fs::rename(&path, dir.join("app.log.1"));
         }
-        if let Ok(file) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        if let Ok(file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+        {
             builder.target(env_logger::Target::Pipe(Box::new(Tee(file))));
         }
     }
     let _ = builder.try_init();
-    log::info!("--- harbour-opencode starting (pid={}) ---", std::process::id());
+    log::info!(
+        "--- harbour-opencode starting (pid={}) ---",
+        std::process::id()
+    );
 }
 
 /// Routed to the file — the launcher does not capture the app's stderr, so a
@@ -73,9 +80,18 @@ fn install_panic_log(dir: &std::path::Path) {
     let path = dir.join("panic.log");
     std::panic::set_hook(Box::new(move |info| {
         let bt = std::backtrace::Backtrace::force_capture();
-        let msg = format!("\n[{} PANIC] thread={:?}\n{}\n{}",
-                          humantime_since_epoch(), std::thread::current().id(), info, bt);
-        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        let msg = format!(
+            "\n[{} PANIC] thread={:?}\n{}\n{}",
+            humantime_since_epoch(),
+            std::thread::current().id(),
+            info,
+            bt
+        );
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+        {
             let _ = f.write_all(msg.as_bytes());
             let _ = f.flush();
         }
@@ -93,6 +109,10 @@ fn humantime_since_epoch() -> String {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     init_logging();
+    // Do not force-create opencode.jsonc with {"permission":{"*":"ask"}} on first
+    // run: that made the agent ask for every action and annoyed users. If the
+    // user wants strict permissions they can create the config themselves; the
+    // server's defaults remain.
     // Drop leftover temp files from a previous run (old /tmp WAVs, half-written
     // TTS cache entries) so they don't accumulate.
     voice::cleanup_tmp();
@@ -122,10 +142,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let voice = voice::VoiceState::with_status(bridge_pinned.borrow().voice_status_handle());
     let tools = bridge_pinned.borrow().tools_handle();
     let permissions = bridge_pinned.borrow().permissions_handle();
-    let questions = bridge_pinned.borrow().questions_handle();
+    let permission_error = bridge_pinned.borrow().permission_error_handle();
+    let saved_permissions = bridge_pinned.borrow().saved_permissions_handle();
+    let forms = bridge_pinned.borrow().forms_handle();
     let settings = bridge_pinned.borrow().settings_handle();
     let console_login = bridge_pinned.borrow().console_login_handle();
-    bridge_pinned.borrow().set_status_shared("connecting");
+    bridge_pinned
+        .borrow()
+        .set_status_shared(markers::STATUS_CONNECTING);
 
     let dispatcher: event::dispatcher::SharedState = Arc::new(Mutex::new(Default::default()));
 
@@ -152,7 +176,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let worker_voice = voice.clone();
     let worker_tools = tools.clone();
     let worker_permissions = permissions.clone();
-    let worker_questions = questions.clone();
+    let worker_permission_error = permission_error.clone();
+    let worker_saved_permissions = saved_permissions.clone();
+    let worker_forms = forms.clone();
     let worker_url_tx = url_tx.clone();
     let worker_dispatcher = dispatcher.clone();
     let worker_base = env_base.clone();
@@ -172,10 +198,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if let Err(e) = std::fs::create_dir_all(&cwd) {
                     log::warn!("failed to create workdir {cwd:?}: {e}");
                 }
-                let guard = server::ServerGuard::start(server::ServerConfig { cwd: Some(cwd), ..Default::default() }).await;
+                let guard = server::ServerGuard::start(server::ServerConfig {
+                    cwd: Some(cwd),
+                    ..Default::default()
+                })
+                .await;
+                // Auth for the connection the worker will use. Our own server
+                // (2.1.x) prints a Basic-auth password on startup → take it
+                // from the guard; the env auth only matters for a pre-existing
+                // external server (`base` from the environment).
+                let mut worker_auth = worker_auth;
                 let base = match &guard {
                     Ok(g) => {
                         log::info!("opencode serve started: {}", g.base_url());
+                        if worker_base.is_none() {
+                            worker_auth = g.auth.clone();
+                        }
                         Some(worker_base.unwrap_or_else(|| g.base_url().to_string()))
                     }
                     Err(e) => {
@@ -203,15 +241,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             worker_sounds,
                             worker_voice,
                             worker_tools,
-                        worker_permissions,
-                        worker_questions,
-                        worker_settings,
-                        console_login,
-                        worker_stop_rx,
-                    )
-                    .await
+                            worker_permissions,
+                            worker_permission_error,
+                            worker_saved_permissions,
+                            worker_forms,
+                            worker_settings,
+                            console_login,
+                            worker_stop_rx,
+                        )
+                        .await
                     }
-                    None => set_status(&worker_status, "error"),
+                    None => {
+                        set_server_status(&worker_status, &markers::ServerConnectionStatus::Error)
+                    }
                 }
                 // Guard drop happens here: after the stop signal.
                 drop(guard);
@@ -246,6 +288,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// Background worker: (1) SSE events → QML bridge, (2) prompts from QML → server.
+/// Why the SSE loop stopped. Drives the worker's decision: reconnect.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StreamEnd {
+    /// The server closed the stream (or the session was dropped) — reconnect.
+    Reconnect,
+    // FIXME: Only one variant? Why this enum was created, maybe some other variants still required
+    // when it's used?
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn run_worker(
     base: String,
@@ -265,18 +316,21 @@ async fn run_worker(
     voice: Arc<voice::VoiceState>,
     tools: Arc<std::sync::Mutex<String>>,
     permissions: Arc<std::sync::Mutex<String>>,
-    questions: Arc<std::sync::Mutex<String>>,
+    permission_error: Arc<std::sync::Mutex<String>>,
+    saved_permissions: Arc<std::sync::Mutex<String>>,
+    forms: Arc<std::sync::Mutex<String>>,
     settings: Arc<std::sync::Mutex<String>>,
     console_login: opencode_client::auth::ConsoleLogin,
     mut stop_rx: tokio::sync::watch::Receiver<bool>,
 ) {
     loop {
+        log::info!("stream adapter: v2");
         tokio::select! {
             _ = stop_rx.changed() => {
                 log::info!("stop signal received, exiting");
                 return;
             }
-            r = run_stream(
+            r = run_stream_adapter(
                 base.clone(),
                 auth.clone(),
                 dispatcher.clone(),
@@ -294,26 +348,281 @@ async fn run_worker(
                 voice.clone(),
                 tools.clone(),
                 permissions.clone(),
-                questions.clone(),
+                permission_error.clone(),
+                saved_permissions.clone(),
+                forms.clone(),
                 settings.clone(),
                 console_login.clone(),
             ) => {
                 match r {
-                    Ok(()) => log::warn!("SSE stream ended, reconnecting…"),
+                    Ok(StreamEnd::Reconnect) => log::warn!("SSE stream ended, reconnecting…"),
                     Err(e) => log::error!("SSE error: {e}, reconnecting…"),
                 }
-                set_status(&status, "connecting");
+                set_server_status(&status, &markers::ServerConnectionStatus::Connecting);
                 tokio::time::sleep(Duration::from_secs(2)).await;
             }
         }
     }
 }
 
-/// A single SSE session: `Ok(())` means the stream ended, `Err` means connection failed.
+/// Run one SSE session with the v2 adapter.
 #[allow(clippy::too_many_arguments)]
-async fn run_stream(
+async fn run_stream_adapter(
     base: String,
     auth: Option<(String, String)>,
+    dispatcher: event::dispatcher::SharedState,
+    worker_pending: Arc<std::sync::Mutex<Vec<String>>>,
+    worker_prompts: Arc<std::sync::Mutex<Vec<String>>>,
+    status: Arc<std::sync::Mutex<String>>,
+    sessions: Arc<std::sync::Mutex<String>>,
+    commands: Arc<std::sync::Mutex<Vec<String>>>,
+    current_session: Arc<std::sync::Mutex<String>>,
+    compacting: Arc<std::sync::Mutex<bool>>,
+    nav: Arc<std::sync::Mutex<i32>>,
+    todos: Arc<std::sync::Mutex<String>>,
+    models: Arc<std::sync::Mutex<String>>,
+    sounds: Arc<std::sync::Mutex<String>>,
+    voice: Arc<voice::VoiceState>,
+    tools: Arc<std::sync::Mutex<String>>,
+    permissions: Arc<std::sync::Mutex<String>>,
+    permission_error: Arc<std::sync::Mutex<String>>,
+    saved_permissions: Arc<std::sync::Mutex<String>>,
+    forms: Arc<std::sync::Mutex<String>>,
+    settings: Arc<std::sync::Mutex<String>>,
+    console_login: opencode_client::auth::ConsoleLogin,
+) -> Result<StreamEnd, String> {
+    let client = api::V2Adapter::new(base.clone(), auth.clone());
+    run_stream(
+        client,
+        dispatcher,
+        worker_pending,
+        worker_prompts,
+        status,
+        sessions,
+        commands,
+        current_session,
+        compacting,
+        nav,
+        todos,
+        models,
+        sounds,
+        voice,
+        tools,
+        permissions,
+        permission_error,
+        saved_permissions,
+        forms,
+        settings,
+        console_login,
+    )
+    .await
+}
+
+/// Per-turn streaming accumulators plus the shared IO handles a terminal
+/// streaming event needs. Bundling them keeps the v2 terminal handlers
+/// (`on_v2_event`/`on_v2_idle`) signature small.
+struct TurnState<'a> {
+    parts: &'a mut std::collections::HashMap<String, String>,
+    text_order: &'a mut Vec<String>,
+    text_live: &'a mut std::collections::HashMap<String, String>,
+    spoken_parts: &'a mut std::collections::HashSet<String>,
+    assistant_messages: &'a std::collections::HashSet<String>,
+    compaction_messages: &'a std::collections::HashSet<String>,
+    reasonings: &'a mut std::collections::HashMap<String, String>,
+    reasoning_order: &'a mut Vec<String>,
+    reasoning_part_ids: &'a mut std::collections::HashSet<String>,
+    live_reasoned_ids: &'a mut std::collections::HashSet<String>,
+    last_reasoning_push: &'a mut u64,
+    last_answer_push: &'a mut u64,
+    current_session: Option<&'a str>,
+    pending: &'a Arc<std::sync::Mutex<Vec<String>>>,
+    voice: &'a Arc<voice::VoiceState>,
+}
+
+impl<'a> TurnState<'a> {
+    /// v2 terminal streaming events: `session.text.ended` / `session.reasoning.ended`
+    /// carry the final text of one block (v1 delivered the same at
+    /// `message.part.updated`; hence the shared accumulator semantics).
+    async fn on_v2_event(
+        &mut self,
+        env: &opencode_client::types::v2::EventEnvelope,
+        _client: &impl api::OpenCodeApi,
+    ) {
+        use opencode_client::types::v2::event as v2;
+        match env.kind.as_str() {
+            "session.text.ended" => {
+                let Ok(d): Result<v2::TextEndedData, _> = serde_json::from_value(env.data.clone())
+                else {
+                    return;
+                };
+                if !self.assistant_messages.contains(&d.assistant_message_id) {
+                    return;
+                }
+                let key = v2_text_key(&d.assistant_message_id, d.ordinal);
+                if self.compaction_messages.contains(&d.assistant_message_id) {
+                    self.spoken_parts.insert(key.clone());
+                }
+                let was_live = self.text_live.contains_key(&key);
+                if self.parts.insert(key.clone(), d.text.clone()).is_none() {
+                    self.text_order.push(key.clone());
+                }
+                if was_live && !d.text.trim().is_empty() {
+                    if let Ok(mut q) = self.pending.lock() {
+                        q.push(proto_live_line(
+                            now_ms(),
+                            ANSWER_LIVE_TAG,
+                            d.text.trim_end(),
+                            &key,
+                        ));
+                    }
+                    let tts_mode = self.voice.tts_mode.lock().map(|m| *m).unwrap_or_default();
+                    if tts_mode == voice::TtsMode::Auto
+                        && self.current_session == Some(d.session_id.as_str())
+                        && !self.voice.dictating()
+                        && self.spoken_parts.insert(key.clone())
+                    {
+                        voice::tts_from_call(self.voice, d.text.trim_end(), self.pending).await;
+                    }
+                }
+            }
+            // FIXME: Maybe better enum with str values to let compiler help us?
+            "session.reasoning.ended" => {
+                let Ok(d): Result<v2::TextEndedData, _> = serde_json::from_value(env.data.clone())
+                else {
+                    return;
+                };
+                if !self.assistant_messages.contains(&d.assistant_message_id) {
+                    return;
+                }
+                let key = v2_reasoning_key(&d.assistant_message_id, d.ordinal);
+                self.reasoning_part_ids.insert(key.clone());
+                if self
+                    .reasonings
+                    .insert(key.clone(), d.text.clone())
+                    .is_none()
+                {
+                    self.reasoning_order.push(key.clone());
+                }
+                if self.live_reasoned_ids.contains(&key) && !d.text.trim().is_empty() {
+                    if let Ok(mut q) = self.pending.lock() {
+                        q.push(proto_live_line(
+                            now_ms(),
+                            THINK_LIVE_TAG,
+                            d.text.trim_end(),
+                            &key,
+                        ));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// v2 `session.idle` — flush the accumulated answer + reasoning to QML and
+    /// reset the turn (mirrors the v1 `idle_session_id` block).
+    async fn on_v2_idle(
+        &mut self,
+        env: &opencode_client::types::v2::EventEnvelope,
+        client: &impl api::OpenCodeApi,
+        sessions: &Arc<std::sync::Mutex<String>>,
+        dispatcher: &event::dispatcher::SharedState,
+    ) {
+        use opencode_client::types::v2::event as v2;
+        use opencode_client::types::v2::keys as k;
+        // Turn end in 2.1.x is `session.execution.succeeded` (success) or
+        // `session.execution.interrupted` (user abort) — the legacy
+        // `session.idle` is not emitted on this path. All three end the turn
+        // cleanly; only `session.execution.failed` is an error (handled in the
+        // dispatcher).
+        if !matches!(
+            env.kind.as_str(),
+            k::IDLE | k::EXECUTION_SUCCEEDED | k::EXECUTION_INTERRUPTED
+        ) {
+            return;
+        }
+        let Ok(d): Result<v2::SessionIdleData, _> = serde_json::from_value(env.data.clone()) else {
+            return;
+        };
+        if self.current_session != Some(d.sessionID.as_str()) {
+            return;
+        }
+        let text: String = self
+            .text_order
+            .iter()
+            .filter_map(|pid| self.parts.get(pid))
+            .map(|s| s.as_str())
+            .collect();
+        if !text.trim().is_empty() {
+            for rid in self.reasoning_order.iter() {
+                if let Some(rea) = self.reasonings.get(rid) {
+                    if !rea.trim().is_empty() && !self.live_reasoned_ids.contains(rid) {
+                        if let Ok(mut q) = self.pending.lock() {
+                            let body = format!("{THINK_TAG}{}", rea.trim_end());
+                            q.push(proto_line(now_ms(), &body));
+                        }
+                    }
+                }
+            }
+            let answer_was_live = self.parts.keys().any(|k| self.text_live.contains_key(k));
+            if !answer_was_live {
+                if let Ok(mut q) = self.pending.lock() {
+                    q.push(proto_line(now_ms(), text.trim_end()));
+                }
+            }
+            let tts_mode = self.voice.tts_mode.lock().map(|m| *m).unwrap_or_default();
+            // The user aborted the turn: the partial answer in `parts` is not
+            // a completed reply — never auto-speak it (Jack's smoke: abort
+            // mid-generation spoke the fragment).
+            let aborted = env.kind.as_str() == k::EXECUTION_INTERRUPTED;
+            if tts_mode == voice::TtsMode::Auto && !aborted {
+                for pid in self.text_order.iter() {
+                    if self.spoken_parts.contains(pid) || self.voice.dictating() {
+                        continue;
+                    }
+                    if let Some(p) = self.parts.get(pid) {
+                        let p = p.trim_end();
+                        if !p.is_empty() {
+                            self.spoken_parts.insert(pid.clone());
+                            voice::tts_from_call(self.voice, p, self.pending).await;
+                        }
+                    }
+                }
+            }
+        }
+        // Note: the turn status (`busy` → `idle`) is published by the
+        // dispatcher's FSM when it sees the same `session.execution.*` /
+        // `session.idle` event — the single writer of the composer gate.
+        self.parts.clear();
+        self.text_live.clear();
+        self.text_order.clear();
+        self.spoken_parts.clear();
+        self.reasonings.clear();
+        self.reasoning_order.clear();
+        self.reasoning_part_ids.clear();
+        self.live_reasoned_ids.clear();
+        *self.last_reasoning_push = 0;
+        *self.last_answer_push = 0;
+        refresh_sessions(client, sessions, &dispatcher).await;
+    }
+}
+
+/// Accumulator key for a v2 text block (`t:<assistantMessageID>:<ordinal>`).
+/// opencode numbers ordinals SEPARATELY for reasoning and text parts (both
+/// start at 0), so the kind prefix keeps the two from colliding on one
+/// `[[p:key]]` (the official TUI namespaces parts the same way).
+fn v2_text_key(assistant_message_id: &str, ordinal: i64) -> String {
+    format!("t:{assistant_message_id}:{ordinal}")
+}
+
+/// Accumulator key for a v2 reasoning block — see [`v2_text_key`].
+fn v2_reasoning_key(assistant_message_id: &str, ordinal: i64) -> String {
+    format!("r:{assistant_message_id}:{ordinal}")
+}
+
+/// A single SSE session: `Ok(())` means the stream ended, `Err` means connection failed.
+#[allow(clippy::too_many_arguments)]
+async fn run_stream<A: api::OpenCodeApi>(
+    client: A,
     dispatcher: event::dispatcher::SharedState,
     worker_pending: Arc<std::sync::Mutex<Vec<String>>>,
     worker_prompts: Arc<std::sync::Mutex<Vec<String>>>,
@@ -329,17 +638,15 @@ async fn run_stream(
     voice: Arc<voice::VoiceState>,
     tools: Arc<std::sync::Mutex<String>>,
     permissions: Arc<std::sync::Mutex<String>>,
-    questions: Arc<std::sync::Mutex<String>>,
+    permission_error: Arc<std::sync::Mutex<String>>,
+    saved_permissions: Arc<std::sync::Mutex<String>>,
+    forms: Arc<std::sync::Mutex<String>>,
     settings: Arc<std::sync::Mutex<String>>,
     console_login: opencode_client::auth::ConsoleLogin,
-) -> Result<(), String> {
-    let client = api::OpenCodeClient::new(base.clone(), auth.clone());
-
-    let sse = event::sse::SseClient::new(base, auth);
-    log::info!("connecting to /global/event...");
-    let mut stream = sse.stream().await?;
+) -> Result<StreamEnd, String> {
+    let mut stream = client.event_stream().await?;
     log::info!("SSE connected");
-    set_status(&status, "idle");
+    set_server_status(&status, &markers::ServerConnectionStatus::Idle);
 
     // Accumulate assistant text parts by part.id (see example full_cycle).
     let mut parts: std::collections::HashMap<String, String> = Default::default();
@@ -397,13 +704,19 @@ async fn run_stream(
     let mut spoken_parts: std::collections::HashSet<String> = Default::default();
     // Periodically refresh sessions list (tick every 200ms; query roughly every 3s).
     let mut ticks: u32 = 0;
-    // Set when a prompt has just been sent; the next `message.updated` (role=user)
-    // of the current session yields the user messageID, which QML attaches to the
-    // fresh user bubble (so revert/fork work on just-sent messages too).
-    let mut expect_user_id: bool = false;
-    // Session the server reported compacted (`session.compacted`). `dispatch`
-    // records it here; below, after the dispatch call, we reload that session's
-    // history so the summary replaces the old turns without re-entering the chat.
+    // Persistent ticker (NOT a fresh `sleep` per loop turn): a recreated timer
+    // never completes when the SSE stream keeps returning immediately (e.g. a
+    // reconnect storm against a missing server), which starved the command
+    // queue — QML never received settings.
+    let mut tick = tokio::time::interval(std::time::Duration::from_millis(200));
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    // The first `tick()` resolves immediately; consume it so the loop body runs
+    // on a steady 200ms cadence.
+    tick.tick().await;
+    // Session the server reported compacted (`session.compaction.ended`).
+    // `dispatch_v2` records it here; below, after the dispatch call, we reload
+    // that session's history so the summary replaces the old turns without
+    // re-entering the chat.
     let mut compacted_session: Option<String> = None;
     // Compaction part.id already announced with a "Compacting…" notice, so a
     // repeat `message.part.updated` for the same compaction does not stack a
@@ -415,48 +728,66 @@ async fn run_stream(
     let mut compaction_messages: std::collections::HashSet<String> = Default::default();
 
     // Show previously started sessions and available models immediately.
-    refresh_sessions(&client, &sessions).await;
+    refresh_sessions(&client, &sessions, &dispatcher).await;
     refresh_models(&client, &models).await;
     refresh_sounds(&sounds);
     // Resume the last session on startup — the chat shows its history.
-    resume_last_session(&client, &mut current_session, &current_session_shared, &worker_pending, &todos).await;
+    resume_last_session(
+        &client,
+        &mut current_session,
+        &current_session_shared,
+        &worker_pending,
+        &todos,
+        &dispatcher,
+        &sessions,
+    )
+    .await;
+    // Repair the turn state from the server's own answer: frames sent while
+    // we were disconnected are gone from the stream, and a turn may have
+    // started or ended in that window. No timeout is involved — this is the
+    // authoritative `GET /api/session/active` map, checked on every (re)connect.
+    match client.active_sessions().await {
+        Ok(active) => {
+            {
+                let mut st = dispatcher.lock().await;
+                event::dispatcher::reconcile_active_sessions(&mut st, &active);
+            }
+            sync_status_from_fsm(&dispatcher, &status, current_session.as_deref()).await;
+        }
+        Err(e) => log::warn!("session/active: {e}"),
+    }
+    // The server may already be waiting for an answer (the client started
+    // late, or the `form.created` frame was missed): ask for the pending
+    // forms once, up front.
+    refresh_forms(&client, &dispatcher, &forms, current_session.as_deref()).await;
+    // The same for the permission requests: the server may already be waiting
+    // for an answer (the client started late, or the `permission.asked` frame
+    // was missed).
+    refresh_permissions(
+        &client,
+        &dispatcher,
+        &permissions,
+        current_session.as_deref(),
+    )
+    .await;
+    refresh_saved_permissions_json(&client, &saved_permissions).await;
 
     // Main loop: listen to SSE and poll the bridge for new prompts in parallel.
     loop {
         tokio::select! {
             item = stream.next() => {
+                // FIXME: As i get - this is the main place of soring out anything that goes out of
+                // server or GUI (doesnt matter too much). But i guess insteard of making this
+                // match statement - monster-like, maybe subdivide those arms into separate
+                // functions moved into their own files, like module handlers/rename.rs,
+                // handlers/...rs, etc?? It may allow also to have tests right in there? Do you
+                // agree?
                 match item {
-                    Some(Ok(ev)) => {
-                        // The server reports its own retry state (retryable model
-                        // errors such as a failed URL call or an exhausted quota):
-                        // `session.status` carries the human message, the attempt
-                        // number and `next` — the ms timestamp of the next try.
-                        // Mirror the TUI: show "message — retrying in N s (#attempt)".
-                        if let opencode_client::types::event::Event::SessionStatus { properties } = &ev.payload {
-                            if current_session.as_deref() == Some(properties.sessionID.as_str()) {
-                                use opencode_client::types::session::SessionStatus;
-                                match &properties.status {
-                                    SessionStatus::Retry { attempt, message, next } => {
-                                        // Token consumed by QML StatusHeader (live countdown):
-                                        // `retry|<next_ms>|<attempt>|<message>`.
-                                        log::info!(
-                                            "session retry #{} at {}: {message}",
-                                            attempt,
-                                            *next
-                                        );
-                                        set_status(
-                                            &status,
-                                            &format!("retry|{next}|{attempt}|{message}"),
-                                        );
-                                    }
-                                    SessionStatus::Busy => set_status(&status, "busy"),
-                                    SessionStatus::Idle => {}
-                                }
-                            }
-                        }
+                    Some(Ok(env)) => {
                         {
                             // The event hub (`dispatch`) owns what each server
-                            // event does; we only lend it the streaming
+                            // event does — including the turn status the
+                            // composer gates on; we only lend it the streaming
                             // accumulators for this turn.
                             let mut stream = event::dispatcher::StreamState {
                                 pending: &*worker_pending,
@@ -473,10 +804,29 @@ async fn run_stream(
                                 compacted: &mut compacted_session,
                                 compaction_seen: &mut compaction_seen,
                                 compacting: &*compacting,
-                                expect_user_id: &mut expect_user_id,
                             };
                             let mut st = dispatcher.lock().await;
-                            let _ = event::dispatcher::dispatch(&ev.payload, &mut st, &mut stream).await;
+                            let _ = event::dispatcher::dispatch_v2(&env, &mut st, &mut stream);
+                        }
+                        // A form arrived (or was settled): hand the new queue
+                        // to QML right away — waiting for the 1 s tick would
+                        // delay the form dialog by a whole tick.
+                        if matches!(
+                            env.kind.as_str(),
+                            v2keys::FORM_CREATED | v2keys::FORM_REPLIED | v2keys::FORM_CANCELLED
+                        ) {
+                            refresh_forms_json(&dispatcher, &forms).await;
+                        }
+                        // The same for a permission request: hand the new queue
+                        // to QML right away — waiting for the 1 s tick would
+                        // delay the dialog by a whole tick.
+                        if matches!(
+                            env.kind.as_str(),
+                            v2keys::PERMISSION_ASKED
+                                | v2keys::PERMISSION_REPLIED
+                                | v2keys::SESSION_ERROR
+                        ) {
+                            refresh_permissions_json(&dispatcher, &permissions).await;
                         }
                         // The server compacted the shown session: reload its
                         // history so the summary and the "Context compacted"
@@ -506,8 +856,8 @@ async fn run_stream(
                                 if let Ok(mut q) = worker_pending.lock() {
                                     q.push(CLEAR_FEED_TAG.to_string());
                                 }
-                                load_history(&client, &sid, &worker_pending).await;
-                                refresh_sessions(&client, &sessions).await;
+                                load_history(&client, &sid, &worker_pending, &dispatcher).await;
+                                refresh_sessions(&client, &sessions, &dispatcher).await;
                                 refresh_todo(&client, &sid, &todos).await;
                             } else {
                                 // Compaction ended in a session the user is not
@@ -515,192 +865,35 @@ async fn run_stream(
                                 log::info!("session {sid} compacted in background");
                             }
                         }
-                        if let Some((sid, mid, id, text)) = ev.payload.text_part() {
-                            if assistant_messages.contains(mid) {
-                                // The compaction summary renders as a normal
-                                // answer but must never be spoken: mark its part
-                                // as handled so both auto-TTS paths below (the
-                                // text-end one and the idle fallback) skip it.
-                                if compaction_messages.contains(mid) {
-                                    spoken_parts.insert(id.to_string());
-                                }
-                                let was_live = text_live.contains_key(id);
-                                if parts.insert(id.to_string(), text.clone()).is_none() {
-                                    text_order.push(id.to_string());
-                                }
-                                // The finished text block (`message.part.updated` at
-                                // text-end) replaces the live-grown concatenation of
-                                // deltas with the exact final text — the same way a
-                                // finished reasoning block replaces its [[thinklive]]
-                                // bubble below. Without this the live bubble could
-                                // keep a slightly stale/throttled tail. The part-id
-                                // rides along so QML edits the SAME bubble even if a
-                                // tool row landed in between.
-                                if was_live && !text.trim().is_empty() {
-                                    if let Ok(mut q) = worker_pending.lock() {
-                                        q.push(proto_live_line(
-                                            now_ms(),
-                                            ANSWER_LIVE_TAG,
-                                            text.trim_end(),
-                                            id,
-                                        ));
-                                    }
-                                    // Auto-TTS: the bubble is final — speak it NOW,
-                                    // no waiting for idle (a long turn with tool
-                                    // calls would otherwise hold all speech back).
-                                    // Only for the session on screen, and never
-                                    // while the user dictates. spoken_parts keeps
-                                    // the part from being spoken twice (the idle
-                                    // pass below is the fallback).
-                                    let tts_mode = voice
-                                        .tts_mode
-                                        .lock()
-                                        .map(|m| *m)
-                                        .unwrap_or_default();
-                                    if tts_mode == voice::TtsMode::Auto
-                                        && current_session.as_deref() == Some(sid)
-                                        && !voice.dictating()
-                                        && spoken_parts.insert(id.to_string())
-                                    {
-                                        log::info!(
-                                            "auto-TTS: part {id} is final, queuing speech"
-                                        );
-                                        voice::tts_from_call(
-                                            &voice,
-                                            text.trim_end(),
-                                            &worker_pending,
-                                        )
-                                        .await;
-                                    }
-                                }
-                            }
-                        }
-                        // Reasoning as a FULL part (message.part.updated): empty at
-                        // reasoning-start, complete at reasoning-end. Register the
-                        // part.id as reasoning (so deltas route here) and, if it was
-                        // already streamed live, re-send the final text once so the
-                        // bubble matches the server exactly.
-                        if let Some((mid, id, text)) = ev.payload.reasoning_part() {
-                            if assistant_messages.contains(mid) {
-                                reasoning_part_ids.insert(id.to_string());
-                                if reasonings.insert(id.to_string(), text.clone()).is_none() {
-                                    reasoning_order.push(id.to_string());
-                                }
-                                if live_reasoned_ids.contains(id) && !text.trim().is_empty() {
-                                    if let Ok(mut q) = worker_pending.lock() {
-                                        q.push(proto_live_line(
-                                            now_ms(),
-                                            THINK_LIVE_TAG,
-                                            text.trim_end(),
-                                            id,
-                                        ));
-                                    }
-                                }
-                            }
-                        }
-                        if let Some(session_id) = ev.payload.idle_session_id() {
-                            if current_session.as_deref() == Some(session_id) {
-                                // Collect accumulated answer and send to QML.
-                                // Parts are joined in ARRIVAL order (see text_order).
-                                let text: String = text_order
-                                    .iter()
-                                    .filter_map(|pid| parts.get(pid))
-                                    .map(|s| s.as_str())
-                                    .collect();
-                                if !text.trim().is_empty() {
-                                    log::debug!("push answer: {} chars", text.chars().count());
-                                    // Reasoning: each block is its OWN [[think]] bubble.
-                                    // Blocks streamed live already have their bubble in
-                                    // the feed (grown via [[thinklive]]), so only blocks
-                                    // that never produced a live delta are pushed here —
-                                    // in arrival order, so several blocks neither collapse
-                                    // into one nor get duplicated.
-                                    for rid in &reasoning_order {
-                                        if let Some(rea) = reasonings.get(rid) {
-                                            if !rea.trim().is_empty()
-                                                && !live_reasoned_ids.contains(rid)
-                                            {
-                                                log::info!(
-                                                    "push reasoning block: {} chars",
-                                                    rea.chars().count()
-                                                );
-                                                if let Ok(mut q) = worker_pending.lock() {
-                                                    let body =
-                                                        format!("{THINK_TAG}{}", rea.trim_end());
-                                                    q.push(proto_line(now_ms(), &body));
-                                                }
-                                            }
-                                        }
-                                    }
-                                    // Answer text: assembled from the parts above. Reasoning was
-                                    // already separated by PART TYPE (type:"reasoning"
-                                    // → its own bubble; text parts → answer), the
-                                    // same way opencode's TUI decides. Parts that
-                                    // streamed live were already finalized in place by
-                                    // their own `message.part.updated` (text-end),
-                                    // exactly like the live reasoning blocks above —
-                                    // re-pushing here would duplicate them. Parts that
-                                    // never streamed live are appended whole.
-                                    let answer_was_live = parts.keys().any(|k| text_live.contains_key(k));
-                                    if !answer_was_live {
-                                        if let Ok(mut q) = worker_pending.lock() {
-                                            q.push(proto_line(now_ms(), text.trim_end()));
-                                        }
-                                    }
-                                    // Auto-TTS: speak each text part as its OWN file so
-                                    // it binds to its own bubble (a turn can contain
-                                    // several text parts around tool calls). Reasoning
-                                    // lives in separate parts and is never TTS'd. Text
-                                    // is passed trimmed so it matches the bubble body.
-                                    let tts_mode = voice
-                                        .tts_mode
-                                        .lock()
-                                        .map(|m| *m)
-                                        .unwrap_or_default();
-                                    if tts_mode == voice::TtsMode::Auto {
-                                        for pid in &text_order {
-                                            // Parts already spoken at text-end
-                                            // (spoken_parts) must not repeat; the
-                                            // rest is the fallback for parts whose
-                                            // text-end landed while dictating.
-                                            if spoken_parts.contains(pid) || voice.dictating() {
-                                                continue;
-                                            }
-                                            if let Some(p) = parts.get(pid) {
-                                                let p = p.trim_end();
-                                                if !p.is_empty() {
-                                                    spoken_parts.insert(pid.clone());
-                                                    voice::tts_from_call(&voice, p, &worker_pending)
-                                                        .await;
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                set_status(&status, "idle");
-                                parts.clear();
-                                text_live.clear();
-                                text_order.clear();
-                                spoken_parts.clear();
-                                reasonings.clear();
-                                reasoning_order.clear();
-                                reasoning_part_ids.clear();
-                                live_reasoned_ids.clear();
-                                last_reasoning_push = 0;
-                                last_answer_push = 0;
-                                refresh_sessions(&client, &sessions).await;
-                            }
-                        }
+                        let mut turn = TurnState {
+                            parts: &mut parts,
+                            text_order: &mut text_order,
+                            text_live: &mut text_live,
+                            spoken_parts: &mut spoken_parts,
+                            assistant_messages: &assistant_messages,
+                            compaction_messages: &compaction_messages,
+                            reasonings: &mut reasonings,
+                            reasoning_order: &mut reasoning_order,
+                            reasoning_part_ids: &mut reasoning_part_ids,
+                            live_reasoned_ids: &mut live_reasoned_ids,
+                            last_reasoning_push: &mut last_reasoning_push,
+                            last_answer_push: &mut last_answer_push,
+                            current_session: current_session.as_deref(),
+                            pending: &worker_pending,
+                            voice: &voice,
+                        };
+                        turn.on_v2_event(&env, &client).await;
+                        turn.on_v2_idle(&env, &client, &sessions, &dispatcher).await;
                     }
                     Some(Err(e)) => log::error!("sse error: {e}"),
                     None => {
                         log::error!("SSE closed");
-                        set_status(&status, "error");
-                        return Ok(());
+                        set_server_status(&status, &markers::ServerConnectionStatus::Error);
+                        return Ok(StreamEnd::Reconnect);
                     }
                 }
             }
-            _ = tokio::time::sleep(std::time::Duration::from_millis(200)) => {
+            _ = tick.tick() => {
                 ticks = ticks.wrapping_add(1);
 
                 // Commands from QML: new / open / rename / delete (JSON).
@@ -717,6 +910,9 @@ async fn run_stream(
                             Ok(sess) => match sess["id"].as_str() {
                                 Some(id) => {
                                     log::info!("new session: {id}");
+                                        // FIXME: Batches of similar calls - maybe move centralize
+                                        // into function like clean(vec![PARTS, REASONINGS,
+                                        // REASONING_ORDER, TEXT_LIVE, TEXT_ORDER])?
                                     current_session = Some(id.to_string());
                                     persist_last_session(Some(id));
                                     parts.clear();
@@ -735,8 +931,10 @@ async fn run_stream(
                                         *g = false;
                                     }
                                     clear_tools(&dispatcher, &tools).await;
-                                    refresh_sessions(&client, &sessions).await;
+                                    ensure_session_model(&client, id, &dispatcher).await;
+                                    refresh_sessions(&client, &sessions, &dispatcher).await;
                                     set_current_session(&current_session_shared, &current_session);
+                                    sync_status_from_fsm(&dispatcher, &status, current_session.as_deref()).await;
                                     if let Ok(mut g) = todos.lock() {
                                         *g = "[]".to_string();
                                     }
@@ -773,9 +971,14 @@ async fn run_stream(
                                 *g = false;
                             }
                             clear_tools(&dispatcher, &tools).await;
-                            load_history(&client, id, &worker_pending).await;
-                            set_status(&status, "idle");
+                            load_history(&client, id, &worker_pending, &dispatcher).await;
+                            ensure_session_model(&client, id, &dispatcher).await;
+                            refresh_sessions(&client, &sessions, &dispatcher).await;
                             set_current_session(&current_session_shared, &current_session);
+                            // The token belongs to the session now on screen:
+                            // show ITS turn state (it may still be working in
+                            // the background) rather than a guessed idle.
+                            sync_status_from_fsm(&dispatcher, &status, current_session.as_deref()).await;
                             refresh_todo(&client, id, &todos).await;
                         }
                         Cmd::Fork { id, message } => {
@@ -804,9 +1007,11 @@ async fn run_stream(
                                             *g = false;
                                         }
                                         clear_tools(&dispatcher, &tools).await;
-                                        load_history(&client, new_id, &worker_pending).await;
-                                        refresh_sessions(&client, &sessions).await;
+                                        load_history(&client, new_id, &worker_pending, &dispatcher).await;
+                                        ensure_session_model(&client, new_id, &dispatcher).await;
+                                        refresh_sessions(&client, &sessions, &dispatcher).await;
                                         set_current_session(&current_session_shared, &current_session);
+                                        sync_status_from_fsm(&dispatcher, &status, current_session.as_deref()).await;
                                         refresh_todo(&client, new_id, &todos).await;
                                         request_nav(&nav, 2);
                                     }
@@ -836,8 +1041,8 @@ async fn run_stream(
                                     spoken_parts.clear();
                                     last_answer_push = 0;
                                     clear_tools(&dispatcher, &tools).await;
-                                    load_history(&client, id, &worker_pending).await;
-                                    set_status(&status, "idle");
+                                    load_history(&client, id, &worker_pending, &dispatcher).await;
+                                    set_server_status(&status, &markers::ServerConnectionStatus::Idle);
                                     refresh_todo(&client, id, &todos).await;
                                 }
                                 Err(e) => log::error!("revert_session: {e}"),
@@ -864,8 +1069,8 @@ async fn run_stream(
                                     spoken_parts.clear();
                                     last_answer_push = 0;
                                     clear_tools(&dispatcher, &tools).await;
-                                    load_history(&client, id, &worker_pending).await;
-                                    set_status(&status, "idle");
+                                    load_history(&client, id, &worker_pending, &dispatcher).await;
+                                    set_server_status(&status, &markers::ServerConnectionStatus::Idle);
                                 }
                                 Err(e) => log::error!("unrevert_session: {e}"),
                             }
@@ -873,21 +1078,22 @@ async fn run_stream(
                         #[cfg(debug_assertions)]
                         Cmd::MockPermission => {
                             let mut st = dispatcher.lock().await;
-                            st.permissions.push(opencode_client::types::Permission {
+                            st.permissions.push(opencode_client::types::PermissionRequest {
                                 id: format!("mock-perm-{}", std::time::SystemTime::now()
                                     .duration_since(std::time::UNIX_EPOCH)
                                     .map(|d| d.as_millis()).unwrap_or(0)),
-                                sessionID: "mock-session".to_string(),
+                                session_id: "mock-session".to_string(),
                                 action: "bash".to_string(),
                                 resources: vec!["npm install && npm run build".to_string()],
                                 save: None,
                                 metadata: None,
                                 source: None,
+                                message: Some("Разрешить запуск команды?".to_string()),
                             });
                             drop(st);
                             refresh_permissions_json(&dispatcher, &permissions).await;
                         }
-                        Cmd::Permission { session, id, response } => {
+                        Cmd::Permission { session, id, response, message } => {
                             if session.is_empty() || id.is_empty() {
                                 continue;
                             }
@@ -902,61 +1108,83 @@ async fn run_stream(
                                 log::info!("permission mock {id} removed from queue");
                                 continue;
                             }
-                            match client.answer_permission(session, id, response).await {
-                                Ok(true) => log::info!("permission {session}/{id} -> {response:?}"),
-                                Ok(false) => log::warn!("permission {session}/{id}: сервер не принял ответ"),
-                                Err(e) => log::error!("answer_permission: {e}"),
+                            match client
+                                .answer_permission(session, id, response, message.as_deref())
+                                .await
+                            {
+                                Ok(true) => {
+                                    log::info!("permission {session}/{id} -> {response:?}");
+                                    // Drop it from the queue right away; the
+                                    // `permission.replied` event does the same.
+                                    {
+                                        let mut st = dispatcher.lock().await;
+                                        st.permissions.pop(id);
+                                    }
+                                    set_permission_error(&permission_error, "");
+                                    refresh_permissions_json(&dispatcher, &permissions).await;
+                                }
+                                Ok(false) => {
+                                    log::warn!("permission {session}/{id}: сервер не принял ответ");
+                                    // The request is still pending — keep the card
+                                    // and tell the user why nothing happened.
+                                    set_permission_error(
+                                        &permission_error,
+                                        "Сервер не принял ответ — попробуй ещё раз",
+                                    );
+                                    refresh_permissions_json(&dispatcher, &permissions).await;
+                                }
+                                Err(e) => {
+                                    log::error!("answer_permission: {e}");
+                                    // The card stays on screen: the user must be
+                                    // able to answer again (the queue is only
+                                    // cleared on success).
+                                    set_permission_error(
+                                        &permission_error,
+                                        &format!("Не удалось ответить: {e}"),
+                                    );
+                                    refresh_permissions_json(&dispatcher, &permissions).await;
+                                }
                             }
                         }
-                        Cmd::Question { id, answers, reject } => {
+                        Cmd::RemoveSavedPermission { id } => {
                             if id.is_empty() {
                                 continue;
                             }
-                            let result = if *reject {
-                                client.reject_question(id).await
-                            } else {
-                                client.answer_question(id, answers.clone()).await
+                            match client.remove_saved_permission(&id).await {
+                                Ok(true) => log::info!("saved permission {id} revoked"),
+                                Ok(false) => {
+                                    log::warn!("saved permission {id}: сервер не принял удаление")
+                                }
+                                Err(e) => log::error!("remove_saved_permission: {e}"),
+                            }
+                            refresh_saved_permissions_json(&client, &saved_permissions).await;
+                        }
+                        Cmd::Form { session, id, answer } => {
+                            if session.is_empty() || id.is_empty() {
+                                continue;
+                            }
+                            // No answer → the user dismissed the form: cancel it.
+                            let result = match answer {
+                                Some(a) => client.reply_form(session, id, a.clone()).await,
+                                None => client.cancel_form(session, id, None).await,
                             };
                             match result {
                                 Ok(accepted) => {
                                     if accepted {
-                                        log::info!("question {id} answered");
+                                        log::info!("form {session}/{id} settled");
                                     } else {
-                                        log::warn!("question {id}: сервер не принял ответ");
+                                        log::warn!("form {session}/{id}: сервер не принял ответ");
                                     }
                                     // Drop it from the queue right away; the
-                                    // question.replied/rejected event also does this.
-                                    let mut st = dispatcher.lock().await;
-                                    st.questions.pop(id);
-                                    drop(st);
-                                    refresh_questions_json(&dispatcher, &questions).await;
+                                    // `form.replied`/`form.cancelled` event does
+                                    // the same.
+                                    {
+                                        let mut st = dispatcher.lock().await;
+                                        st.forms.pop(id);
+                                    }
+                                    refresh_forms_json(&dispatcher, &forms).await;
                                 }
-                                Err(e) => log::error!("question {id}: {e}"),
-                            }
-                        }
-                        Cmd::Share { id } => {
-                            if id.is_empty() {
-                                continue;
-                            }
-                            match client.share_session(id).await {
-                                Ok(sess) => {
-                                    let url = sess["share"]["url"].as_str().unwrap_or("");
-                                    log::info!("share {id} -> {url}");
-                                    refresh_sessions(&client, &sessions).await;
-                                }
-                                Err(e) => log::error!("share_session: {e}"),
-                            }
-                        }
-                        Cmd::Unshare { id } => {
-                            if id.is_empty() {
-                                continue;
-                            }
-                            match client.unshare_session(id).await {
-                                Ok(()) => {
-                                    log::info!("unshare {id}");
-                                    refresh_sessions(&client, &sessions).await;
-                                }
-                                Err(e) => log::error!("unshare_session: {e}"),
+                                Err(e) => log::error!("form {session}/{id}: {e}"),
                             }
                         }
                         Cmd::Summarize { id } => {
@@ -970,38 +1198,42 @@ async fn run_stream(
                                     *g = true;
                                 }
                             }
-                            // `POST /summarize` on the server only returns once
-                            // the whole compaction is DONE (~20 s). Awaiting it
-                            // here would freeze this loop — the very loop that
-                            // reads the SSE stream — so every live event of the
-                            // compaction (the growing summary text) would only be
-                            // drained after the fact, and then immediately wiped
-                            // by the `session.compacted` reload: the summary
-                            // bubble would never grow live. Run the blocking POST
-                            // off-task so SSE keeps flowing while it is written.
+                            // `POST /summarize` (v1) / `POST /compact` (v2) on the
+                            // server only returns once the whole compaction is
+                            // DONE (~20 s). Awaiting it here would freeze this loop
+                            // — the very loop that reads the SSE stream — so every
+                            // live event of the compaction (the growing summary
+                            // text) would only be drained after the fact, and then
+                            // immediately wiped by the `session.compacted` reload:
+                            // the summary bubble would never grow live. Run the
+                            // blocking POST off-task so SSE keeps flowing while it
+                            // is written.
+                            //
+                            // The model gate was removed: the v2 server takes the
+                            // model from the session itself (its GET/list carry no
+                            // `model` field at all), and the v1 server accepts the
+                            // ids only as hints — requiring them here silently
+                            // blocked every compact on v2.
                             let task_client = client.clone();
                             let task_compacting = compacting.clone();
                             let task_id = id.clone();
                             tokio::spawn(async move {
-                                match task_client.get_session(&task_id).await {
-                                    Ok(s) => {
-                                        let provider = s["model"]["providerID"].as_str().unwrap_or("");
-                                        let model = s["model"]["id"].as_str().unwrap_or("");
-                                        if provider.is_empty() || model.is_empty() {
-                                            log::error!("summarize: у сессии нет модели: {s}");
-                                        } else {
-                                            match task_client
-                                                .summarize_session(&task_id, provider, model)
-                                                .await
-                                            {
-                                                Ok(()) => {
-                                                    log::info!("summarize {task_id} ({provider}/{model})")
-                                                }
-                                                Err(e) => log::error!("summarize_session: {e}"),
-                                            }
-                                        }
-                                    }
-                                    Err(e) => log::error!("get_session: {e}"),
+                                use opencode_client::types::v2::keys as k;
+                                let mut provider = String::new();
+                                let mut model = String::new();
+                                if let Ok(s) = task_client.get_session(&task_id).await {
+                                    provider = s[k::MODEL][k::PROVIDER_ID]
+                                        .as_str()
+                                        .unwrap_or("")
+                                        .to_string();
+                                    model = s[k::MODEL][k::ID].as_str().unwrap_or("").to_string();
+                                }
+                                match task_client
+                                    .summarize_session(&task_id, &provider, &model)
+                                    .await
+                                {
+                                    Ok(()) => log::info!("summarize {task_id} requested"),
+                                    Err(e) => log::error!("summarize_session: {e}"),
                                 }
                                 // The compaction is over (the buffered
                                 // `session.compacted` also clears this for the
@@ -1019,7 +1251,7 @@ async fn run_stream(
                             match client.abort(id).await {
                                 Ok(_) => {
                                     log::info!("abort {id}");
-                                    set_status(&status, "idle");
+                                    set_server_status(&status, &markers::ServerConnectionStatus::Idle);
                                 }
                                 Err(e) => log::error!("abort: {e}"),
                             }
@@ -1031,7 +1263,14 @@ async fn run_stream(
                             match client.set_model(id, provider, model).await {
                                 Ok(()) => {
                                     log::info!("set_model {id} -> {provider}/{model}");
-                                    refresh_sessions(&client, &sessions).await;
+                                    // Record it immediately so the picker/sessions
+                                    // list reflect the change even before the
+                                    // `session.model.selected` event arrives.
+                                    dispatcher.lock().await.session_models.insert(
+                                        id.clone(),
+                                        (provider.clone(), model.clone()),
+                                    );
+                                    refresh_sessions(&client, &sessions, &dispatcher).await;
                                 }
                                 Err(e) => log::error!("set_model: {e}"),
                             }
@@ -1055,7 +1294,7 @@ async fn run_stream(
                             match client.rename_session(id, title).await {
                                 Ok(()) => {
                                     log::info!("renamed {id} -> {title:?}");
-                                    refresh_sessions(&client, &sessions).await;
+                                    refresh_sessions(&client, &sessions, &dispatcher).await;
                                 }
                                 Err(e) => log::error!("rename_session: {e}"),
                             }
@@ -1071,11 +1310,12 @@ async fn run_stream(
                                         current_session = None;
                                         persist_last_session(None);
                                         set_current_session(&current_session_shared, &current_session);
+                                        sync_status_from_fsm(&dispatcher, &status, current_session.as_deref()).await;
                                         if let Ok(mut g) = todos.lock() {
                                             *g = "[]".to_string();
                                         }
                                     }
-                                    refresh_sessions(&client, &sessions).await;
+                                    refresh_sessions(&client, &sessions, &dispatcher).await;
                                 }
                                 Err(e) => log::error!("delete_session: {e}"),
                             }
@@ -1113,11 +1353,12 @@ async fn run_stream(
                                 current_session = None;
                                 persist_last_session(None);
                                 set_current_session(&current_session_shared, &current_session);
+                                sync_status_from_fsm(&dispatcher, &status, current_session.as_deref()).await;
                                 if let Ok(mut g) = todos.lock() {
                                     *g = "[]".to_string();
                                 }
                             }
-                            refresh_sessions(&client, &sessions).await;
+                            refresh_sessions(&client, &sessions, &dispatcher).await;
                             // After deleting all sessions, immediately create a new one — the chat must not be empty.
                             match client.create_session(None).await {
                                 Ok(sess) => match sess["id"].as_str() {
@@ -1142,11 +1383,12 @@ async fn run_stream(
                                         }
                                         clear_tools(&dispatcher, &tools).await;
                                         set_current_session(&current_session_shared, &current_session);
+                                        sync_status_from_fsm(&dispatcher, &status, current_session.as_deref()).await;
                                         if let Ok(mut g) = todos.lock() {
                                             *g = "[]".to_string();
                                         }
                                         // A new session must appear in the sessions list immediately.
-                                        refresh_sessions(&client, &sessions).await;
+                                        refresh_sessions(&client, &sessions, &dispatcher).await;
                                     }
                                     None => log::error!("delete_all: нет id при создании"),
                                 },
@@ -1217,7 +1459,7 @@ async fn run_stream(
                             }
                         }
                         Cmd::ConsoleLogin => {
-                            if let Err(e) = console_login.start() {
+                            if let Err(e) = console_login.begin(&client).await {
                                 log::warn!("console login: {e}");
                             }
                         }
@@ -1227,6 +1469,11 @@ async fn run_stream(
                         }
                     }
                 }
+
+                // Advance a pending device login: one throttled status poll of
+                // the server's attempt. Event-driven on the server side (it
+                // polls the provider itself); this only reads its answer.
+                console_login.poll(&client).await;
 
                 // Device login finished: on success reload the server config so
                 // the fresh account (org/models) is used, then tell the user.
@@ -1251,7 +1498,7 @@ async fn run_stream(
 
                 for prompt in worker_prompts.lock().map(|mut q| std::mem::take(&mut *q)).unwrap_or_default() {
                     log::info!("QML промпт: {prompt}");
-                    set_status(&status, "busy");
+                    set_server_status(&status, &markers::ServerConnectionStatus::Busy);
                     // Create a session if there is none.
                     if current_session.is_none() {
                         match client.create_session(None).await {
@@ -1267,7 +1514,7 @@ async fn run_stream(
                                     if let Ok(mut q) = worker_pending.lock() {
                                         q.push(svc_line(now_ms(), i18n::K_SESSION_ERROR, &[msg]));
                                     }
-                                    set_status(&status, "error");
+                                    set_server_status(&status, &markers::ServerConnectionStatus::Idle);
                                     continue;
                                 }
                             },
@@ -1281,7 +1528,7 @@ async fn run_stream(
                                         &[emsg],
                                     ));
                                 }
-                                set_status(&status, "error");
+                                set_server_status(&status, &markers::ServerConnectionStatus::Idle);
                                 continue;
                             }
                         }
@@ -1300,34 +1547,57 @@ async fn run_stream(
                         if let Ok(mut q) = worker_pending.lock() {
                             q.push(format!("{REVERTED_TAG}0"));
                         }
-                        if let Err(e) = client.prompt_async(&sid, &prompt, session_agents.get(&sid).cloned()).await {
-                            log::error!("prompt_async: {e}");
-                            let emsg = e.to_string();
-                            if let Ok(mut q) = worker_pending.lock() {
-                                q.push(svc_line(now_ms(), i18n::K_PROMPT_ERROR, &[emsg]));
+                        match client.prompt_async(&sid, &prompt, session_agents.get(&sid).cloned()).await {
+                            Err(e) => {
+                                log::error!("prompt_async: {e}");
+                                let emsg = e.to_string();
+                                if let Ok(mut q) = worker_pending.lock() {
+                                    q.push(svc_line(now_ms(), i18n::K_PROMPT_ERROR, &[emsg]));
+                                }
+                                set_server_status(&status, &markers::ServerConnectionStatus::Idle);
                             }
-                            set_status(&status, "error");
-                        } else {
-                            // The user message will arrive via `message.updated`;
-                            // grab its id to let QML offer revert/fork on the bubble.
-                            expect_user_id = true;
+                            // v2 returns the user-message id in the response:
+                            // hand it straight to QML so the fresh bubble offers
+                            // revert/fork, no SSE wait needed.
+                            Ok(Some(id)) => {
+                                if let Ok(mut q) = worker_pending.lock() {
+                                    q.push(format!("{SET_MSG_ID_TAG}{id}"));
+                                }
+                            }
+                            // No id in the answer: a server anomaly on v2
+                            // (the id is part of a successful response).
+                            Ok(None) => {
+                                log::warn!("prompt_async не вернул id пользовательского сообщения");
+                            }
                         }
                     }
                 }
 
                 // Every ~3 seconds refresh sessions list and TODOs for current session.
                 if ticks % 15 == 0 {
-                    refresh_sessions(&client, &sessions).await;
+                    refresh_sessions(&client, &sessions, &dispatcher).await;
                     if let Some(sid) = current_session.clone() {
                         refresh_todo(&client, &sid, &todos).await;
                     }
+                    // Reconcile the form queue with the server (the SSE event is
+                    // the fast path; this poll is the safety net).
+                    refresh_forms(&client, &dispatcher, &forms, current_session.as_deref()).await;
+                    // Same safety net for the permission requests (the SSE
+                    // event is the fast path).
+                    refresh_permissions(
+                        &client,
+                        &dispatcher,
+                        &permissions,
+                        current_session.as_deref(),
+                    )
+                    .await;
                 }
 
                 // Every ~1 second — snapshot of tools and permission requests for QML.
                 if ticks % 5 == 0 {
                     refresh_tools_json(&dispatcher, &tools).await;
                     refresh_permissions_json(&dispatcher, &permissions).await;
-                    refresh_questions_json(&dispatcher, &questions).await;
+                    refresh_forms_json(&dispatcher, &forms).await;
                 }
             }
         }
@@ -1335,10 +1605,20 @@ async fn run_stream(
 }
 
 /// Load compact sessions list into shared buffer for QML.
+///
+/// `dispatcher` supplies the per-session current model tracked from v2
+/// `session.model.selected` / `session.step.started` / history. The v2 session
+/// list includes `model` only once the server has bound one, so this fills the
+/// gap for sessions whose model we learned another way.
 async fn refresh_sessions(
-    client: &api::OpenCodeClient,
+    client: &impl api::OpenCodeApi,
     sessions: &Arc<std::sync::Mutex<String>>,
+    dispatcher: &event::dispatcher::SharedState,
 ) {
+    let tracked_models: std::collections::HashMap<String, (String, String)> = {
+        let state = dispatcher.lock().await;
+        state.session_models.clone()
+    };
     match client.list_sessions().await {
         Ok(v) => {
             let compact: Vec<serde_json::Value> = v
@@ -1346,38 +1626,51 @@ async fn refresh_sessions(
                 .map(|a| {
                     a.iter()
                         .filter_map(|s| {
-                            let id = s.get("id")?.clone();
+                            let id = s.get(keys::ID)?.clone();
                             let title = s
-                                .get("title")
+                                .get(keys::TITLE)
                                 .cloned()
                                 .unwrap_or(serde_json::Value::String(String::new()));
                             let updated = s
-                                .get("time")
-                                .and_then(|t| t.get("updated"))
+                                .get(keys::TIME)
+                                .and_then(|t| t.get(keys::UPDATED))
                                 .cloned()
                                 .unwrap_or(serde_json::Value::Number(0.into()));
-                            let share_url = s
-                                .get("share")
-                                .and_then(|sh| sh.get("url"))
-                                .cloned()
-                                .unwrap_or(serde_json::Value::String(String::new()));
+                            // Prefer the server's `model` (v1); fall back to the
+                            // model we tracked from `session.model.selected`
+                            // (v2, whose list has no `model`).
+                            let id_str = id.as_str().unwrap_or("");
+                            let tracked = tracked_models.get(id_str);
                             let provider_id = s
-                                .get("model")
-                                .and_then(|m| m.get("providerID"))
+                                .get(keys::MODEL)
+                                .and_then(|m| m.get(keys::PROVIDER_ID))
                                 .cloned()
-                                .unwrap_or(serde_json::Value::String(String::new()));
+                                .unwrap_or_else(|| {
+                                    serde_json::Value::String(
+                                        tracked.map(|(p, _)| p.clone()).unwrap_or_default(),
+                                    )
+                                });
                             let model_id = s
-                                .get("model")
-                                .and_then(|m| m.get("id"))
+                                .get(keys::MODEL)
+                                .and_then(|m| m.get(keys::ID))
                                 .cloned()
-                                .unwrap_or(serde_json::Value::String(String::new()));
-                            let cost = s.get("cost").cloned().unwrap_or(serde_json::Value::Number(0.into()));
-                            let tokens = s.get("tokens").cloned().unwrap_or(serde_json::Value::Null);
+                                .unwrap_or_else(|| {
+                                    serde_json::Value::String(
+                                        tracked.map(|(_, m)| m.clone()).unwrap_or_default(),
+                                    )
+                                });
+                            let cost = s
+                                .get(keys::COST)
+                                .cloned()
+                                .unwrap_or(serde_json::Value::Number(0.into()));
+                            let tokens = s
+                                .get(keys::TOKENS)
+                                .cloned()
+                                .unwrap_or(serde_json::Value::Null);
                             Some(serde_json::json!({
                                 "id": id,
                                 "title": title,
                                 "updated": updated,
-                                "shareUrl": share_url,
                                 "providerID": provider_id,
                                 "modelID": model_id,
                                 "cost": cost,
@@ -1398,7 +1691,7 @@ async fn refresh_sessions(
 
 /// Load session TODOs into shared buffer for QML.
 async fn refresh_todo(
-    client: &api::OpenCodeClient,
+    client: &impl api::OpenCodeApi,
     session_id: &str,
     todos: &Arc<std::sync::Mutex<String>>,
 ) {
@@ -1413,10 +1706,7 @@ async fn refresh_todo(
 }
 
 /// Load providers/models and flatten for QML.
-async fn refresh_models(
-    client: &api::OpenCodeClient,
-    models: &Arc<std::sync::Mutex<String>>,
-) {
+async fn refresh_models(client: &impl api::OpenCodeApi, models: &Arc<std::sync::Mutex<String>>) {
     let v = match client.providers().await {
         Ok(v) => v,
         Err(e) => {
@@ -1487,7 +1777,11 @@ fn refresh_sounds(sounds: &Arc<std::sync::Mutex<String>>) {
                     .chars()
                     .enumerate()
                     .map(|(i, c)| {
-                        if i == 0 { c.to_uppercase().collect::<String>() } else { c.to_string() }
+                        if i == 0 {
+                            c.to_uppercase().collect::<String>()
+                        } else {
+                            c.to_string()
+                        }
                     })
                     .collect::<String>();
                 in_dir.push((pretty, format!("file://{disp}")));
@@ -1506,11 +1800,126 @@ fn refresh_sounds(sounds: &Arc<std::sync::Mutex<String>>) {
     }
 }
 
+/// Render a v2 `MessageInfo[]` history (`GET /api/session/{id}/message`) into
+/// the same feed lines the v1 `load_history` path emits: user bubbles, `[[think]]`
+/// reasoning bubbles, answer text, inline tool rows and compaction notices.
+/// `revert_id` hides the reverted tail (id >= boundary) exactly as in v1.
+///
+/// Returns the feed lines plus the *most recent* assistant model seen in the
+/// history (`(providerID, modelID)`), which the caller stores so the
+/// sessions/picker list can show a model for a session the server never told us
+/// about (v2 session GET/list carry no `model`).
+fn history_lines_v2(
+    arr: &[serde_json::Value],
+    revert_id: Option<&str>,
+) -> (Vec<String>, Option<(String, String)>) {
+    use opencode_client::types::v2::message::{
+        CompactionStatus, Content, MessageBody, MessageInfo,
+    };
+    let mut msgs: Vec<MessageInfo> = Vec::new();
+    for raw in arr {
+        match serde_json::from_value::<MessageInfo>(raw.clone()) {
+            Ok(m) => msgs.push(m),
+            Err(e) => log::warn!("history v2: message is unparseable ({e}) — skipped"),
+        }
+    }
+    msgs.sort_by_key(|m| m.time.created);
+
+    let mut lines: Vec<String> = Vec::new();
+    let mut last_model: Option<(String, String)> = None;
+    for m in &msgs {
+        // Hide the reverted tail (mirror SessionRevert.cleanup boundaries).
+        if let Some(r) = revert_id {
+            if !m.id.is_empty() && m.id.as_bytes() >= r.as_bytes() {
+                continue;
+            }
+        }
+        let created = m.time.created;
+        match &m.body {
+            MessageBody::User { text, .. } => {
+                if !text.trim().is_empty() {
+                    lines.push(proto_user_line(created, &m.id, text));
+                }
+            }
+            MessageBody::Assistant(a) => {
+                if let Some(mdl) = &a.model {
+                    last_model = Some((mdl.providerID.clone(), mdl.id.clone()));
+                }
+                // Reasoning first (mirrors the live stream), then answer, then tool rows.
+                let reasoning_ts = created;
+                let mut reasoning = String::new();
+                let mut text = String::new();
+                let mut tool_lines: Vec<String> = Vec::new();
+                for c in &a.content {
+                    match c {
+                        Content::Text { text: t } => text.push_str(t),
+                        Content::Reasoning { text: t, time } => {
+                            let _ = time;
+                            reasoning.push_str(t);
+                        }
+                        Content::Tool { id, name, state, .. } => {
+                            if !id.is_empty() {
+                                tool_lines.push(proto_tool_line(
+                                    created,
+                                    id,
+                                    name,
+                                    state.ui_status(),
+                                    &state.description(),
+                                ));
+                            }
+                        }
+                        Content::Unknown => log::warn!(
+                            "history v2: assistant content type is not implemented in the UI (skipped)"
+                        ),
+                    }
+                }
+                if !reasoning.trim().is_empty() {
+                    let body = format!("{THINK_TAG}{}", reasoning.trim_end());
+                    lines.push(proto_line(reasoning_ts, &body));
+                }
+                if !text.trim().is_empty() {
+                    lines.push(proto_line(created, &text));
+                }
+                lines.extend(tool_lines);
+            }
+            MessageBody::Compaction { status, .. } => {
+                // The summary text is the compacted history itself — render it
+                // as a normal answer bubble (NOT just a generic "compacted"
+                // marker), so the bubble that grew live during the compaction
+                // does not vanish when this reload replaces the feed. `running`
+                // has the growing text; `completed` the final summary.
+                match status {
+                    CompactionStatus::Running { summary, .. }
+                    | CompactionStatus::Completed { summary, .. } => {
+                        if !summary.trim().is_empty() {
+                            lines.push(proto_line(created, summary.trim_end()));
+                        }
+                    }
+                    // A failed compaction is not a "context compacted" marker: a
+                    // benign "nothing to compact yet" carries only an error, so
+                    // do not render a misleading success line. (The live feed
+                    // already shows the informational notice when it happens.)
+                    CompactionStatus::Failed { .. } => {}
+                    CompactionStatus::Unknown => log::warn!(
+                        "history v2: compaction status is not implemented in the UI (skipped)"
+                    ),
+                }
+            }
+            // Switches, synthetic/system/skill/shell/idle messages and unknown
+            // kinds do not render in the feed (mirrors the v1 path skipping
+            // non-user/assistant roles).
+            _ => {}
+        }
+    }
+    (lines, last_model)
+}
+
 /// Load session history (info/parts pairs) and push strings to QML queue.
 async fn load_history(
-    client: &api::OpenCodeClient,
+    client: &impl api::OpenCodeApi,
     session_id: &str,
     pending: &Arc<std::sync::Mutex<Vec<String>>>,
+    dispatcher: &event::dispatcher::SharedState,
 ) {
     // Revert boundary: messages with `id >= revert.messageID` are hidden. The
     // server does not flag them — it only records the boundary on the session
@@ -1518,7 +1927,9 @@ async fn load_history(
     // filter is ours. The presence of a boundary also drives the QML "Restore"
     // banner (control line `[[reverted]]1`).
     let revert_id = match client.get_session(session_id).await {
-        Ok(s) => s[keys::REVERT][keys::MESSAGE_ID].as_str().map(str::to_string),
+        Ok(s) => s[keys::REVERT][keys::MESSAGE_ID]
+            .as_str()
+            .map(str::to_string),
         Err(e) => {
             log::warn!("get_session (revert state): {e}");
             None
@@ -1532,6 +1943,32 @@ async fn load_history(
     }
     match client.session_messages(session_id).await {
         Ok(v) => {
+            let arr = v.as_array().cloned().unwrap_or_default();
+            // v2 returns `MessageInfo[]` inline (no `{info, parts}` wrapper — the
+            // v2 body carries its parts as `content[]`). Route it to the v2
+            // renderer so history renders the same way as the v1 path does.
+            let is_v2 = arr
+                .first()
+                .map(|e| e.get(keys::INFO).is_none() && e.get(keys::TYPE).is_some())
+                .unwrap_or(false);
+            if is_v2 {
+                let (lines, model) = history_lines_v2(&arr, revert_id.as_deref());
+                log::info!("история сессии {session_id} (v2): {} строк", lines.len());
+                // Remember the model the history reveals (the source of truth on
+                // v2, where session GET/list carry none) so the picker checkmark
+                // works for a session whose model we never saw selected live.
+                if let Some(m) = model {
+                    dispatcher
+                        .lock()
+                        .await
+                        .session_models
+                        .insert(session_id.to_string(), m);
+                }
+                if let Ok(mut q) = pending.lock() {
+                    q.extend(lines);
+                }
+                return;
+            }
             let mut items: Vec<&serde_json::Value> =
                 v.as_array().map(|a| a.iter().collect()).unwrap_or_default();
             items.sort_by_key(|e| {
@@ -1652,10 +2089,38 @@ async fn load_history(
     }
 }
 
-/// Thread-safely set status for QML (no Qt signals).
-fn set_status(status: &Arc<std::sync::Mutex<String>>, s: &str) {
+/// Thread-safely set server connection status for QML (no Qt signals).
+fn set_server_status(status: &Arc<std::sync::Mutex<String>>, s: &markers::ServerConnectionStatus) {
     if let Ok(mut g) = status.lock() {
-        *g = s.to_string();
+        *g = s.to_status_string();
+    }
+}
+
+/// Mirror the turn status of the session on screen (kept by the dispatcher's
+/// per-session FSM) into the QML token. Called after the UI switches sessions:
+/// the token is global, so it must follow the session the user now sees.
+///
+/// Only a turn token is replaced — `connecting`/`error` belong to the SSE
+/// connection, not to a session, and must survive a switch.
+async fn sync_status_from_fsm(
+    dispatcher: &event::dispatcher::SharedState,
+    status: &Arc<std::sync::Mutex<String>>,
+    current_session: Option<&str>,
+) {
+    let token = {
+        let st = dispatcher.lock().await;
+        match current_session {
+            Some(sid) => event::dispatcher::status_token_for(&st, sid),
+            None => markers::STATUS_IDLE.to_string(),
+        }
+    };
+    let Ok(mut g) = status.lock() else { return };
+    let is_turn = g.is_empty()
+        || g.as_str() == markers::STATUS_IDLE
+        || g.as_str() == markers::STATUS_BUSY
+        || g.starts_with(markers::STATUS_RETRY_PREFIX);
+    if is_turn {
+        *g = token;
     }
 }
 
@@ -1683,7 +2148,9 @@ fn last_session_path() -> Option<std::path::PathBuf> {
 
 /// Remember current session (`None` — clear record).
 fn persist_last_session(session: Option<&str>) {
-    let Some(path) = last_session_path() else { return };
+    let Some(path) = last_session_path() else {
+        return;
+    };
     match session {
         Some(id) => {
             if let Err(e) = std::fs::write(&path, id) {
@@ -1699,11 +2166,13 @@ fn persist_last_session(session: Option<&str>) {
 /// On startup, open the last session: check existence, load history.
 /// If there is no last session — create a new one (chat must not be empty).
 async fn resume_last_session(
-    client: &api::OpenCodeClient,
+    client: &impl api::OpenCodeApi,
     current_session: &mut Option<String>,
     current_session_shared: &Arc<std::sync::Mutex<String>>,
     pending: &Arc<std::sync::Mutex<Vec<String>>>,
     todos: &Arc<std::sync::Mutex<String>>,
+    dispatcher: &event::dispatcher::SharedState,
+    sessions: &Arc<std::sync::Mutex<String>>,
 ) {
     let last: Option<String> = last_session_path()
         .and_then(|path| std::fs::read_to_string(&path).ok())
@@ -1758,8 +2227,53 @@ async fn resume_last_session(
     *current_session = Some(sid.clone());
     persist_last_session(Some(&sid));
     set_current_session(current_session_shared, &*current_session);
-    load_history(client, &sid, pending).await;
+    load_history(client, &sid, pending, dispatcher).await;
+    ensure_session_model(client, &sid, dispatcher).await;
+    // History may have revealed the session's model (v2): republish the list so
+    // the sessions/picker show it right away.
+    refresh_sessions(client, sessions, dispatcher).await;
     refresh_todo(client, &sid, todos).await;
+}
+
+/// Make sure `session_id` has a model bound, so the picker has something to
+/// check. On v2 a session may have no `model` (the server only includes one once
+/// a model is bound); when the history revealed none either, bind the server's
+/// default model (`GET /api/model/default`). No-op when a model is already
+/// known.
+async fn ensure_session_model(
+    client: &impl api::OpenCodeApi,
+    session_id: &str,
+    dispatcher: &event::dispatcher::SharedState,
+) {
+    if dispatcher
+        .lock()
+        .await
+        .session_models
+        .contains_key(session_id)
+    {
+        return;
+    }
+    let default = match client.default_model().await {
+        Ok(m) => m,
+        Err(e) => {
+            log::warn!("default_model: {e}");
+            None
+        }
+    };
+    let Some((provider, model)) = default else {
+        return;
+    };
+    match client.set_model(session_id, &provider, &model).await {
+        Ok(()) => {
+            log::info!("bound default model {provider}/{model} to {session_id}");
+            dispatcher
+                .lock()
+                .await
+                .session_models
+                .insert(session_id.to_string(), (provider, model));
+        }
+        Err(e) => log::warn!("bind default model: {e}"),
+    }
 }
 
 /// Reset tools snapshot (when switching sessions so old tools don't mix into new history).
@@ -1803,7 +2317,18 @@ async fn refresh_tools_json(
     }
 }
 
+/// Store the last failed permission answer for the UI (empty — no error).
+fn set_permission_error(buf: &Arc<std::sync::Mutex<String>>, msg: &str) {
+    if let Ok(mut g) = buf.lock() {
+        *g = msg.to_string();
+    }
+}
+
 /// Snapshot of permission requests for the dialog.
+///
+/// Each request keeps the server's own shape (`{id, sessionID, action,
+/// resources, message, save, source}`) plus the answer options — the dialog
+/// shows what is asked (`message`/`resources`) and who asked (`source`).
 async fn refresh_permissions_json(
     dispatcher: &event::dispatcher::SharedState,
     permissions: &Arc<std::sync::Mutex<String>>,
@@ -1823,10 +2348,16 @@ async fn refresh_permissions_json(
         .map(|p| {
             serde_json::json!({
                 "id": p.id,
-                "sessionID": p.sessionID,
+                "sessionID": p.session_id,
                 "action": p.action,
                 "resources": p.resources,
-                "metadata": p.metadata.as_ref().map(|m| m.to_string()).unwrap_or_default(),
+                "message": p.message.as_deref().unwrap_or_default(),
+                "save": p.save.clone().unwrap_or_default(),
+                "source": p.source.as_ref().map(|s| serde_json::json!({
+                    "type": s.kind,
+                    "messageID": s.message_id,
+                    "id": s.id,
+                })),
                 "options": options,
             })
         })
@@ -1838,42 +2369,139 @@ async fn refresh_permissions_json(
     }
 }
 
-/// Snapshot of pending questions from the model for the dialog.
-async fn refresh_questions_json(
+/// Reconcile the permission queue with the server.
+///
+/// The SSE `permission.asked` event is the fast path; this poll is the safety
+/// net (a request created while the client was offline, a lost SSE frame, or a
+/// request the server already settled — the ghost card). The server's list is
+/// authoritative: the queue is replaced with it, the current session's request
+/// first.
+async fn refresh_permissions(
+    client: &impl api::OpenCodeApi,
     dispatcher: &event::dispatcher::SharedState,
-    questions: &Arc<std::sync::Mutex<String>>,
+    permissions: &Arc<std::sync::Mutex<String>>,
+    current_session: Option<&str>,
 ) {
-    let st = dispatcher.lock().await;
-    let pending = &st.questions.pending;
-    let arr: Vec<serde_json::Value> = pending
+    let mut list = match client.list_permissions().await {
+        Ok(Some(l)) => l,
+        Ok(None) => return,
+        Err(e) => {
+            log::warn!("list_permissions: {e}");
+            // A server without the location route: ask the current session.
+            let sid = match current_session {
+                Some(s) => s,
+                None => return,
+            };
+            match client.list_session_permissions(sid).await {
+                Ok(Some(l)) => l,
+                _ => return,
+            }
+        }
+    };
+    // The request of the session the user is looking at comes first.
+    if let Some(sid) = current_session {
+        if let Some(idx) = list.iter().position(|p| p.session_id == sid) {
+            let p = list.remove(idx);
+            list.insert(0, p);
+        }
+    }
+    {
+        let mut st = dispatcher.lock().await;
+        st.permissions.replace(list);
+    }
+    refresh_permissions_json(dispatcher, permissions).await;
+}
+
+/// Snapshot of the saved ("always allow") permission rules.
+async fn refresh_saved_permissions_json(
+    client: &impl api::OpenCodeApi,
+    saved: &Arc<std::sync::Mutex<String>>,
+) {
+    let list = match client.list_saved_permissions().await {
+        Ok(Some(l)) => l,
+        Ok(None) => return,
+        Err(e) => {
+            log::warn!("list_saved_permissions: {e}");
+            return;
+        }
+    };
+    let arr: Vec<serde_json::Value> = list
         .iter()
-        .map(|q| {
+        .map(|p| {
             serde_json::json!({
-                "id": q.id,
-                "sessionID": q.sessionID,
-                "questions": q
-                    .questions
-                    .iter()
-                    .map(|qi| {
-                        serde_json::json!({
-                            "header": qi.header,
-                            "question": qi.question,
-                            "multiple": qi.multiple.unwrap_or(false),
-                            "custom": qi.custom.unwrap_or(true),
-                            "options": qi.options.iter().map(|o| serde_json::json!({
-                                "label": o.label,
-                                "description": o.description,
-                            })).collect::<Vec<_>>(),
-                        })
-                    })
-                    .collect::<Vec<_>>(),
+                "id": p.id,
+                "action": p.action,
+                "resource": p.resource,
+                "projectID": p.project_id,
             })
         })
         .collect();
-    drop(st);
-    let qj = serde_json::Value::Array(arr).to_string();
-    if let Ok(mut g) = questions.lock() {
-        *g = qj;
+    let sj = serde_json::Value::Array(arr).to_string();
+    if let Ok(mut g) = saved.lock() {
+        *g = sj;
     }
 }
 
+/// Snapshot of the pending forms (opencode v2) for the form dialog.
+///
+/// The forms go to QML in the server's own shape (`Form.Info`), so the QML
+/// side reads the field list as it arrived (no re-mapping, no lost fields).
+async fn refresh_forms_json(
+    dispatcher: &event::dispatcher::SharedState,
+    forms: &Arc<std::sync::Mutex<String>>,
+) {
+    let st = dispatcher.lock().await;
+    let arr: Vec<serde_json::Value> = st
+        .forms
+        .pending
+        .iter()
+        .filter_map(|f| serde_json::to_value(f).ok())
+        .collect();
+    drop(st);
+    let fj = serde_json::Value::Array(arr).to_string();
+    if let Ok(mut g) = forms.lock() {
+        *g = fj;
+    }
+}
+
+/// Reconcile the form queue with the server.
+///
+/// The SSE `form.created` event is the fast path; this poll is the safety
+/// net (a form created while the client was offline, or a form settled
+/// elsewhere). The server's list is authoritative: the queue is replaced with
+/// it, the current session's form first.
+async fn refresh_forms(
+    client: &impl api::OpenCodeApi,
+    dispatcher: &event::dispatcher::SharedState,
+    forms: &Arc<std::sync::Mutex<String>>,
+    current_session: Option<&str>,
+) {
+    let mut list = match client.list_forms().await {
+        Ok(Some(l)) => l,
+        Ok(None) => return,
+        Err(e) => {
+            log::warn!("list_forms: {e}");
+            // A server without the global route: ask the current session.
+            let sid = match current_session {
+                Some(s) => s,
+                None => return,
+            };
+            match client.list_session_forms(sid).await {
+                Ok(Some(l)) => l,
+                _ => return,
+            }
+        }
+    };
+    // The form of the session the user is looking at comes first.
+    if let Some(sid) = current_session {
+        if let Some(idx) = list.iter().position(|f| f.session_id == sid) {
+            let f = list.remove(idx);
+            list.insert(0, f);
+        }
+    }
+    {
+        let mut st = dispatcher.lock().await;
+        st.forms.replace(list);
+    }
+    refresh_forms_json(dispatcher, forms).await;
+}

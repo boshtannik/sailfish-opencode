@@ -13,7 +13,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::settings::Settings;
-use crate::types::event::PermissionReplyKind;
+use crate::types::v2::permission::PermissionReplyKind;
 
 /// Commands that QML sends to the worker as JSON `{"cmd": <name>, ...fields}`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,21 +52,29 @@ pub enum Cmd {
     Unrevert {
         id: String,
     },
+    /// Answer a permission request (opencode v2).
     Permission {
         session: String,
         id: String,
         response: PermissionReplyKind,
+        /// Optional reason shown to the model (`{decision, message?}`).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message: Option<String>,
     },
-    /// Answer (or reject) a question from the model.
-    Question {
-        /// requestID of the `question.asked` event.
+    /// Revoke a saved ("always allow") permission rule.
+    RemoveSavedPermission {
         id: String,
-        /// Chosen option labels per question, in question order.
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        answers: Vec<Vec<String>>,
-        /// Reject the request instead of answering.
-        #[serde(default, skip_serializing_if = "is_false")]
-        reject: bool,
+    },
+    /// Answer (or cancel) a form from the model (opencode v2).
+    Form {
+        /// The session the form belongs to — the v2 routes are session-scoped
+        /// (`POST /api/session/{sessionID}/form/{formID}/reply`).
+        session: String,
+        /// The form id (`frm_…`).
+        id: String,
+        /// The answer map `{fieldKey: value}`; absent — cancel the form.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        answer: Option<serde_json::Value>,
     },
     /// Set the working directory for opencode serve (cwd).
     SetWorkdir {
@@ -81,12 +89,6 @@ pub enum Cmd {
     /// Dev-only (see `bridge/mock_permission`): the variant is absent in release builds.
     #[cfg(debug_assertions)]
     MockPermission,
-    Share {
-        id: String,
-    },
-    Unshare {
-        id: String,
-    },
     Summarize {
         id: String,
     },
@@ -147,10 +149,6 @@ pub enum Cmd {
         id: String,
     },
     VoiceCatalogUpdate,
-}
-
-fn is_false(b: &bool) -> bool {
-    !*b
 }
 
 impl Cmd {
