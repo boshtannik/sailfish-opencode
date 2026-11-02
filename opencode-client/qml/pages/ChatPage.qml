@@ -1582,8 +1582,25 @@ Item {
             right: parent.right
             bottom: parent.bottom
         }
-        // Single input level: the panel height = the height of one row of buttons.
-        height: Theme.itemSizeMedium + Theme.paddingMedium
+        // One row of buttons; the text field grows with its text (up to
+        // about five lines) and the buttons stay on the bottom line.
+        height: (input.visible ? input.height : Theme.itemSizeMedium) + Theme.paddingMedium
+        Behavior on height { NumberAnimation { duration: 100; easing.type: Easing.OutQuad } }
+        readonly property int maxInputHeight: Theme.itemSizeMedium
+                                              + 4 * Math.round(input.font.pixelSize * 1.3)
+
+        // Rounded field behind the text input.
+        Rectangle {
+            visible: input.visible
+            x: input.x
+            y: input.y + Theme.paddingSmall / 2
+            width: input.width
+            height: input.height - Theme.paddingSmall
+            radius: Math.min(height / 2, Theme.itemSizeMedium / 2)
+            color: Theme.rgba(Theme.primaryColor, input.activeFocus ? 0.10 : 0.06)
+            border.width: input.activeFocus ? 1 : 0
+            border.color: Theme.rgba(Theme.highlightColor, 0.4)
+        }
 
         // ── Fixed input panel layouts ──────────────────────────────────────
         // There are few variants — we define each explicitly via State (anchors), without
@@ -1701,7 +1718,8 @@ Item {
             visible: false
             width: Theme.itemSizeMedium
             height: Theme.itemSizeMedium
-            anchors.verticalCenter: inputPanel.verticalCenter
+            anchors.bottom: inputPanel.bottom
+            anchors.bottomMargin: Theme.paddingMedium / 2
             // The horizontal anchor is set only by state (left/center/right),
             // so that no anchor conflict arises when centering.
             icon.source: (appWindow.recording || appWindow.recognizing)
@@ -1736,7 +1754,8 @@ Item {
             anchors {
                 right: inputPanel.right
                 rightMargin: Theme.paddingSmall
-                verticalCenter: inputPanel.verticalCenter
+                bottom: inputPanel.bottom
+                bottomMargin: Theme.paddingMedium / 2
             }
             icon.source: "image://theme/icon-m-enter-accept"
             // A pending retry is "busy" for the agent but not for the user: the
@@ -1758,7 +1777,8 @@ Item {
             anchors {
                 right: inputPanel.right
                 rightMargin: Theme.paddingSmall
-                verticalCenter: inputPanel.verticalCenter
+                bottom: inputPanel.bottom
+                bottomMargin: Theme.paddingMedium / 2
             }
             icon.source: "image://theme/icon-m-stop"
             onClicked: appWindow.stopAgent()
@@ -1779,9 +1799,11 @@ Item {
             labelVisible: false
             verticalAlignment: Text.AlignVCenter
             horizontalAlignment: Text.AlignLeft
-            // One line of the same height as the buttons: the bottom aligns to one level.
-            height: Theme.itemSizeMedium
-            anchors.verticalCenter: inputPanel.verticalCenter
+            // At least one button row tall, growing with the text.
+            height: Math.max(Theme.itemSizeMedium,
+                             Math.min(implicitHeight, inputPanel.maxInputHeight))
+            anchors.bottom: inputPanel.bottom
+            anchors.bottomMargin: Theme.paddingMedium / 2
             // Default anchors (width in the initial layout [input, send]);
             // the state overrides them for the chosen scheme.
             anchors.left: inputPanel.left
