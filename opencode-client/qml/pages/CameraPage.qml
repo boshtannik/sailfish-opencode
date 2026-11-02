@@ -17,6 +17,22 @@ Page {
     property string error: ""
     // Seconds recorded so far (shown while recording).
     property int recordSeconds: 0
+    // Flash: photos cycle off → auto → on; video toggles the torch.
+    property int flashMode: Camera.FlashOff
+
+    function nextFlash() {
+        if (cameraPage.videoMode)
+            cameraPage.flashMode = cameraPage.flashMode === Camera.FlashVideoLight
+                                   ? Camera.FlashOff : Camera.FlashVideoLight
+        else if (cameraPage.flashMode === Camera.FlashOff)
+            cameraPage.flashMode = Camera.FlashAuto
+        else if (cameraPage.flashMode === Camera.FlashAuto)
+            cameraPage.flashMode = Camera.FlashOn
+        else
+            cameraPage.flashMode = Camera.FlashOff
+    }
+    // Switching photo/video starts with the flash off (as the Jolla camera).
+    onVideoModeChanged: cameraPage.flashMode = Camera.FlashOff
 
     allowedOrientations: Orientation.Portrait
     backNavigation: !recording
@@ -64,6 +80,7 @@ Page {
         cameraState: cameraPage.status === PageStatus.Active || cameraPage.recording
                      ? Camera.ActiveState : Camera.UnloadedState
         metaData.orientation: camera.orientation
+        flash.mode: cameraPage.flashMode
 
         imageCapture {
             onImageSaved: cameraPage.finish(path)
@@ -108,11 +125,54 @@ Page {
         onTriggered: cameraPage.recordSeconds++
     }
 
-    // ── top: recording time / error ──
+    // ── top bar: close, recording time / error, flash ──
+    Rectangle {
+        id: topBar
+        anchors {
+            left: parent.left
+            right: parent.right
+            top: parent.top
+        }
+        height: Theme.itemSizeLarge
+        gradient: Gradient {
+            GradientStop { position: 0.0; color: Theme.rgba("black", 0.55) }
+            GradientStop { position: 1.0; color: "transparent" }
+        }
+
+        IconButton {
+            anchors {
+                left: parent.left
+                leftMargin: Theme.paddingMedium
+                verticalCenter: parent.verticalCenter
+            }
+            enabled: !cameraPage.recording
+            icon.source: "image://theme/icon-m-close?white"
+            onClicked: pageStack.pop()
+        }
+
+        IconButton {
+            anchors {
+                right: parent.right
+                rightMargin: Theme.paddingMedium
+                verticalCenter: parent.verticalCenter
+            }
+            // Front cameras usually have no flash.
+            visible: camera.position !== Camera.FrontFace
+            icon.source: {
+                switch (cameraPage.flashMode) {
+                case Camera.FlashAuto: return "image://theme/icon-camera-flash-automatic?white"
+                case Camera.FlashOn:
+                case Camera.FlashVideoLight: return "image://theme/icon-camera-flash-on?white"
+                default: return "image://theme/icon-camera-flash-off?white"
+                }
+            }
+            onClicked: cameraPage.nextFlash()
+        }
+    }
+
     Label {
         anchors {
-            top: parent.top
-            topMargin: Theme.paddingLarge * 2
+            verticalCenter: topBar.verticalCenter
             horizontalCenter: parent.horizontalCenter
         }
         visible: cameraPage.recording || cameraPage.error !== ""
@@ -206,6 +266,7 @@ Page {
                     var cams = QtMultimedia.availableCameras
                     for (var i = 0; i < cams.length; i++) {
                         if (cams[i].position === want) {
+                            cameraPage.flashMode = Camera.FlashOff
                             camera.deviceId = cams[i].deviceId
                             return
                         }
