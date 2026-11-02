@@ -1104,6 +1104,22 @@ lang drücken — entfernen</translation>
         <source>this session no longer exists. Open another session or start a new one</source>
         <translation>diese Sitzung existiert nicht mehr. Öffne eine andere Sitzung oder starte eine neue</translation>
     </message>
+    <message>
+        <source>busy</source>
+        <translation>beschäftigt</translation>
+    </message>
+    <message>
+        <source>connecting</source>
+        <translation>verbinde</translation>
+    </message>
+    <message>
+        <source>error</source>
+        <translation>Fehler</translation>
+    </message>
+    <message>
+        <source>idle</source>
+        <translation>bereit</translation>
+    </message>
 </context>
 <context>
     <name>ModelPickerPage</name>

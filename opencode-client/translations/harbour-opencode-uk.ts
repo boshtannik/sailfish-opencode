@@ -1104,6 +1104,22 @@ long press — remove</source>
         <source>this session no longer exists. Open another session or start a new one</source>
         <translation>цієї сесії більше немає. Відкрийте іншу сесію або почніть нову</translation>
     </message>
+    <message>
+        <source>busy</source>
+        <translation>працює</translation>
+    </message>
+    <message>
+        <source>connecting</source>
+        <translation>підключення</translation>
+    </message>
+    <message>
+        <source>error</source>
+        <translation>помилка</translation>
+    </message>
+    <message>
+        <source>idle</source>
+        <translation>готовий</translation>
+    </message>
 </context>
 <context>
     <name>ModelPickerPage</name>

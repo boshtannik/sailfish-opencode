@@ -1104,6 +1104,22 @@ pitkä painallus — poista</translation>
         <source>this session no longer exists. Open another session or start a new one</source>
         <translation>tätä istuntoa ei enää ole. Avaa toinen istunto tai aloita uusi</translation>
     </message>
+    <message>
+        <source>busy</source>
+        <translation>työskentelee</translation>
+    </message>
+    <message>
+        <source>connecting</source>
+        <translation>yhdistetään</translation>
+    </message>
+    <message>
+        <source>error</source>
+        <translation>virhe</translation>
+    </message>
+    <message>
+        <source>idle</source>
+        <translation>valmis</translation>
+    </message>
 </context>
 <context>
     <name>ModelPickerPage</name>

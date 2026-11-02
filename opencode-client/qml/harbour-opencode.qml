@@ -1126,6 +1126,19 @@ ApplicationWindow {
         }
     }
 
+    // Display text of a server status (the worker sends fixed keys).
+    function statusLabel(s) {
+        switch (s) {
+        case app.kServerStatusConnecting: return qsTr("connecting")
+        case app.kServerStatusIdle:       return qsTr("idle")
+        case app.kServerStatusBusy:       return qsTr("busy")
+        case app.kServerStatusError:      return qsTr("error")
+        default:
+            console.warn("statusLabel: unknown server status '" + s + "' shown as-is")
+            return s
+        }
+    }
+
 
 
     // Base status independent of the retry detail token (`retry|…` counts as

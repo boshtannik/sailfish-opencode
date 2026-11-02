@@ -1111,6 +1111,22 @@ long press — remove</source>
         <source>Your own answer…</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>busy</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>connecting</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>error</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>idle</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>ModelPickerPage</name>

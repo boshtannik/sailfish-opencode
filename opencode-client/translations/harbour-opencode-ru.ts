@@ -1118,6 +1118,22 @@ long press — remove</source>
         <source>Your own answer…</source>
         <translation>Свой ответ…</translation>
     </message>
+    <message>
+        <source>busy</source>
+        <translation>работает</translation>
+    </message>
+    <message>
+        <source>connecting</source>
+        <translation>подключение</translation>
+    </message>
+    <message>
+        <source>error</source>
+        <translation>ошибка</translation>
+    </message>
+    <message>
+        <source>idle</source>
+        <translation>готов</translation>
+    </message>
 </context>
 <context>
     <name>ModelPickerPage</name>

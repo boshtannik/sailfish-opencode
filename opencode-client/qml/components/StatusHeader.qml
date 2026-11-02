@@ -67,7 +67,7 @@ Item {
             rightMargin: Theme.horizontalPageMargin
             verticalCenter: parent.verticalCenter
         }
-        text: statusHeader.retry ? qsTr("waiting…") : appWindow.statusText
+        text: statusHeader.retry ? qsTr("waiting…") : appWindow.statusLabel(appWindow.statusText)
         width: Math.min(implicitWidth, statusHeader.width * 0.4)
         elide: Text.ElideRight
         color: appWindow.statusColor(appWindow.statusText)
