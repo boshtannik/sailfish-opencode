@@ -170,6 +170,32 @@ Item {
                 onDownChanged: if (!down) appWindow.setIconScale(sliderValue / 100)
             }
 
+            // The input bar icons at the chosen size (mic, paperclip, send).
+            Row {
+                anchors.horizontalCenter: parent.horizontalCenter
+                spacing: Theme.paddingLarge * 2
+                Repeater {
+                    model: ["image://theme/icon-m-mic", "image://theme/icon-m-attach",
+                            "image://theme/icon-m-enter-accept"]
+                    Icon {
+                        source: modelData
+                        width: globalSettingsPage.iconPreviewSize
+                        height: globalSettingsPage.iconPreviewSize
+                        sourceSize.width: globalSettingsPage.iconPreviewSize
+                        sourceSize.height: globalSettingsPage.iconPreviewSize
+                    }
+                }
+            }
+            Label {
+                x: Theme.horizontalPageMargin
+                width: parent.width - 2 * Theme.horizontalPageMargin
+                horizontalAlignment: Text.AlignHCenter
+                text: qsTr("Message buttons and the input bar (mic, attach, send)")
+                wrapMode: Text.Wrap
+                color: Theme.secondaryColor
+                font.pixelSize: appWindow.fs(Theme.fontSizeExtraSmall)
+            }
+
             TextSwitch {
                 text: qsTr("Label thinking and answers")
                 description: qsTr("Show \"Answer\" above the model's replies; thinking is always marked")

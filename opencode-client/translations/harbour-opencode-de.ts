@@ -391,6 +391,10 @@ Sprachantworten zu aktivieren (Einstellungen → Sprachmodelle).</translation>
         <source>Icon size</source>
         <translation>Symbolgröße</translation>
     </message>
+    <message>
+        <source>Message buttons and the input bar (mic, attach, send)</source>
+        <translation>Nachrichtenschaltflächen und die Eingabeleiste (Mikrofon, Anhang, Senden)</translation>
+    </message>
 </context>
 <context>
     <name>SessionSettingsPage</name>

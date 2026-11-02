@@ -393,6 +393,10 @@ voice answers (Settings → Voice models).</source>
         <source>Icon size</source>
         <translation>Размер значков</translation>
     </message>
+    <message>
+        <source>Message buttons and the input bar (mic, attach, send)</source>
+        <translation>Кнопки сообщений и панель ввода (микрофон, вложение, отправка)</translation>
+    </message>
 </context>
 <context>
     <name>SessionSettingsPage</name>

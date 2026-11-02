@@ -36,6 +36,9 @@ Item {
     readonly property int msgIconSize: Math.round(Theme.iconSizeMedium * appWindow.iconScale)
     readonly property int smallButtonSize: Math.round(Theme.itemSizeSmall * appWindow.iconScale)
     readonly property int smallIconSize: Math.round(Theme.iconSizeSmallPlus * appWindow.iconScale)
+    // Input bar buttons (mic, send/stop, paperclip) follow Icon size too.
+    readonly property int barButtonSize: Math.round(Theme.itemSizeMedium * appWindow.iconScale)
+    readonly property int barIconSize: Math.round(Theme.iconSizeMedium * appWindow.iconScale)
 
     // ── Mini-markdown → HTML (Text.RichText) ──────────────────────────────
     // No third-party libraries: headings, lists, quotes, bold/italic,
@@ -1584,7 +1587,7 @@ Item {
         }
         // One row of buttons; the text field grows with its text (up to
         // about five lines) and the buttons stay on the bottom line.
-        height: Math.max(Theme.itemSizeMedium, input.visible ? input.height : 0) + Theme.paddingMedium
+        height: Math.max(chatPage.barButtonSize, input.visible ? input.height : 0) + Theme.paddingMedium
         Behavior on height { NumberAnimation { duration: 100; easing.type: Easing.OutQuad } }
         readonly property int maxInputHeight: Theme.itemSizeMedium
                                               + 4 * Math.round(input.font.pixelSize * 1.3)
@@ -1594,12 +1597,12 @@ Item {
             visible: input.visible
             x: input.x
             width: input.width
-            height: Math.max(Theme.itemSizeMedium - Theme.paddingMedium, input.height)
+            height: Math.max(chatPage.barButtonSize - Theme.paddingMedium, input.height)
             // Centred on the text: the field has a little more margin below
             // its text than above.
             y: input.y + (input.height - height) / 2
                - (Theme.paddingMedium - Theme.paddingSmall) / 2
-            radius: Math.min(height / 2, Theme.itemSizeMedium / 2)
+            radius: Math.min(height / 2, chatPage.barButtonSize / 2)
             color: Theme.rgba(Theme.primaryColor, input.activeFocus ? 0.10 : 0.06)
             border.width: input.activeFocus ? 1 : 0
             border.color: Theme.rgba(Theme.highlightColor, 0.4)
@@ -1719,8 +1722,12 @@ Item {
         IconButton {
             id: mic
             visible: false
-            width: Theme.itemSizeMedium
-            height: Theme.itemSizeMedium
+            width: chatPage.barButtonSize
+            height: chatPage.barButtonSize
+            icon.width: chatPage.barIconSize
+            icon.height: chatPage.barIconSize
+            icon.sourceSize.width: chatPage.barIconSize
+            icon.sourceSize.height: chatPage.barIconSize
             anchors.bottom: inputPanel.bottom
             anchors.bottomMargin: Theme.paddingMedium / 2
             // The horizontal anchor is set only by state (left/center/right),
@@ -1752,8 +1759,12 @@ Item {
             // During a retry the agent is "busy" but nothing is generating:
             // show the (disabled) send button instead of an unusable stop.
             visible: !chatPage.busy || chatPage.retryInfo !== null
-            width: Theme.itemSizeMedium
-            height: Theme.itemSizeMedium
+            width: chatPage.barButtonSize
+            height: chatPage.barButtonSize
+            icon.width: chatPage.barIconSize
+            icon.height: chatPage.barIconSize
+            icon.sourceSize.width: chatPage.barIconSize
+            icon.sourceSize.height: chatPage.barIconSize
             anchors {
                 right: inputPanel.right
                 rightMargin: Theme.paddingSmall
@@ -1775,8 +1786,12 @@ Item {
         IconButton {
             id: stop
             visible: chatPage.busy && header.retry === null
-            width: Theme.itemSizeMedium
-            height: Theme.itemSizeMedium
+            width: chatPage.barButtonSize
+            height: chatPage.barButtonSize
+            icon.width: chatPage.barIconSize
+            icon.height: chatPage.barIconSize
+            icon.sourceSize.width: chatPage.barIconSize
+            icon.sourceSize.height: chatPage.barIconSize
             anchors {
                 right: inputPanel.right
                 rightMargin: Theme.paddingSmall
@@ -1807,7 +1822,7 @@ Item {
             height: Math.min(implicitHeight, inputPanel.maxInputHeight)
             anchors.bottom: inputPanel.bottom
             anchors.bottomMargin: Theme.paddingMedium / 2
-                                  + Math.max(0, (Theme.itemSizeMedium - height) / 2)
+                                  + Math.max(0, (chatPage.barButtonSize - height) / 2)
             // Default anchors (width in the initial layout [input, send]);
             // the state overrides them for the chosen scheme.
             anchors.left: inputPanel.left
@@ -1830,9 +1845,13 @@ Item {
         IconButton {
             id: attachButton
             visible: appWindow.canAttach && input.visible
-            width: Theme.iconSizeMedium
-            height: Theme.iconSizeMedium
+            width: chatPage.barIconSize
+            height: chatPage.barIconSize
             icon.source: "image://theme/icon-m-attach"
+            icon.width: chatPage.barIconSize
+            icon.height: chatPage.barIconSize
+            icon.sourceSize.width: chatPage.barIconSize
+            icon.sourceSize.height: chatPage.barIconSize
             enabled: !chatPage.busy || chatPage.retryInfo !== null
             highlighted: down || attachSheet.open
             onClicked: attachSheet.open = !attachSheet.open

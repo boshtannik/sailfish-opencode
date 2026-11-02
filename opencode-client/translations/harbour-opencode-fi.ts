@@ -391,6 +391,10 @@ voice answers (Settings → Voice models).</source>
         <source>Icon size</source>
         <translation>Kuvakkeiden koko</translation>
     </message>
+    <message>
+        <source>Message buttons and the input bar (mic, attach, send)</source>
+        <translation>Viestien painikkeet ja syöttöpalkki (mikrofoni, liite, lähetys)</translation>
+    </message>
 </context>
 <context>
     <name>SessionSettingsPage</name>

@@ -390,6 +390,10 @@ voice answers (Settings → Voice models).</source>
         <source>Icon size</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>Message buttons and the input bar (mic, attach, send)</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>SessionSettingsPage</name>
