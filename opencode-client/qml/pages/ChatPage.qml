@@ -1584,7 +1584,7 @@ Item {
         }
         // One row of buttons; the text field grows with its text (up to
         // about five lines) and the buttons stay on the bottom line.
-        height: (input.visible ? input.height : Theme.itemSizeMedium) + Theme.paddingMedium
+        height: Math.max(Theme.itemSizeMedium, input.visible ? input.height : 0) + Theme.paddingMedium
         Behavior on height { NumberAnimation { duration: 100; easing.type: Easing.OutQuad } }
         readonly property int maxInputHeight: Theme.itemSizeMedium
                                               + 4 * Math.round(input.font.pixelSize * 1.3)
@@ -1593,9 +1593,12 @@ Item {
         Rectangle {
             visible: input.visible
             x: input.x
-            y: input.y + Theme.paddingSmall / 2
             width: input.width
-            height: input.height - Theme.paddingSmall
+            height: Math.max(Theme.itemSizeMedium - Theme.paddingMedium, input.height)
+            // Centred on the text: the field has a little more margin below
+            // its text than above.
+            y: input.y + (input.height - height) / 2
+               - (Theme.paddingMedium - Theme.paddingSmall) / 2
             radius: Math.min(height / 2, Theme.itemSizeMedium / 2)
             color: Theme.rgba(Theme.primaryColor, input.activeFocus ? 0.10 : 0.06)
             border.width: input.activeFocus ? 1 : 0
@@ -1799,11 +1802,12 @@ Item {
             labelVisible: false
             verticalAlignment: Text.AlignVCenter
             horizontalAlignment: Text.AlignLeft
-            // At least one button row tall, growing with the text.
-            height: Math.max(Theme.itemSizeMedium,
-                             Math.min(implicitHeight, inputPanel.maxInputHeight))
+            // Natural height, growing with the text; while shorter than the
+            // button row it sits centred on it.
+            height: Math.min(implicitHeight, inputPanel.maxInputHeight)
             anchors.bottom: inputPanel.bottom
             anchors.bottomMargin: Theme.paddingMedium / 2
+                                  + Math.max(0, (Theme.itemSizeMedium - height) / 2)
             // Default anchors (width in the initial layout [input, send]);
             // the state overrides them for the chosen scheme.
             anchors.left: inputPanel.left
