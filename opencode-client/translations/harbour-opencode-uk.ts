@@ -33,6 +33,26 @@
         <source>Restore</source>
         <translation>Відновити</translation>
     </message>
+    <message>
+        <source>Answer</source>
+        <translation>Відповідь</translation>
+    </message>
+    <message>
+        <source>Thinking</source>
+        <translation>Міркування</translation>
+    </message>
+    <message>
+        <source>attempt #%1</source>
+        <translation>спроба №%1</translation>
+    </message>
+    <message>
+        <source>in %1</source>
+        <translation>через %1</translation>
+    </message>
+    <message>
+        <source>retrying</source>
+        <translation>повтор</translation>
+    </message>
 </context>
 <context>
     <name>GlobalSettingsPage</name>
@@ -193,6 +213,152 @@
         <source>Notification sound</source>
         <translation>Звук сповіщення</translation>
     </message>
+    <message>
+        <source>API key saved ✓ Pick a Claude model from the model name at the top of the chat. Enter a new key to replace it.</source>
+        <translation>API-ключ збережено ✓ Виберіть модель Claude, натиснувши на назву моделі вгорі чату. Введіть новий ключ, щоб замінити його.</translation>
+    </message>
+    <message>
+        <source>Add your Anthropic API key to unlock Claude models. Free OpenCode models work without a key.</source>
+        <translation>Додайте API-ключ Anthropic, щоб відкрити моделі Claude. Безкоштовні моделі OpenCode працюють без ключа.</translation>
+    </message>
+    <message>
+        <source>Anthropic API key</source>
+        <translation>API-ключ Anthropic</translation>
+    </message>
+    <message>
+        <source>Anthropic API key (sk-ant-…)</source>
+        <translation>API-ключ Anthropic (sk-ant-…)</translation>
+    </message>
+    <message>
+        <source>Anthropic rejected the saved API key, so Claude models are locked. Enter a valid key to unlock them.</source>
+        <translation>Anthropic відхилив збережений API-ключ, тому моделі Claude заблоковано. Введіть дійсний ключ, щоб відкрити їх.</translation>
+    </message>
+    <message>
+        <source>Appearance</source>
+        <translation>Зовнішній вигляд</translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation>Скасувати</translation>
+    </message>
+    <message>
+        <source>Changes take effect after restarting the app</source>
+        <translation>Зміни наберуть чинності після перезапуску застосунку</translation>
+    </message>
+    <message>
+        <source>Claude (Anthropic)</source>
+        <translation>Claude (Anthropic)</translation>
+    </message>
+    <message>
+        <source>Copy button on messages</source>
+        <translation>Кнопка копіювання в повідомленнях</translation>
+    </message>
+    <message>
+        <source>Download and select a speech synthesis model to enable
+voice answers (Settings → Voice models).</source>
+        <translation>Завантажте й виберіть модель синтезу мовлення, щоб увімкнути
+голосові відповіді (Налаштування → Голосові моделі).</translation>
+    </message>
+    <message>
+        <source>Enter this code on the opened page:</source>
+        <translation>Введіть цей код на сторінці, що відкрилася:</translation>
+    </message>
+    <message>
+        <source>Expand thinking</source>
+        <translation>Розгортати міркування</translation>
+    </message>
+    <message>
+        <source>General</source>
+        <translation>Загальні</translation>
+    </message>
+    <message>
+        <source>Get a key</source>
+        <translation>Отримати ключ</translation>
+    </message>
+    <message>
+        <source>Label thinking and answers</source>
+        <translation>Підписувати міркування й відповіді</translation>
+    </message>
+    <message>
+        <source>Messages</source>
+        <translation>Повідомлення</translation>
+    </message>
+    <message>
+        <source>Open browser again</source>
+        <translation>Відкрити браузер знову</translation>
+    </message>
+    <message>
+        <source>OpenCode account</source>
+        <translation>Обліковий запис OpenCode</translation>
+    </message>
+    <message>
+        <source>Preview: the quick brown fox jumps over the lazy dog.</source>
+        <translation>Приклад: чуєш їх, доцю, га? Кумедна ж ти, прощайся без ґольфів!</translation>
+    </message>
+    <message>
+        <source>Read an answer aloud (needs a speech synthesis model)</source>
+        <translation>Озвучити відповідь (потрібна модель синтезу мовлення)</translation>
+    </message>
+    <message>
+        <source>Save key</source>
+        <translation>Зберегти ключ</translation>
+    </message>
+    <message>
+        <source>Show &quot;Answer&quot; above the model&apos;s replies; thinking is always marked</source>
+        <translation>Показувати «Відповідь» над відповідями моделі; міркування позначаються завжди</translation>
+    </message>
+    <message>
+        <source>Show model thinking (reasoning)</source>
+        <translation>Показувати міркування моделі</translation>
+    </message>
+    <message>
+        <source>Show the model&apos;s reasoning as it works, not just final answers</source>
+        <translation>Показувати хід міркувань моделі, а не лише остаточні відповіді</translation>
+    </message>
+    <message>
+        <source>Show the whole reasoning instead of its last lines (tap &quot;Thinking&quot; on a message to toggle it)</source>
+        <translation>Показувати міркування повністю, а не останні рядки (натисніть «Міркування» в повідомленні, щоб перемкнути)</translation>
+    </message>
+    <message>
+        <source>Sign in to your opencode.ai account. The app shows a code to enter in the browser.</source>
+        <translation>Увійдіть в обліковий запис opencode.ai. Застосунок покаже код, який треба ввести в браузері.</translation>
+    </message>
+    <message>
+        <source>Sign in with OpenCode</source>
+        <translation>Увійти через OpenCode</translation>
+    </message>
+    <message>
+        <source>Sign-in failed</source>
+        <translation>Не вдалося увійти</translation>
+    </message>
+    <message>
+        <source>Signed in ✓</source>
+        <translation>Вхід виконано ✓</translation>
+    </message>
+    <message>
+        <source>Speaker button on answers</source>
+        <translation>Кнопка озвучення у відповідях</translation>
+    </message>
+    <message>
+        <source>Text size</source>
+        <translation>Розмір тексту</translation>
+    </message>
+    <message>
+        <source>Thinking</source>
+        <translation>Міркування</translation>
+    </message>
+    <message>
+        <source>Waiting for authorization…</source>
+        <translation>Очікування авторизації…</translation>
+    </message>
+    <message>
+        <source>Working directory (restart required)</source>
+        <translation>Робоча тека (потрібен перезапуск)</translation>
+    </message>
+    <message>
+        <source>e.g. /home/defaultuser/opencode-home</source>
+        <translation>наприклад, /home/defaultuser/opencode-home</translation>
+    </message>
 </context>
 <context>
     <name>SessionSettingsPage</name>
@@ -336,6 +502,14 @@
         <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="424"/>
         <source>No available models</source>
         <translation>Немає доступних моделей</translation>
+    </message>
+    <message>
+        <source>How much the model thinks before it answers</source>
+        <translation>Скільки модель міркує перед відповіддю</translation>
+    </message>
+    <message>
+        <source>Reasoning</source>
+        <translation>Міркування</translation>
     </message>
 </context>
 <context>
@@ -721,6 +895,280 @@ long press — remove</source>
         <location filename="../qml/harbour-opencode.qml" line="2396"/>
         <source>Leave empty to name automatically</source>
         <translation>Залиште порожнім, щоб назвати автоматично</translation>
+    </message>
+    <message>
+        <source>%1. Add the provider&apos;s API key in Settings or pick another model.</source>
+        <translation>%1. Додайте API-ключ провайдера в налаштуваннях або виберіть іншу модель.</translation>
+    </message>
+    <message>
+        <source>API key saved for %1</source>
+        <translation>API-ключ для %1 збережено</translation>
+    </message>
+    <message>
+        <source>API key saved for %1, but it could not be verified (%2)</source>
+        <translation>API-ключ для %1 збережено, але перевірити його не вдалося (%2)</translation>
+    </message>
+    <message>
+        <source>Answer required</source>
+        <translation>Потрібна відповідь</translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation>Скасувати</translation>
+    </message>
+    <message>
+        <source>Confirm the opened link to continue</source>
+        <translation>Підтвердьте відкрите посилання, щоб продовжити</translation>
+    </message>
+    <message>
+        <source>Could not switch the model: %1</source>
+        <translation>Не вдалося змінити модель: %1</translation>
+    </message>
+    <message>
+        <source>Default</source>
+        <translation>Типово</translation>
+    </message>
+    <message>
+        <source>Enter the API key first</source>
+        <translation>Спочатку введіть API-ключ</translation>
+    </message>
+    <message>
+        <source>Expected a URL</source>
+        <translation>Очікується URL</translation>
+    </message>
+    <message>
+        <source>Expected a date (YYYY-MM-DD)</source>
+        <translation>Очікується дата (РРРР-ММ-ДД)</translation>
+    </message>
+    <message>
+        <source>Expected a date and time</source>
+        <translation>Очікуються дата й час</translation>
+    </message>
+    <message>
+        <source>Expected a number</source>
+        <translation>Очікується число</translation>
+    </message>
+    <message>
+        <source>Expected an email address</source>
+        <translation>Очікується адреса електронної пошти</translation>
+    </message>
+    <message>
+        <source>Expected an integer</source>
+        <translation>Очікується ціле число</translation>
+    </message>
+    <message>
+        <source>Expected selections</source>
+        <translation>Очікується вибір варіантів</translation>
+    </message>
+    <message>
+        <source>Expected text</source>
+        <translation>Очікується текст</translation>
+    </message>
+    <message>
+        <source>Expected yes or no</source>
+        <translation>Очікується «так» або «ні»</translation>
+    </message>
+    <message>
+        <source>Extra high</source>
+        <translation>Дуже високий</translation>
+    </message>
+    <message>
+        <source>Failed to save the API key for %1: %2</source>
+        <translation>Не вдалося зберегти API-ключ для %1: %2</translation>
+    </message>
+    <message>
+        <source>High</source>
+        <translation>Високий</translation>
+    </message>
+    <message>
+        <source>I have completed this step</source>
+        <translation>Я виконав цей крок</translation>
+    </message>
+    <message>
+        <source>Invalid format</source>
+        <translation>Неправильний формат</translation>
+    </message>
+    <message>
+        <source>Low</source>
+        <translation>Низький</translation>
+    </message>
+    <message>
+        <source>Max</source>
+        <translation>Максимум</translation>
+    </message>
+    <message>
+        <source>Medium</source>
+        <translation>Середній</translation>
+    </message>
+    <message>
+        <source>Minimal</source>
+        <translation>Мінімальний</translation>
+    </message>
+    <message>
+        <source>Must be at least %1</source>
+        <translation>Має бути не менше %1</translation>
+    </message>
+    <message>
+        <source>Must be at least %1 characters</source>
+        <translation>Не коротше %1 символів</translation>
+    </message>
+    <message>
+        <source>Must be at most %1</source>
+        <translation>Має бути не більше %1</translation>
+    </message>
+    <message>
+        <source>Must be at most %1 characters</source>
+        <translation>Не довше %1 символів</translation>
+    </message>
+    <message>
+        <source>No</source>
+        <translation>Ні</translation>
+    </message>
+    <message>
+        <source>No model selected</source>
+        <translation>Модель не вибрано</translation>
+    </message>
+    <message>
+        <source>Nothing to compact: %1</source>
+        <translation>Нічого стискати: %1</translation>
+    </message>
+    <message>
+        <source>Off</source>
+        <translation>Вимк.</translation>
+    </message>
+    <message>
+        <source>OpenCode sign-in failed: %1</source>
+        <translation>Не вдалося увійти в OpenCode: %1</translation>
+    </message>
+    <message>
+        <source>Ready</source>
+        <translation>Готово</translation>
+    </message>
+    <message>
+        <source>Select an available option</source>
+        <translation>Виберіть доступний варіант</translation>
+    </message>
+    <message>
+        <source>Select at least %1</source>
+        <translation>Виберіть не менше %1</translation>
+    </message>
+    <message>
+        <source>Select at least one option</source>
+        <translation>Виберіть хоча б один варіант</translation>
+    </message>
+    <message>
+        <source>Select at most %1</source>
+        <translation>Виберіть не більше %1</translation>
+    </message>
+    <message>
+        <source>Select only available options</source>
+        <translation>Вибирайте лише доступні варіанти</translation>
+    </message>
+    <message>
+        <source>Signed in to OpenCode</source>
+        <translation>Вхід в OpenCode виконано</translation>
+    </message>
+    <message>
+        <source>Switched to %1</source>
+        <translation>Перемкнено на %1</translation>
+    </message>
+    <message>
+        <source>The %1 API key was rejected (%2). Check the key and try again.</source>
+        <translation>API-ключ %1 відхилено (%2). Перевірте ключ і спробуйте знову.</translation>
+    </message>
+    <message>
+        <source>The API key was rejected: %1. Enter a valid key in Settings to unlock these models.</source>
+        <translation>API-ключ відхилено: %1. Введіть дійсний ключ у налаштуваннях, щоб відкрити ці моделі.</translation>
+    </message>
+    <message>
+        <source>The form is no longer available</source>
+        <translation>Форма більше недоступна</translation>
+    </message>
+    <message>
+        <source>This session is no longer available on the server, so a new session was started.</source>
+        <translation>Ця сесія більше недоступна на сервері, тому розпочато нову сесію.</translation>
+    </message>
+    <message>
+        <source>Working…</source>
+        <translation>Працюю…</translation>
+    </message>
+    <message>
+        <source>Yes</source>
+        <translation>Так</translation>
+    </message>
+    <message>
+        <source>Your own answer…</source>
+        <translation>Своя відповідь…</translation>
+    </message>
+    <message>
+        <source>this session no longer exists. Open another session or start a new one</source>
+        <translation>цієї сесії більше немає. Відкрийте іншу сесію або почніть нову</translation>
+    </message>
+</context>
+<context>
+    <name>ModelPickerPage</name>
+    <message>
+        <source>%1 locked</source>
+        <translation>заблоковано: %1</translation>
+    </message>
+    <message>
+        <source>%1 models</source>
+        <translation>моделей: %1</translation>
+    </message>
+    <message>
+        <source>%1 providers · %2 available</source>
+        <translation>провайдерів: %1 · доступно: %2</translation>
+    </message>
+    <message>
+        <source>1 model</source>
+        <translation>1 модель</translation>
+    </message>
+    <message>
+        <source>Add your %1 API key in Settings to unlock %2.</source>
+        <translation>Додайте API-ключ %1 у налаштуваннях, щоб відкрити %2.</translation>
+    </message>
+    <message>
+        <source>Add your %1 API key in Settings to unlock its models.</source>
+        <translation>Додайте API-ключ %1 у налаштуваннях, щоб відкрити його моделі.</translation>
+    </message>
+    <message>
+        <source>Model</source>
+        <translation>Модель</translation>
+    </message>
+    <message>
+        <source>Needs an API key</source>
+        <translation>Потрібен API-ключ</translation>
+    </message>
+    <message>
+        <source>No available models</source>
+        <translation>Немає доступних моделей</translation>
+    </message>
+    <message>
+        <source>Reasoning: %1</source>
+        <translation>Міркування: %1</translation>
+    </message>
+    <message>
+        <source>Show %1 more providers</source>
+        <translation>Показати ще провайдерів: %1</translation>
+    </message>
+    <message>
+        <source>Show 1 more provider</source>
+        <translation>Показати ще 1 провайдера</translation>
+    </message>
+    <message>
+        <source>The %1 API key was rejected. Enter a valid key in Settings to unlock these models.</source>
+        <translation>API-ключ %1 відхилено. Введіть дійсний ключ у налаштуваннях, щоб відкрити ці моделі.</translation>
+    </message>
+    <message>
+        <source>locked</source>
+        <translation>заблоковано</translation>
+    </message>
+</context>
+<context>
+    <name>StatusHeader</name>
+    <message>
+        <source>waiting…</source>
+        <translation>очікування…</translation>
     </message>
 </context>
 </TS>

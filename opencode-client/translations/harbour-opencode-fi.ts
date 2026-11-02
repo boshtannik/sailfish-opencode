@@ -33,6 +33,26 @@
         <source>Restore</source>
         <translation>Palauta</translation>
     </message>
+    <message>
+        <source>Answer</source>
+        <translation>Vastaus</translation>
+    </message>
+    <message>
+        <source>Thinking</source>
+        <translation>Ajattelu</translation>
+    </message>
+    <message>
+        <source>attempt #%1</source>
+        <translation>yritys %1</translation>
+    </message>
+    <message>
+        <source>in %1</source>
+        <translation>%1 kuluttua</translation>
+    </message>
+    <message>
+        <source>retrying</source>
+        <translation>yritetään uudelleen</translation>
+    </message>
 </context>
 <context>
     <name>GlobalSettingsPage</name>
@@ -193,6 +213,152 @@
         <source>Notification sound</source>
         <translation>Ilmoitusääni</translation>
     </message>
+    <message>
+        <source>API key saved ✓ Pick a Claude model from the model name at the top of the chat. Enter a new key to replace it.</source>
+        <translation>API-avain tallennettu ✓ Valitse Claude-malli napauttamalla mallin nimeä keskustelun yläreunassa. Syötä uusi avain korvataksesi sen.</translation>
+    </message>
+    <message>
+        <source>Add your Anthropic API key to unlock Claude models. Free OpenCode models work without a key.</source>
+        <translation>Lisää Anthropic-API-avaimesi avataksesi Claude-mallit. OpenCoden ilmaiset mallit toimivat ilman avainta.</translation>
+    </message>
+    <message>
+        <source>Anthropic API key</source>
+        <translation>Anthropic-API-avain</translation>
+    </message>
+    <message>
+        <source>Anthropic API key (sk-ant-…)</source>
+        <translation>Anthropic-API-avain (sk-ant-…)</translation>
+    </message>
+    <message>
+        <source>Anthropic rejected the saved API key, so Claude models are locked. Enter a valid key to unlock them.</source>
+        <translation>Anthropic hylkäsi tallennetun API-avaimen, joten Claude-mallit on lukittu. Syötä kelvollinen avain avataksesi ne.</translation>
+    </message>
+    <message>
+        <source>Appearance</source>
+        <translation>Ulkoasu</translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation>Peruuta</translation>
+    </message>
+    <message>
+        <source>Changes take effect after restarting the app</source>
+        <translation>Muutokset tulevat voimaan, kun sovellus käynnistetään uudelleen</translation>
+    </message>
+    <message>
+        <source>Claude (Anthropic)</source>
+        <translation>Claude (Anthropic)</translation>
+    </message>
+    <message>
+        <source>Copy button on messages</source>
+        <translation>Kopiointipainike viesteissä</translation>
+    </message>
+    <message>
+        <source>Download and select a speech synthesis model to enable
+voice answers (Settings → Voice models).</source>
+        <translation>Lataa ja valitse puhesynteesimalli ottaaksesi
+äänivastaukset käyttöön (Asetukset → Äänimallit).</translation>
+    </message>
+    <message>
+        <source>Enter this code on the opened page:</source>
+        <translation>Syötä tämä koodi avautuneelle sivulle:</translation>
+    </message>
+    <message>
+        <source>Expand thinking</source>
+        <translation>Laajenna ajattelu</translation>
+    </message>
+    <message>
+        <source>General</source>
+        <translation>Yleiset</translation>
+    </message>
+    <message>
+        <source>Get a key</source>
+        <translation>Hanki avain</translation>
+    </message>
+    <message>
+        <source>Label thinking and answers</source>
+        <translation>Merkitse ajattelu ja vastaukset</translation>
+    </message>
+    <message>
+        <source>Messages</source>
+        <translation>Viestit</translation>
+    </message>
+    <message>
+        <source>Open browser again</source>
+        <translation>Avaa selain uudelleen</translation>
+    </message>
+    <message>
+        <source>OpenCode account</source>
+        <translation>OpenCode-tili</translation>
+    </message>
+    <message>
+        <source>Preview: the quick brown fox jumps over the lazy dog.</source>
+        <translation>Esikatselu: vikkelä kettu hyppää laiskan koiran yli.</translation>
+    </message>
+    <message>
+        <source>Read an answer aloud (needs a speech synthesis model)</source>
+        <translation>Lue vastaus ääneen (vaatii puhesynteesimallin)</translation>
+    </message>
+    <message>
+        <source>Save key</source>
+        <translation>Tallenna avain</translation>
+    </message>
+    <message>
+        <source>Show &quot;Answer&quot; above the model&apos;s replies; thinking is always marked</source>
+        <translation>Näytä ”Vastaus” mallin vastausten yläpuolella; ajattelu merkitään aina</translation>
+    </message>
+    <message>
+        <source>Show model thinking (reasoning)</source>
+        <translation>Näytä mallin ajattelu (päättely)</translation>
+    </message>
+    <message>
+        <source>Show the model&apos;s reasoning as it works, not just final answers</source>
+        <translation>Näytä mallin päättely sen työskennellessä, ei vain lopullisia vastauksia</translation>
+    </message>
+    <message>
+        <source>Show the whole reasoning instead of its last lines (tap &quot;Thinking&quot; on a message to toggle it)</source>
+        <translation>Näytä koko päättely viimeisten rivien sijaan (napauta viestin ”Ajattelu”-otsikkoa vaihtaaksesi)</translation>
+    </message>
+    <message>
+        <source>Sign in to your opencode.ai account. The app shows a code to enter in the browser.</source>
+        <translation>Kirjaudu opencode.ai-tilillesi. Sovellus näyttää koodin, joka syötetään selaimessa.</translation>
+    </message>
+    <message>
+        <source>Sign in with OpenCode</source>
+        <translation>Kirjaudu OpenCodella</translation>
+    </message>
+    <message>
+        <source>Sign-in failed</source>
+        <translation>Kirjautuminen epäonnistui</translation>
+    </message>
+    <message>
+        <source>Signed in ✓</source>
+        <translation>Kirjauduttu ✓</translation>
+    </message>
+    <message>
+        <source>Speaker button on answers</source>
+        <translation>Kaiutinpainike vastauksissa</translation>
+    </message>
+    <message>
+        <source>Text size</source>
+        <translation>Tekstin koko</translation>
+    </message>
+    <message>
+        <source>Thinking</source>
+        <translation>Ajattelu</translation>
+    </message>
+    <message>
+        <source>Waiting for authorization…</source>
+        <translation>Odotetaan valtuutusta…</translation>
+    </message>
+    <message>
+        <source>Working directory (restart required)</source>
+        <translation>Työkansio (vaatii uudelleenkäynnistyksen)</translation>
+    </message>
+    <message>
+        <source>e.g. /home/defaultuser/opencode-home</source>
+        <translation>esim. /home/defaultuser/opencode-home</translation>
+    </message>
 </context>
 <context>
     <name>SessionSettingsPage</name>
@@ -336,6 +502,14 @@
         <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="424"/>
         <source>No available models</source>
         <translation>Ei käytettävissä olevia malleja</translation>
+    </message>
+    <message>
+        <source>How much the model thinks before it answers</source>
+        <translation>Kuinka paljon malli ajattelee ennen vastaamista</translation>
+    </message>
+    <message>
+        <source>Reasoning</source>
+        <translation>Päättely</translation>
     </message>
 </context>
 <context>
@@ -721,6 +895,280 @@ pitkä painallus — poista</translation>
         <location filename="../qml/harbour-opencode.qml" line="2396"/>
         <source>Leave empty to name automatically</source>
         <translation>Jätä tyhjäksi, niin nimetetään automaattisesti</translation>
+    </message>
+    <message>
+        <source>%1. Add the provider&apos;s API key in Settings or pick another model.</source>
+        <translation>%1. Lisää palveluntarjoajan API-avain asetuksissa tai valitse toinen malli.</translation>
+    </message>
+    <message>
+        <source>API key saved for %1</source>
+        <translation>API-avain tallennettu: %1</translation>
+    </message>
+    <message>
+        <source>API key saved for %1, but it could not be verified (%2)</source>
+        <translation>API-avain tallennettu (%1), mutta sitä ei voitu tarkistaa (%2)</translation>
+    </message>
+    <message>
+        <source>Answer required</source>
+        <translation>Vastaus vaaditaan</translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation>Peruuta</translation>
+    </message>
+    <message>
+        <source>Confirm the opened link to continue</source>
+        <translation>Vahvista avattu linkki jatkaaksesi</translation>
+    </message>
+    <message>
+        <source>Could not switch the model: %1</source>
+        <translation>Mallin vaihto epäonnistui: %1</translation>
+    </message>
+    <message>
+        <source>Default</source>
+        <translation>Oletus</translation>
+    </message>
+    <message>
+        <source>Enter the API key first</source>
+        <translation>Syötä ensin API-avain</translation>
+    </message>
+    <message>
+        <source>Expected a URL</source>
+        <translation>Odotettiin URL-osoitetta</translation>
+    </message>
+    <message>
+        <source>Expected a date (YYYY-MM-DD)</source>
+        <translation>Odotettiin päivämäärää (VVVV-KK-PP)</translation>
+    </message>
+    <message>
+        <source>Expected a date and time</source>
+        <translation>Odotettiin päivämäärää ja aikaa</translation>
+    </message>
+    <message>
+        <source>Expected a number</source>
+        <translation>Odotettiin lukua</translation>
+    </message>
+    <message>
+        <source>Expected an email address</source>
+        <translation>Odotettiin sähköpostiosoitetta</translation>
+    </message>
+    <message>
+        <source>Expected an integer</source>
+        <translation>Odotettiin kokonaislukua</translation>
+    </message>
+    <message>
+        <source>Expected selections</source>
+        <translation>Odotettiin valintoja</translation>
+    </message>
+    <message>
+        <source>Expected text</source>
+        <translation>Odotettiin tekstiä</translation>
+    </message>
+    <message>
+        <source>Expected yes or no</source>
+        <translation>Odotettiin kyllä tai ei</translation>
+    </message>
+    <message>
+        <source>Extra high</source>
+        <translation>Erittäin korkea</translation>
+    </message>
+    <message>
+        <source>Failed to save the API key for %1: %2</source>
+        <translation>API-avaimen tallennus epäonnistui (%1): %2</translation>
+    </message>
+    <message>
+        <source>High</source>
+        <translation>Korkea</translation>
+    </message>
+    <message>
+        <source>I have completed this step</source>
+        <translation>Olen suorittanut tämän vaiheen</translation>
+    </message>
+    <message>
+        <source>Invalid format</source>
+        <translation>Virheellinen muoto</translation>
+    </message>
+    <message>
+        <source>Low</source>
+        <translation>Matala</translation>
+    </message>
+    <message>
+        <source>Max</source>
+        <translation>Maksimi</translation>
+    </message>
+    <message>
+        <source>Medium</source>
+        <translation>Keskitaso</translation>
+    </message>
+    <message>
+        <source>Minimal</source>
+        <translation>Minimaalinen</translation>
+    </message>
+    <message>
+        <source>Must be at least %1</source>
+        <translation>On oltava vähintään %1</translation>
+    </message>
+    <message>
+        <source>Must be at least %1 characters</source>
+        <translation>Vähintään %1 merkkiä</translation>
+    </message>
+    <message>
+        <source>Must be at most %1</source>
+        <translation>Saa olla enintään %1</translation>
+    </message>
+    <message>
+        <source>Must be at most %1 characters</source>
+        <translation>Enintään %1 merkkiä</translation>
+    </message>
+    <message>
+        <source>No</source>
+        <translation>Ei</translation>
+    </message>
+    <message>
+        <source>No model selected</source>
+        <translation>Mallia ei ole valittu</translation>
+    </message>
+    <message>
+        <source>Nothing to compact: %1</source>
+        <translation>Ei tiivistettävää: %1</translation>
+    </message>
+    <message>
+        <source>Off</source>
+        <translation>Pois</translation>
+    </message>
+    <message>
+        <source>OpenCode sign-in failed: %1</source>
+        <translation>Kirjautuminen OpenCodeen epäonnistui: %1</translation>
+    </message>
+    <message>
+        <source>Ready</source>
+        <translation>Valmis</translation>
+    </message>
+    <message>
+        <source>Select an available option</source>
+        <translation>Valitse käytettävissä oleva vaihtoehto</translation>
+    </message>
+    <message>
+        <source>Select at least %1</source>
+        <translation>Valitse vähintään %1</translation>
+    </message>
+    <message>
+        <source>Select at least one option</source>
+        <translation>Valitse vähintään yksi vaihtoehto</translation>
+    </message>
+    <message>
+        <source>Select at most %1</source>
+        <translation>Valitse enintään %1</translation>
+    </message>
+    <message>
+        <source>Select only available options</source>
+        <translation>Valitse vain käytettävissä olevia vaihtoehtoja</translation>
+    </message>
+    <message>
+        <source>Signed in to OpenCode</source>
+        <translation>Kirjauduttu OpenCodeen</translation>
+    </message>
+    <message>
+        <source>Switched to %1</source>
+        <translation>Vaihdettu: %1</translation>
+    </message>
+    <message>
+        <source>The %1 API key was rejected (%2). Check the key and try again.</source>
+        <translation>%1-API-avain hylättiin (%2). Tarkista avain ja yritä uudelleen.</translation>
+    </message>
+    <message>
+        <source>The API key was rejected: %1. Enter a valid key in Settings to unlock these models.</source>
+        <translation>API-avain hylättiin: %1. Syötä kelvollinen avain asetuksissa avataksesi nämä mallit.</translation>
+    </message>
+    <message>
+        <source>The form is no longer available</source>
+        <translation>Lomake ei ole enää saatavilla</translation>
+    </message>
+    <message>
+        <source>This session is no longer available on the server, so a new session was started.</source>
+        <translation>Tämä istunto ei ole enää saatavilla palvelimella, joten aloitettiin uusi istunto.</translation>
+    </message>
+    <message>
+        <source>Working…</source>
+        <translation>Työskennellään…</translation>
+    </message>
+    <message>
+        <source>Yes</source>
+        <translation>Kyllä</translation>
+    </message>
+    <message>
+        <source>Your own answer…</source>
+        <translation>Oma vastaus…</translation>
+    </message>
+    <message>
+        <source>this session no longer exists. Open another session or start a new one</source>
+        <translation>tätä istuntoa ei enää ole. Avaa toinen istunto tai aloita uusi</translation>
+    </message>
+</context>
+<context>
+    <name>ModelPickerPage</name>
+    <message>
+        <source>%1 locked</source>
+        <translation>%1 lukittu</translation>
+    </message>
+    <message>
+        <source>%1 models</source>
+        <translation>%1 mallia</translation>
+    </message>
+    <message>
+        <source>%1 providers · %2 available</source>
+        <translation>%1 palveluntarjoajaa · %2 käytettävissä</translation>
+    </message>
+    <message>
+        <source>1 model</source>
+        <translation>1 malli</translation>
+    </message>
+    <message>
+        <source>Add your %1 API key in Settings to unlock %2.</source>
+        <translation>Lisää %1-API-avaimesi asetuksissa avataksesi mallin %2.</translation>
+    </message>
+    <message>
+        <source>Add your %1 API key in Settings to unlock its models.</source>
+        <translation>Lisää %1-API-avaimesi asetuksissa avataksesi sen mallit.</translation>
+    </message>
+    <message>
+        <source>Model</source>
+        <translation>Malli</translation>
+    </message>
+    <message>
+        <source>Needs an API key</source>
+        <translation>Vaatii API-avaimen</translation>
+    </message>
+    <message>
+        <source>No available models</source>
+        <translation>Ei käytettävissä olevia malleja</translation>
+    </message>
+    <message>
+        <source>Reasoning: %1</source>
+        <translation>Päättely: %1</translation>
+    </message>
+    <message>
+        <source>Show %1 more providers</source>
+        <translation>Näytä %1 muuta palveluntarjoajaa</translation>
+    </message>
+    <message>
+        <source>Show 1 more provider</source>
+        <translation>Näytä 1 muu palveluntarjoaja</translation>
+    </message>
+    <message>
+        <source>The %1 API key was rejected. Enter a valid key in Settings to unlock these models.</source>
+        <translation>%1-API-avain hylättiin. Syötä kelvollinen avain asetuksissa avataksesi nämä mallit.</translation>
+    </message>
+    <message>
+        <source>locked</source>
+        <translation>lukittu</translation>
+    </message>
+</context>
+<context>
+    <name>StatusHeader</name>
+    <message>
+        <source>waiting…</source>
+        <translation>odotetaan…</translation>
     </message>
 </context>
 </TS>
