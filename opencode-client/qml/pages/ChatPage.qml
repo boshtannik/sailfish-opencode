@@ -461,7 +461,8 @@ Item {
         height: width
         z: 7
         visible: opacity > 0
-        opacity: (!chatList.stickBottom && chatList.count > 0 && !chatList.nearEnd()) ? 1 : 0
+        opacity: (!chatList.stickBottom && chatList.count > 0 && !chatList.nearEnd()
+                  && !attachSheet.open) ? 1 : 0
         Behavior on opacity { FadeAnimation { duration: 180 } }
         Rectangle {
             anchors.fill: parent
@@ -1282,8 +1283,9 @@ Item {
         }
     }
 
-    // Image-only models get the image picker; models that also read PDFs get
-    // the content picker (images, documents, …), as the Email app does.
+    // ── Attach menu ──────────────────────────────────────────────────────
+    // The paperclip opens this panel above the input: camera, gallery,
+    // videos (models that read video) and files (models that read PDFs).
     Component {
         id: imagePickerPage
         ImagePickerPage {
@@ -1294,17 +1296,122 @@ Item {
         }
     }
     Component {
-        id: contentPickerPage
-        ContentPickerPage {
-            title: qsTr("Attach a file")
+        id: videoPickerPage
+        VideoPickerPage {
             onSelectedContentPropertiesChanged: {
                 if (selectedContentProperties && selectedContentProperties.filePath)
                     appWindow.addAttachment(selectedContentProperties.filePath)
             }
         }
     }
-    function openAttachPicker() {
-        pageStack.push(appWindow.canAttachPdf ? contentPickerPage : imagePickerPage)
+    Component {
+        id: filePickerPage
+        FilePickerPage {
+            title: qsTr("Attach a file")
+            nameFilters: {
+                var f = []
+                if (appWindow.canAttachPdf) f.push("*.pdf")
+                if (appWindow.canAttachImages) f = f.concat(["*.png", "*.jpg", "*.jpeg", "*.gif", "*.webp"])
+                if (appWindow.canAttachVideo) f = f.concat(["*.mp4", "*.mov", "*.webm"])
+                return f
+            }
+            onSelectedContentPropertiesChanged: {
+                if (selectedContentProperties && selectedContentProperties.filePath)
+                    appWindow.addAttachment(selectedContentProperties.filePath)
+            }
+        }
+    }
+    function openAttach(what) {
+        attachSheet.open = false
+        if (what === "camera")
+            pageStack.push(Qt.resolvedUrl("CameraPage.qml"),
+                           { appWindow: appWindow, allowVideo: appWindow.canAttachVideo })
+        else if (what === "gallery")
+            pageStack.push(imagePickerPage)
+        else if (what === "videos")
+            pageStack.push(videoPickerPage)
+        else
+            pageStack.push(filePickerPage)
+    }
+
+    Rectangle {
+        id: attachSheet
+        property bool open: false
+        anchors {
+            left: parent.left
+            right: parent.right
+            bottom: attachStrip.top
+        }
+        height: attachRow.height + 2 * Theme.paddingLarge
+        // Opaque base so the chat does not show through, tinted with the theme.
+        color: "black"
+        z: 8
+        Rectangle {
+            anchors.fill: parent
+            color: Theme.rgba(Theme.highlightDimmerColor, 0.85)
+        }
+        visible: opacity > 0
+        opacity: open && appWindow.canAttach ? 1 : 0
+        transform: Translate {
+            y: attachSheet.open ? 0 : Theme.paddingLarge
+            Behavior on y { NumberAnimation { duration: 140; easing.type: Easing.OutQuad } }
+        }
+        Behavior on opacity { FadeAnimation { duration: 140 } }
+        // A model without file input (or another session) closes it.
+        Connections {
+            target: appWindow
+            onCurrentSessionIdChanged: attachSheet.open = false
+            onCanAttachChanged: if (!appWindow.canAttach) attachSheet.open = false
+        }
+
+        Row {
+            id: attachRow
+            anchors.centerIn: parent
+            spacing: Theme.paddingLarge * 1.5
+            Repeater {
+                model: {
+                    var m = [{ id: "camera", icon: "image://theme/icon-m-camera", text: qsTr("Camera") },
+                             { id: "gallery", icon: "image://theme/icon-m-image", text: qsTr("Gallery") }]
+                    if (appWindow.canAttachVideo)
+                        m.push({ id: "videos", icon: "image://theme/icon-m-video", text: qsTr("Videos") })
+                    if (appWindow.canAttachPdf)
+                        m.push({ id: "files", icon: "image://theme/icon-m-document", text: qsTr("Files") })
+                    return m
+                }
+                BackgroundItem {
+                    id: tile
+                    width: Theme.itemSizeLarge
+                    height: tileCol.height
+                    onClicked: chatPage.openAttach(modelData.id)
+                    Column {
+                        id: tileCol
+                        width: parent.width
+                        spacing: Theme.paddingSmall
+                        Rectangle {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            width: Theme.itemSizeMedium
+                            height: width
+                            radius: width / 2
+                            color: tile.highlighted ? Theme.rgba(Theme.highlightBackgroundColor, 0.5)
+                                                    : Theme.rgba(Theme.primaryColor, 0.12)
+                            Icon {
+                                anchors.centerIn: parent
+                                source: modelData.icon
+                                highlighted: tile.highlighted
+                            }
+                        }
+                        Label {
+                            width: parent.width
+                            horizontalAlignment: Text.AlignHCenter
+                            text: modelData.text
+                            truncationMode: TruncationMode.Fade
+                            font.pixelSize: appWindow.fs(Theme.fontSizeExtraSmall)
+                            color: tile.highlighted ? Theme.highlightColor : Theme.primaryColor
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // ── Revert banner ─────────────────────────────────────────────────────
@@ -1593,7 +1700,8 @@ Item {
             height: Theme.iconSizeMedium
             icon.source: "image://theme/icon-m-attach"
             enabled: !chatPage.busy || chatPage.retryInfo !== null
-            onClicked: chatPage.openAttachPicker()
+            highlighted: down || attachSheet.open
+            onClicked: attachSheet.open = !attachSheet.open
         }
     }
 }

@@ -61,6 +61,22 @@
         <source>this model can&apos;t read it</source>
         <translation>tämä malli ei voi lukea sitä</translation>
     </message>
+    <message>
+        <source>Camera</source>
+        <translation>Kamera</translation>
+    </message>
+    <message>
+        <source>Files</source>
+        <translation>Tiedostot</translation>
+    </message>
+    <message>
+        <source>Gallery</source>
+        <translation>Galleria</translation>
+    </message>
+    <message>
+        <source>Videos</source>
+        <translation>Videot</translation>
+    </message>
 </context>
 <context>
     <name>GlobalSettingsPage</name>
@@ -1205,6 +1221,17 @@ pitkä painallus — poista</translation>
     <message>
         <source>waiting…</source>
         <translation>odotetaan…</translation>
+    </message>
+</context>
+<context>
+    <name>CameraPage</name>
+    <message>
+        <source>Photo</source>
+        <translation>Kuva</translation>
+    </message>
+    <message>
+        <source>Video</source>
+        <translation>Video</translation>
     </message>
 </context>
 </TS>

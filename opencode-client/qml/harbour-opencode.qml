@@ -112,6 +112,7 @@ ApplicationWindow {
     // Model input kinds (`capabilities.input` from the server).
     readonly property string kInputImage: "image"
     readonly property string kInputPdf: "pdf"
+    readonly property string kInputVideo: "video"
     readonly property string kSttTag: "[[stt]]"
     readonly property string kTtsTag: "[[tts]]"
     readonly property string kTtsStopTag: "[[ttsstop]]"
@@ -1198,6 +1199,7 @@ ApplicationWindow {
                                 ? currentModelInfo.inputs : []
     readonly property bool canAttachImages: currentInputs.indexOf(kInputImage) >= 0
     readonly property bool canAttachPdf: currentInputs.indexOf(kInputPdf) >= 0
+    readonly property bool canAttachVideo: currentInputs.indexOf(kInputVideo) >= 0
     readonly property bool canAttach: canAttachImages || canAttachPdf
 
     function attachmentKind(path) {
@@ -1207,6 +1209,8 @@ ApplicationWindow {
             return app.kInputImage
         if (ext === "pdf")
             return app.kInputPdf
+        if (["mp4", "mov", "3gp", "mkv", "webm"].indexOf(ext) >= 0)
+            return app.kInputVideo
         return ""
     }
     function attachmentSupported(a) {

@@ -61,6 +61,22 @@
         <source>this model can&apos;t read it</source>
         <translation>ця модель не може його прочитати</translation>
     </message>
+    <message>
+        <source>Camera</source>
+        <translation>Камера</translation>
+    </message>
+    <message>
+        <source>Files</source>
+        <translation>Файли</translation>
+    </message>
+    <message>
+        <source>Gallery</source>
+        <translation>Галерея</translation>
+    </message>
+    <message>
+        <source>Videos</source>
+        <translation>Відео</translation>
+    </message>
 </context>
 <context>
     <name>GlobalSettingsPage</name>
@@ -1205,6 +1221,17 @@ long press — remove</source>
     <message>
         <source>waiting…</source>
         <translation>очікування…</translation>
+    </message>
+</context>
+<context>
+    <name>CameraPage</name>
+    <message>
+        <source>Photo</source>
+        <translation>Фото</translation>
+    </message>
+    <message>
+        <source>Video</source>
+        <translation>Відео</translation>
     </message>
 </context>
 </TS>

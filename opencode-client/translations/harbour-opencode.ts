@@ -61,6 +61,22 @@
         <source>this model can&apos;t read it</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>Camera</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Files</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Gallery</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Videos</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>GlobalSettingsPage</name>
@@ -1211,6 +1227,17 @@ long press — remove</source>
     <name>StatusHeader</name>
     <message>
         <source>waiting…</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>CameraPage</name>
+    <message>
+        <source>Photo</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Video</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
