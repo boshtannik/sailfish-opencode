@@ -1179,6 +1179,14 @@ pitkä painallus — poista</translation>
         <source>locked</source>
         <translation>lukittu</translation>
     </message>
+    <message>
+        <source>Hold a model to choose its reasoning level</source>
+        <translation>Pidä mallia painettuna valitaksesi päättelytason</translation>
+    </message>
+    <message>
+        <source>Reasoning for %1</source>
+        <translation>Päättely: %1</translation>
+    </message>
 </context>
 <context>
     <name>StatusHeader</name>

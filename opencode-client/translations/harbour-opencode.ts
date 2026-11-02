@@ -1186,6 +1186,14 @@ long press — remove</source>
         <source>locked</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>Hold a model to choose its reasoning level</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reasoning for %1</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>StatusHeader</name>

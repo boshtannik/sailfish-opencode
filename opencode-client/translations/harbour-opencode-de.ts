@@ -1179,6 +1179,14 @@ lang drücken — entfernen</translation>
         <source>locked</source>
         <translation>gesperrt</translation>
     </message>
+    <message>
+        <source>Hold a model to choose its reasoning level</source>
+        <translation>Halte ein Modell gedrückt, um die Denkstufe zu wählen</translation>
+    </message>
+    <message>
+        <source>Reasoning for %1</source>
+        <translation>Denkstufe für %1</translation>
+    </message>
 </context>
 <context>
     <name>StatusHeader</name>

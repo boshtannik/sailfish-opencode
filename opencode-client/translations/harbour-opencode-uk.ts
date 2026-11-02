@@ -1179,6 +1179,14 @@ long press — remove</source>
         <source>locked</source>
         <translation>заблоковано</translation>
     </message>
+    <message>
+        <source>Hold a model to choose its reasoning level</source>
+        <translation>Утримуйте модель, щоб вибрати рівень міркування</translation>
+    </message>
+    <message>
+        <source>Reasoning for %1</source>
+        <translation>Міркування для %1</translation>
+    </message>
 </context>
 <context>
     <name>StatusHeader</name>
