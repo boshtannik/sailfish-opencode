@@ -1585,12 +1585,15 @@ Item {
             right: parent.right
             bottom: parent.bottom
         }
-        // One row of buttons; the text field grows with its text (up to
-        // about five lines) and the buttons stay on the bottom line.
+        // One row of buttons; the text field grows with its text up to two
+        // lines, then scrolls; the buttons stay on the bottom line.
         height: Math.max(chatPage.barButtonSize, input.visible ? input.height : 0) + Theme.paddingMedium
         Behavior on height { NumberAnimation { duration: 100; easing.type: Easing.OutQuad } }
-        readonly property int maxInputHeight: Theme.itemSizeMedium
-                                              + 4 * Math.round(input.font.pixelSize * 1.3)
+        readonly property int maxInputHeight: input._totalVerticalMargins + 2 * inputMetrics.height
+        FontMetrics {
+            id: inputMetrics
+            font: input.font
+        }
 
         // Rounded field behind the text input.
         Rectangle {
@@ -1832,8 +1835,10 @@ Item {
             placeholderText: chatPage.busy
                              ? qsTr("Agent is working…")
                              : qsTr("Agent prompt…")
-            // Paperclip inside the field, for models that read images/PDFs.
-            rightItem: appWindow.canAttach ? attachButton : null
+            // Room for the paperclip, which sits on the bottom line of the
+            // field (not on its first line, as a rightItem would).
+            textRightMargin: attachButton.visible ? attachButton.width + Theme.paddingSmall
+                                                  : Theme.horizontalPageMargin
             EnterKey.enabled: text.length > 0 && !chatPage.busy
             EnterKey.iconSource: "image://theme/icon-m-enter-accept"
             EnterKey.onClicked: {
@@ -1845,8 +1850,15 @@ Item {
         IconButton {
             id: attachButton
             visible: appWindow.canAttach && input.visible
-            width: chatPage.barIconSize
-            height: chatPage.barIconSize
+            z: 1
+            width: chatPage.barIconSize + Theme.paddingMedium
+            height: chatPage.barButtonSize
+            anchors {
+                right: input.right
+                rightMargin: Theme.paddingSmall
+                bottom: inputPanel.bottom
+                bottomMargin: Theme.paddingMedium / 2
+            }
             icon.source: "image://theme/icon-m-attach"
             icon.width: chatPage.barIconSize
             icon.height: chatPage.barIconSize
