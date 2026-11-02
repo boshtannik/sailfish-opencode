@@ -190,8 +190,34 @@ Item {
                         font.pixelSize: appWindow.fs(Theme.fontSizeExtraSmall)
                     }
                 }
-                // Reasoning is tuned from the bar above the chat input.
                 onClicked: appWindow.openModelPicker()
+            }
+
+            // Reasoning level of the current model (only for models that
+            // have levels). "Default" leaves the choice to the server.
+            ComboBox {
+                id: reasoningCombo
+                width: parent.width
+                visible: appWindow.currentVariants.length > 0
+                label: qsTr("Reasoning")
+                description: qsTr("How much the model thinks before it answers")
+                menu: ContextMenu {
+                    Repeater {
+                        model: appWindow.variantChoices
+                        // Applied on tap only: a refreshed choice list must
+                        // never change the level by itself.
+                        MenuItem {
+                            text: appWindow.variantLabel(modelData)
+                            onClicked: if (modelData !== appWindow.currentVariant)
+                                           appWindow.setCurrentVariant(modelData)
+                        }
+                    }
+                }
+                Binding {
+                    target: reasoningCombo
+                    property: "currentIndex"
+                    value: Math.max(0, appWindow.variantChoices.indexOf(appWindow.currentVariant))
+                }
             }
 
             BackgroundItem {
