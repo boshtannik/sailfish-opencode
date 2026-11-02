@@ -53,6 +53,14 @@
         <source>retrying</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>Attach a file</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>this model can&apos;t read it</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>GlobalSettingsPage</name>

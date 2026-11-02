@@ -106,6 +106,12 @@ ApplicationWindow {
     // place so the answer is visible while the model types.
     readonly property string kAnswerLiveTag: "[[answerlive]]";
     readonly property string kUserPrefix: ">>> "
+    // One line per attached file under a user message (mirror of
+    // opencode-proto ATTACHMENT_PREFIX / user_text_with_attachments).
+    readonly property string kAttachmentPrefix: "📎 "
+    // Model input kinds (`capabilities.input` from the server).
+    readonly property string kInputImage: "image"
+    readonly property string kInputPdf: "pdf"
     readonly property string kSttTag: "[[stt]]"
     readonly property string kTtsTag: "[[tts]]"
     readonly property string kTtsStopTag: "[[ttsstop]]"
@@ -1164,19 +1170,70 @@ ApplicationWindow {
         return seconds + "s"
     }
 
+    // ── Attachments ──────────────────────────────────────────────────────
+    // Files picked for the next prompt: [{path, name, kind}], kind = image|pdf.
+    property var attachments: []
+    // What the current model reads; the attach button shows only when it
+    // reads images or PDFs.
+    property var currentInputs: (currentModelInfo && currentModelInfo.inputs)
+                                ? currentModelInfo.inputs : []
+    readonly property bool canAttachImages: currentInputs.indexOf(kInputImage) >= 0
+    readonly property bool canAttachPdf: currentInputs.indexOf(kInputPdf) >= 0
+    readonly property bool canAttach: canAttachImages || canAttachPdf
+
+    function attachmentKind(path) {
+        var p = ("" + path).toLowerCase()
+        var ext = p.substring(p.lastIndexOf(".") + 1)
+        if (["png", "jpg", "jpeg", "gif", "webp", "bmp"].indexOf(ext) >= 0)
+            return app.kInputImage
+        if (ext === "pdf")
+            return app.kInputPdf
+        return ""
+    }
+    function attachmentSupported(a) {
+        return a.kind !== "" && app.currentInputs.indexOf(a.kind) >= 0
+    }
+    function addAttachment(path) {
+        var p = "" + path
+        if (p.indexOf("file://") === 0)
+            p = decodeURIComponent(p.substring("file://".length))
+        if (p === "")
+            return
+        for (var i = 0; i < app.attachments.length; i++)
+            if (app.attachments[i].path === p)
+                return
+        app.attachments = app.attachments.concat([{
+            path: p, name: p.substring(p.lastIndexOf("/") + 1), kind: app.attachmentKind(p) }])
+    }
+    function removeAttachment(index) {
+        var a = app.attachments.slice()
+        a.splice(index, 1)
+        app.attachments = a
+    }
+
     function send(text) {
         app.pokePoll()
         var t = ("" + text).trim()
-        if (t === "")
+        // Only files the current model can read are sent; the chips of the
+        // others say so before sending.
+        var files = app.attachments.filter(app.attachmentSupported)
+        if (t === "" && files.length === 0)
             return
         // A new prompt clears the revert server-side (the reverted tail is
         // dropped on the next turn), so the banner goes away too.
         app.reverted = false
+        var shown = t
+        for (var i = 0; i < files.length; i++)
+            shown += (shown === "" ? "" : "\n") + app.kAttachmentPrefix + files[i].name
         var acc = app.messages
         acc = acc.concat(app.kTsOpen + Date.now() + app.kTsClose
-                        + app.kUserPrefix + t)
+                        + app.kUserPrefix + shown)
         app.messages = acc
-        bridge.send_prompt(t)
+        if (files.length > 0)
+            bridge.send_prompt_files(t, JSON.stringify(files.map(function(f) { return f.path })))
+        else
+            bridge.send_prompt(t)
+        app.attachments = []
     }
 
     // Session mode (build/plan agent) — a property of a particular session. The

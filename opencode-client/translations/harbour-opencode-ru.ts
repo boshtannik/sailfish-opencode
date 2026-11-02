@@ -53,6 +53,14 @@
         <source>retrying</source>
         <translation>повтор</translation>
     </message>
+    <message>
+        <source>Attach a file</source>
+        <translation>Прикрепить файл</translation>
+    </message>
+    <message>
+        <source>this model can&apos;t read it</source>
+        <translation>эта модель не может его прочитать</translation>
+    </message>
 </context>
 <context>
     <name>GlobalSettingsPage</name>

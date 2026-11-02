@@ -53,6 +53,14 @@
         <source>retrying</source>
         <translation>yritetään uudelleen</translation>
     </message>
+    <message>
+        <source>Attach a file</source>
+        <translation>Liitä tiedosto</translation>
+    </message>
+    <message>
+        <source>this model can&apos;t read it</source>
+        <translation>tämä malli ei voi lukea sitä</translation>
+    </message>
 </context>
 <context>
     <name>GlobalSettingsPage</name>

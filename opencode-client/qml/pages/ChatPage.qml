@@ -1,5 +1,6 @@
 import QtQuick 2.6
 import Sailfish.Silica 1.0
+import Sailfish.Pickers 1.0
 import "../components"
 import "../components/MdCache.js" as MdCache
 
@@ -9,6 +10,9 @@ Item {
     property var appWindow
 
     readonly property bool busy: appWindow.statusBase(appWindow.statusText) === "busy"
+    // Attached files the current model can read (they make Send usable even
+    // with an empty text field).
+    readonly property int sendableAttachments: appWindow.attachments.filter(appWindow.attachmentSupported).length
 
     // ms (unix) → "HH:MM" local time.
     function tsLabel(ms) {
@@ -356,7 +360,7 @@ Item {
             top: compactionBanner.visible ? compactionBanner.bottom : (retryBanner.visible ? retryBanner.bottom : header.bottom)
             left: parent.left
             right: parent.right
-            bottom: revertStrip.visible ? revertStrip.top : inputPanel.top
+            bottom: revertStrip.visible ? revertStrip.top : attachStrip.top
         }
         model: appWindow.chatModel
         clip: true
@@ -449,7 +453,7 @@ Item {
         anchors {
             right: parent.right
             rightMargin: Theme.horizontalPageMargin
-            bottom: inputPanel.top
+            bottom: attachStrip.top
             bottomMargin: Theme.paddingLarge
         }
         width: Math.round(Theme.itemSizeMedium * appWindow.fontScale)
@@ -1216,6 +1220,92 @@ Item {
         }
     }
 
+    // ── Attachments for the next prompt ──────────────────────────────────
+    // One chip per picked file (✕ removes it). A file the current model
+    // cannot read stays listed, marked, and is not sent.
+    Item {
+        id: attachStrip
+        anchors {
+            left: parent.left
+            right: parent.right
+            bottom: inputPanel.top
+        }
+        visible: appWindow.attachments.length > 0
+        height: visible ? attachFlow.height + 2 * Theme.paddingSmall : 0
+
+        Flow {
+            id: attachFlow
+            x: Theme.horizontalPageMargin
+            y: Theme.paddingSmall
+            width: parent.width - 2 * Theme.horizontalPageMargin
+            spacing: Theme.paddingSmall
+            Repeater {
+                model: appWindow.attachments
+                BackgroundItem {
+                    id: chip
+                    readonly property bool ok: appWindow.attachmentSupported(modelData)
+                    width: Math.min(attachFlow.width, chipRow.width + 2 * Theme.paddingMedium)
+                    height: Theme.itemSizeExtraSmall
+                    Rectangle {
+                        anchors.fill: parent
+                        radius: height / 2
+                        color: "transparent"
+                        border.width: 1
+                        border.color: chip.ok ? Theme.rgba(Theme.highlightColor, 0.6)
+                                              : Theme.rgba(Theme.errorColor, 0.8)
+                    }
+                    Row {
+                        id: chipRow
+                        anchors.centerIn: parent
+                        spacing: Theme.paddingSmall
+                        Label {
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: Math.min(implicitWidth, attachFlow.width - Theme.itemSizeExtraSmall
+                                            - 3 * Theme.paddingMedium)
+                            truncationMode: TruncationMode.Fade
+                            text: appWindow.kAttachmentPrefix + modelData.name
+                                  + (chip.ok ? "" : " · " + qsTr("this model can't read it"))
+                            color: chip.ok ? Theme.highlightColor : Theme.errorColor
+                            font.pixelSize: appWindow.fs(Theme.fontSizeExtraSmall)
+                        }
+                        Label {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "✕"
+                            color: chip.highlighted ? Theme.highlightColor : Theme.secondaryColor
+                            font.pixelSize: appWindow.fs(Theme.fontSizeSmall)
+                        }
+                    }
+                    onClicked: appWindow.removeAttachment(index)
+                }
+            }
+        }
+    }
+
+    // Image-only models get the image picker; models that also read PDFs get
+    // the content picker (images, documents, …), as the Email app does.
+    Component {
+        id: imagePickerPage
+        ImagePickerPage {
+            onSelectedContentPropertiesChanged: {
+                if (selectedContentProperties && selectedContentProperties.filePath)
+                    appWindow.addAttachment(selectedContentProperties.filePath)
+            }
+        }
+    }
+    Component {
+        id: contentPickerPage
+        ContentPickerPage {
+            title: qsTr("Attach a file")
+            onSelectedContentPropertiesChanged: {
+                if (selectedContentProperties && selectedContentProperties.filePath)
+                    appWindow.addAttachment(selectedContentProperties.filePath)
+            }
+        }
+    }
+    function openAttachPicker() {
+        pageStack.push(appWindow.canAttachPdf ? contentPickerPage : imagePickerPage)
+    }
+
     // ── Revert banner ─────────────────────────────────────────────────────
     // Shown while the session tail is reverted (worker control line
     // `[[reverted]]1`). "Restore" calls unrevert and the full history reloads.
@@ -1227,7 +1317,7 @@ Item {
         anchors {
             left: parent.left
             right: parent.right
-            bottom: inputPanel.top
+            bottom: attachStrip.top
         }
 
         Rectangle {
@@ -1436,7 +1526,8 @@ Item {
             // A pending retry is "busy" for the agent but not for the user: the
             // button stays visible (disabled) so it does not turn into a useless
             // stop button, and the composer keeps accepting text (see `input`).
-            enabled: input.text.length > 0 && header.retry === null
+            enabled: (input.text.length > 0 || chatPage.sendableAttachments > 0)
+                     && header.retry === null
             onClicked: {
                 appWindow.send(input.text)
                 input.text = ""
@@ -1484,12 +1575,24 @@ Item {
             placeholderText: chatPage.busy
                              ? qsTr("Agent is working…")
                              : qsTr("Agent prompt…")
+            // Paperclip inside the field, for models that read images/PDFs.
+            rightItem: appWindow.canAttach ? attachButton : null
             EnterKey.enabled: text.length > 0 && !chatPage.busy
             EnterKey.iconSource: "image://theme/icon-m-enter-accept"
             EnterKey.onClicked: {
                 appWindow.send(input.text)
                 input.text = ""
             }
+        }
+
+        IconButton {
+            id: attachButton
+            visible: appWindow.canAttach && input.visible
+            width: Theme.iconSizeMedium
+            height: Theme.iconSizeMedium
+            icon.source: "image://theme/icon-m-attach"
+            enabled: !chatPage.busy || chatPage.retryInfo !== null
+            onClicked: chatPage.openAttachPicker()
         }
     }
 }
