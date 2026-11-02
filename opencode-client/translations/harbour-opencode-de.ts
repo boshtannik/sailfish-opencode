@@ -77,6 +77,10 @@
         <source>Videos</source>
         <translation>Videos</translation>
     </message>
+    <message>
+        <source>Marked files can&apos;t be read by this model and won&apos;t be sent</source>
+        <translation>Markierte Dateien kann dieses Modell nicht lesen; sie werden nicht gesendet</translation>
+    </message>
 </context>
 <context>
     <name>GlobalSettingsPage</name>
@@ -1232,6 +1236,13 @@ lang drücken — entfernen</translation>
     <message>
         <source>Video</source>
         <translation>Video</translation>
+    </message>
+</context>
+<context>
+    <name>ImageViewerPage</name>
+    <message>
+        <source>Remove attachment</source>
+        <translation>Anhang entfernen</translation>
     </message>
 </context>
 </TS>

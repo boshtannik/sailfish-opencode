@@ -77,6 +77,10 @@
         <source>Videos</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>Marked files can&apos;t be read by this model and won&apos;t be sent</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>GlobalSettingsPage</name>
@@ -1238,6 +1242,13 @@ long press — remove</source>
     </message>
     <message>
         <source>Video</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>ImageViewerPage</name>
+    <message>
+        <source>Remove attachment</source>
         <translation type="unfinished"></translation>
     </message>
 </context>

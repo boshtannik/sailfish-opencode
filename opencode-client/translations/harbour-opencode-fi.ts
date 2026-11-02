@@ -77,6 +77,10 @@
         <source>Videos</source>
         <translation>Videot</translation>
     </message>
+    <message>
+        <source>Marked files can&apos;t be read by this model and won&apos;t be sent</source>
+        <translation>Merkittyjä tiedostoja tämä malli ei voi lukea, eikä niitä lähetetä</translation>
+    </message>
 </context>
 <context>
     <name>GlobalSettingsPage</name>
@@ -1232,6 +1236,13 @@ pitkä painallus — poista</translation>
     <message>
         <source>Video</source>
         <translation>Video</translation>
+    </message>
+</context>
+<context>
+    <name>ImageViewerPage</name>
+    <message>
+        <source>Remove attachment</source>
+        <translation>Poista liite</translation>
     </message>
 </context>
 </TS>

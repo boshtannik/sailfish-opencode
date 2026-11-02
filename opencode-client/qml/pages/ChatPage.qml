@@ -1,6 +1,7 @@
 import QtQuick 2.6
 import Sailfish.Silica 1.0
 import Sailfish.Pickers 1.0
+import Nemo.Thumbnailer 1.0
 import "../components"
 import "../components/MdCache.js" as MdCache
 
@@ -1243,45 +1244,152 @@ Item {
             spacing: Theme.paddingSmall
             Repeater {
                 model: appWindow.attachments
-                BackgroundItem {
-                    id: chip
+                Loader {
+                    readonly property var att: modelData
+                    readonly property int attIndex: index
                     readonly property bool ok: appWindow.attachmentSupported(modelData)
-                    width: Math.min(attachFlow.width, chipRow.width + 2 * Theme.paddingMedium)
-                    height: Theme.itemSizeExtraSmall
-                    Rectangle {
-                        anchors.fill: parent
-                        radius: height / 2
-                        color: "transparent"
-                        border.width: 1
-                        border.color: chip.ok ? Theme.rgba(Theme.highlightColor, 0.6)
-                                              : Theme.rgba(Theme.errorColor, 0.8)
-                    }
-                    Row {
-                        id: chipRow
-                        anchors.centerIn: parent
-                        spacing: Theme.paddingSmall
-                        Label {
-                            anchors.verticalCenter: parent.verticalCenter
-                            width: Math.min(implicitWidth, attachFlow.width - Theme.itemSizeExtraSmall
-                                            - 3 * Theme.paddingMedium)
-                            truncationMode: TruncationMode.Fade
-                            text: appWindow.kAttachmentPrefix + modelData.name
-                                  + (chip.ok ? "" : " · " + qsTr("this model can't read it"))
-                            color: chip.ok ? Theme.highlightColor : Theme.errorColor
-                            font.pixelSize: appWindow.fs(Theme.fontSizeExtraSmall)
-                        }
-                        Label {
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: "✕"
-                            color: chip.highlighted ? Theme.highlightColor : Theme.secondaryColor
-                            font.pixelSize: appWindow.fs(Theme.fontSizeSmall)
-                        }
-                    }
-                    onClicked: appWindow.removeAttachment(index)
+                    sourceComponent: (modelData.kind === appWindow.kInputImage
+                                      || modelData.kind === appWindow.kInputVideo)
+                                     ? thumbTile : fileChip
                 }
             }
         }
     }
+
+    // Image/video attachment: a thumbnail tile with a ✕ badge. Tap an image
+    // to see it full screen, a video to play it.
+    Component {
+        id: thumbTile
+        BackgroundItem {
+            id: thumbItem
+            readonly property var att: parent ? parent.att : null
+            readonly property int attIndex: parent ? parent.attIndex : -1
+            readonly property bool ok: parent ? parent.ok : true
+            width: Theme.itemSizeExtraLarge
+            height: width
+            Thumbnail {
+                id: thumb
+                anchors.fill: parent
+                source: thumbItem.att ? "file://" + thumbItem.att.path : ""
+                mimeType: thumbItem.att && thumbItem.att.kind === appWindow.kInputVideo ? "video/mp4" : ""
+                sourceSize.width: width
+                sourceSize.height: height
+                fillMode: Thumbnail.PreserveAspectCrop
+                opacity: thumbItem.ok ? 1 : 0.4
+            }
+            Rectangle {
+                anchors.fill: parent
+                color: "transparent"
+                radius: Theme.paddingSmall
+                border.width: thumbItem.ok ? 1 : 2
+                border.color: thumbItem.ok ? Theme.rgba(Theme.highlightColor, 0.6) : Theme.errorColor
+            }
+            Image {
+                visible: thumbItem.att && thumbItem.att.kind === appWindow.kInputVideo
+                anchors.centerIn: parent
+                source: "image://theme/icon-m-play?white"
+            }
+            // ✕: remove this attachment.
+            MouseArea {
+                anchors {
+                    top: parent.top
+                    right: parent.right
+                }
+                width: Theme.itemSizeExtraSmall
+                height: width
+                onClicked: appWindow.removeAttachment(thumbItem.attIndex)
+                Rectangle {
+                    anchors {
+                        top: parent.top
+                        right: parent.right
+                        margins: Theme.paddingSmall / 2
+                    }
+                    width: Theme.iconSizeSmall + Theme.paddingSmall
+                    height: width
+                    radius: width / 2
+                    color: Theme.rgba("black", 0.65)
+                    Label {
+                        anchors.centerIn: parent
+                        text: "✕"
+                        color: "white"
+                        font.pixelSize: Theme.fontSizeExtraSmall
+                    }
+                }
+            }
+            onClicked: {
+                if (!thumbItem.att)
+                    return
+                if (thumbItem.att.kind === appWindow.kInputVideo)
+                    Qt.openUrlExternally("file://" + thumbItem.att.path)
+                else
+                    pageStack.push(Qt.resolvedUrl("ImageViewerPage.qml"),
+                                   { appWindow: appWindow, path: thumbItem.att.path,
+                                     name: thumbItem.att.name, index: thumbItem.attIndex })
+            }
+        }
+    }
+
+    // Other attachments (PDF…): a name chip; tap removes it.
+    Component {
+        id: fileChip
+        BackgroundItem {
+            id: chip
+            readonly property var att: parent ? parent.att : null
+            readonly property int attIndex: parent ? parent.attIndex : -1
+            readonly property bool ok: parent ? parent.ok : true
+            width: Math.min(attachFlow.width, chipRow.width + 2 * Theme.paddingMedium)
+            height: Theme.itemSizeExtraSmall
+            Rectangle {
+                anchors.fill: parent
+                radius: height / 2
+                color: "transparent"
+                border.width: 1
+                border.color: chip.ok ? Theme.rgba(Theme.highlightColor, 0.6)
+                                      : Theme.rgba(Theme.errorColor, 0.8)
+            }
+            Row {
+                id: chipRow
+                anchors.centerIn: parent
+                spacing: Theme.paddingSmall
+                Label {
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: Math.min(implicitWidth, attachFlow.width - Theme.itemSizeExtraSmall
+                                    - 3 * Theme.paddingMedium)
+                    truncationMode: TruncationMode.Fade
+                    text: chip.att ? appWindow.kAttachmentPrefix + chip.att.name : ""
+                    color: chip.ok ? Theme.highlightColor : Theme.errorColor
+                    font.pixelSize: appWindow.fs(Theme.fontSizeExtraSmall)
+                }
+                Label {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "✕"
+                    color: chip.highlighted ? Theme.highlightColor : Theme.secondaryColor
+                    font.pixelSize: appWindow.fs(Theme.fontSizeSmall)
+                }
+            }
+            onClicked: appWindow.removeAttachment(chip.attIndex)
+        }
+    }
+
+    // A file the current model cannot read: say so once under the tiles.
+    Label {
+        id: attachWarning
+        visible: attachStrip.visible
+                 && appWindow.attachments.length > chatPage.sendableAttachments
+        anchors {
+            left: parent.left
+            leftMargin: Theme.horizontalPageMargin
+            right: parent.right
+            rightMargin: Theme.horizontalPageMargin
+            bottom: attachStrip.top
+        }
+        z: 7
+        text: qsTr("Marked files can't be read by this model and won't be sent")
+        wrapMode: Text.Wrap
+        color: Theme.errorColor
+        font.pixelSize: appWindow.fs(Theme.fontSizeExtraSmall)
+    }
+
 
     // ── Attach menu ──────────────────────────────────────────────────────
     // The paperclip opens this panel above the input: camera, gallery,
