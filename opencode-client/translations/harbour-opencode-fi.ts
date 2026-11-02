@@ -367,6 +367,10 @@ voice answers (Settings → Voice models).</source>
         <source>e.g. /home/defaultuser/opencode-home</source>
         <translation>esim. /home/defaultuser/opencode-home</translation>
     </message>
+    <message>
+        <source>Icon size</source>
+        <translation>Kuvakkeiden koko</translation>
+    </message>
 </context>
 <context>
     <name>SessionSettingsPage</name>

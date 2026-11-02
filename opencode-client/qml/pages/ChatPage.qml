@@ -30,10 +30,11 @@ Item {
     }
 
     // Message buttons follow the text size setting (Settings → Chat display).
-    readonly property int msgButtonSize: Math.round(Theme.itemSizeMedium * appWindow.fontScale)
-    readonly property int msgIconSize: Math.round(Theme.iconSizeMedium * appWindow.fontScale)
-    readonly property int smallButtonSize: Math.round(Theme.itemSizeSmall * appWindow.fontScale)
-    readonly property int smallIconSize: Math.round(Theme.iconSizeSmallPlus * appWindow.fontScale)
+    // Message icons follow Settings → Icon size (not the text size).
+    readonly property int msgButtonSize: Math.round(Theme.itemSizeMedium * appWindow.iconScale)
+    readonly property int msgIconSize: Math.round(Theme.iconSizeMedium * appWindow.iconScale)
+    readonly property int smallButtonSize: Math.round(Theme.itemSizeSmall * appWindow.iconScale)
+    readonly property int smallIconSize: Math.round(Theme.iconSizeSmallPlus * appWindow.iconScale)
 
     // ── Mini-markdown → HTML (Text.RichText) ──────────────────────────────
     // No third-party libraries: headings, lists, quotes, bold/italic,

@@ -313,6 +313,20 @@ ApplicationWindow {
         fontScaleSetting.value = Math.max(fontScaleMin, Math.min(fontScaleMax, v))
         fontScaleSetting.sync()
     }
+    // Size of the per-message icons (copy, speaker, code copy): its own
+    // factor (60–160 %), set with the Icon size slider in Settings.
+    readonly property real iconScaleMin: 0.6
+    readonly property real iconScaleMax: 1.6
+    property real iconScale: {
+        var v = Number(iconScaleSetting.value)
+        if (isNaN(v) || v <= 0)
+            return 1.0
+        return Math.max(iconScaleMin, Math.min(iconScaleMax, v))
+    }
+    function setIconScale(v) {
+        iconScaleSetting.value = Math.max(iconScaleMin, Math.min(iconScaleMax, v))
+        iconScaleSetting.sync()
+    }
     // Per-bubble buttons and the thinking/answer captions.
     property bool showCopyButton: showCopyButtonSetting.value !== false
     property bool showSpeakButton: showSpeakButtonSetting.value !== false
@@ -444,6 +458,11 @@ ApplicationWindow {
     ConfigurationValue {
         id: fontScaleSetting
         key: "/apps/harbour-opencode/fontScale"
+        defaultValue: 1.0
+    }
+    ConfigurationValue {
+        id: iconScaleSetting
+        key: "/apps/harbour-opencode/iconScale"
         defaultValue: 1.0
     }
     ConfigurationValue {

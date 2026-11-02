@@ -367,6 +367,10 @@ Sprachantworten zu aktivieren (Einstellungen → Sprachmodelle).</translation>
         <source>e.g. /home/defaultuser/opencode-home</source>
         <translation>z. B. /home/defaultuser/opencode-home</translation>
     </message>
+    <message>
+        <source>Icon size</source>
+        <translation>Symbolgröße</translation>
+    </message>
 </context>
 <context>
     <name>SessionSettingsPage</name>

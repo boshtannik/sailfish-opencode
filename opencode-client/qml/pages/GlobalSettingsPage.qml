@@ -4,6 +4,11 @@ import Sailfish.Silica 1.0
 Item {
     id: globalSettingsPage
 
+    // Size of the icons in the copy/speaker switches: follows the Icon size
+    // slider while it is dragged.
+    readonly property int iconPreviewSize: Math.round(Theme.iconSizeMedium
+        * (iconScaleSlider ? iconScaleSlider.sliderValue / 100 : appWindow.iconScale))
+
     property bool providerKeySet: false
     // Mirrors `auth::ANTHROPIC_PROVIDER` in Rust.
     readonly property string kAnthropicProvider: "anthropic"
@@ -126,17 +131,43 @@ Item {
 
             SectionHeader { text: qsTr("Messages") }
 
-            TextSwitch {
+            // The switches show the icons they control, at the size picked
+            // below, so the slider previews its effect live.
+            IconTextSwitch {
                 text: qsTr("Copy button on messages")
+                icon.source: "image://theme/icon-m-clipboard"
+                icon.width: globalSettingsPage.iconPreviewSize
+                icon.height: globalSettingsPage.iconPreviewSize
+                icon.sourceSize.width: globalSettingsPage.iconPreviewSize
+                icon.sourceSize.height: globalSettingsPage.iconPreviewSize
                 checked: appWindow.showCopyButton
                 onCheckedChanged: appWindow.setShowCopyButton(checked)
             }
 
-            TextSwitch {
+            IconTextSwitch {
                 text: qsTr("Speaker button on answers")
                 description: qsTr("Read an answer aloud (needs a speech synthesis model)")
+                icon.source: "image://theme/icon-m-speaker-on"
+                icon.width: globalSettingsPage.iconPreviewSize
+                icon.height: globalSettingsPage.iconPreviewSize
+                icon.sourceSize.width: globalSettingsPage.iconPreviewSize
+                icon.sourceSize.height: globalSettingsPage.iconPreviewSize
                 checked: appWindow.showSpeakButton
                 onCheckedChanged: appWindow.setShowSpeakButton(checked)
+            }
+
+            Slider {
+                id: iconScaleSlider
+                width: parent.width
+                label: qsTr("Icon size")
+                minimumValue: appWindow.iconScaleMin * 100
+                maximumValue: appWindow.iconScaleMax * 100
+                stepSize: 5
+                value: Math.round(appWindow.iconScale * 100)
+                valueText: Math.round(sliderValue) + " %"
+                // The icons above follow the slider live; the chat applies
+                // the size on release.
+                onDownChanged: if (!down) appWindow.setIconScale(sliderValue / 100)
             }
 
             TextSwitch {
