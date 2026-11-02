@@ -64,6 +64,10 @@ pub const TOOL_OPEN: &str = "[[tool]]";
 /// (`session.model.selected`) and from history (`model-switched` messages), so
 /// the feed shows which model answered what. QML mirror: `kModelSwitchTag`.
 pub const MODEL_SWITCH_TAG: &str = "[[modelswitch]]";
+/// Prefix of an attachment line inside a user message ("📎 photo.jpg"), one
+/// line per attached file under the prompt text. Used by the history feed and
+/// by QML's local echo of a sent prompt (mirror: `kAttachmentPrefix`).
+pub const ATTACHMENT_PREFIX: &str = "📎 ";
 /// Recognized STT-text label (worker sends `[[stt]] <text>`).
 pub const STT_TAG: &str = "[[stt]]";
 /// Finished TTS-WAV label (worker sends `[[tts]]<path>`).
@@ -164,6 +168,20 @@ pub fn proto_user_line(ts: u64, id: &str, text: &str) -> String {
     }
 }
 
+/// User-message text with its attachments listed under it, one
+/// [`ATTACHMENT_PREFIX`] line per file name.
+pub fn user_text_with_attachments(text: &str, names: &[String]) -> String {
+    let mut out = text.trim_end().to_string();
+    for n in names {
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        out.push_str(ATTACHMENT_PREFIX);
+        out.push_str(n);
+    }
+    out
+}
+
 /// Build an inline tool-call line. Newlines and the arg separator are flattened
 /// to spaces so the line survives the `\u001e`-joined / `\u001f`-split protocol.
 pub fn proto_tool_line(ts: u64, call_id: &str, name: &str, status: &str, text: &str) -> String {
@@ -204,6 +222,14 @@ pub fn proto_model_switch_line(ts: u64, provider: &str, model: &str, variant: &s
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn user_text_lists_attachments() {
+        let names = vec!["a.png".to_string(), "b.pdf".to_string()];
+        assert_eq!(user_text_with_attachments("look", &names), "look\n📎 a.png\n📎 b.pdf");
+        assert_eq!(user_text_with_attachments("", &names[..1]), "📎 a.png");
+        assert_eq!(user_text_with_attachments("plain", &[]), "plain");
+    }
+
     use super::*;
 
     #[test]

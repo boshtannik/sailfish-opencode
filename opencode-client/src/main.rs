@@ -2015,9 +2015,11 @@ fn history_lines_v2(
         }
         let created = m.time.created;
         match &m.body {
-            MessageBody::User { text, .. } => {
-                if !text.trim().is_empty() {
-                    lines.push(proto_user_line(created, &m.id, text));
+            MessageBody::User { text, files } => {
+                let names: Vec<String> = files.iter().map(|f| f.display_name()).collect();
+                let shown = user_text_with_attachments(text, &names);
+                if !shown.trim().is_empty() {
+                    lines.push(proto_user_line(created, &m.id, &shown));
                 }
             }
             MessageBody::Assistant(a) => {
