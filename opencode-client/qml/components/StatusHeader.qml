@@ -26,34 +26,51 @@ Item {
         }
     }
 
-    // Single-line connection header: [●] opencode [connecting | idle | busy | waiting… | error]
-    Row {
+    // Single-line header: [●] <current model ▾> [connecting | idle | busy | waiting… | error]
+    // The model name is a button (→ Session settings → Switch model); it
+    // fades out when long so the dot and the status always stay visible.
+    BackgroundItem {
+        id: modelButton
+        anchors.fill: parent
+        onClicked: appWindow.openModelPickerFromHeader()
+    }
+
+    Label {
+        id: dot
         anchors {
             left: parent.left
             leftMargin: Theme.horizontalPageMargin
             verticalCenter: parent.verticalCenter
         }
-        spacing: Theme.paddingSmall
-
-        Label {
-            text: "●"
-            color: appWindow.statusColor(appWindow.statusText)
-            font.pixelSize: appWindow ? appWindow.fs(Theme.fontSizeSmall) : Theme.fontSizeSmall
-            anchors.verticalCenter: parent.verticalCenter
+        text: "●"
+        color: appWindow.statusColor(appWindow.statusText)
+        font.pixelSize: appWindow ? appWindow.fs(Theme.fontSizeSmall) : Theme.fontSizeSmall
+    }
+    Label {
+        id: modelLabel
+        anchors {
+            left: dot.right
+            leftMargin: Theme.paddingSmall
+            right: statusLabel.left
+            rightMargin: Theme.paddingMedium
+            verticalCenter: parent.verticalCenter
         }
-        Label {
-            text: "opencode"
-            color: Theme.primaryColor
-            font.pixelSize: appWindow ? appWindow.fs(Theme.fontSizeMedium) : Theme.fontSizeMedium
-            anchors.verticalCenter: parent.verticalCenter
+        text: appWindow ? appWindow.currentModelText + "  ▾" : ""
+        truncationMode: TruncationMode.Fade
+        color: modelButton.highlighted ? Theme.highlightColor : Theme.primaryColor
+        font.pixelSize: appWindow ? appWindow.fs(Theme.fontSizeSmall) : Theme.fontSizeSmall
+    }
+    Label {
+        id: statusLabel
+        anchors {
+            right: parent.right
+            rightMargin: Theme.horizontalPageMargin
+            verticalCenter: parent.verticalCenter
         }
-        Label {
-            text: statusHeader.retry ? qsTr("waiting…") : appWindow.statusText
-            width: Math.min(implicitWidth, statusHeader.width * 0.65)
-            elide: Text.ElideRight
-            color: appWindow.statusColor(appWindow.statusText)
-            font.pixelSize: appWindow ? appWindow.fs(Theme.fontSizeExtraSmall) : Theme.fontSizeExtraSmall
-            anchors.verticalCenter: parent.verticalCenter
-        }
+        text: statusHeader.retry ? qsTr("waiting…") : appWindow.statusText
+        width: Math.min(implicitWidth, statusHeader.width * 0.4)
+        elide: Text.ElideRight
+        color: appWindow.statusColor(appWindow.statusText)
+        font.pixelSize: appWindow ? appWindow.fs(Theme.fontSizeExtraSmall) : Theme.fontSizeExtraSmall
     }
 }

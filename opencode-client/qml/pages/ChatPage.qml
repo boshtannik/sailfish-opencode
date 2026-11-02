@@ -356,7 +356,7 @@ Item {
             top: compactionBanner.visible ? compactionBanner.bottom : (retryBanner.visible ? retryBanner.bottom : header.bottom)
             left: parent.left
             right: parent.right
-            bottom: revertStrip.visible ? revertStrip.top : modelBar.top
+            bottom: revertStrip.visible ? revertStrip.top : inputPanel.top
         }
         model: appWindow.chatModel
         clip: true
@@ -449,15 +449,14 @@ Item {
         anchors {
             right: parent.right
             rightMargin: Theme.horizontalPageMargin
-            bottom: modelBar.top
+            bottom: inputPanel.top
             bottomMargin: Theme.paddingLarge
         }
         width: Math.round(Theme.itemSizeMedium * appWindow.fontScale)
         height: width
         z: 7
         visible: opacity > 0
-        opacity: (!chatList.stickBottom && chatList.count > 0 && !chatList.nearEnd()
-                  && !reasoningPanel.open) ? 1 : 0
+        opacity: (!chatList.stickBottom && chatList.count > 0 && !chatList.nearEnd()) ? 1 : 0
         Behavior on opacity { FadeAnimation { duration: 180 } }
         Rectangle {
             anchors.fill: parent
@@ -1217,154 +1216,6 @@ Item {
         }
     }
 
-    // ── Model / reasoning bar ─────────────────────────────────────────────
-    // Sits on top of the input panel: the current model (tap → picker) and,
-    // for models with reasoning levels, the level (tap → quick chooser).
-    Item {
-        id: modelBar
-        anchors {
-            left: parent.left
-            right: parent.right
-            bottom: inputPanel.top
-        }
-        height: Theme.itemSizeExtraSmall
-
-        BackgroundItem {
-            id: modelChip
-            anchors {
-                left: parent.left
-                top: parent.top
-                bottom: parent.bottom
-                right: reasoningChip.visible ? reasoningChip.left : parent.right
-            }
-            Label {
-                anchors {
-                    left: parent.left
-                    leftMargin: Theme.horizontalPageMargin
-                    right: parent.right
-                    rightMargin: Theme.paddingSmall
-                    verticalCenter: parent.verticalCenter
-                }
-                text: appWindow.currentModelText + "  ▾"
-                truncationMode: TruncationMode.Fade
-                font.pixelSize: appWindow.fs(Theme.fontSizeExtraSmall)
-                color: modelChip.highlighted ? Theme.highlightColor : Theme.secondaryHighlightColor
-            }
-            onClicked: {
-                reasoningPanel.open = false
-                appWindow.openModelPicker()
-            }
-        }
-
-        BackgroundItem {
-            id: reasoningChip
-            visible: appWindow.currentVariants.length > 0
-            anchors {
-                right: parent.right
-                top: parent.top
-                bottom: parent.bottom
-            }
-            width: reasoningLbl.implicitWidth + Theme.horizontalPageMargin + Theme.paddingLarge
-            highlighted: down || reasoningPanel.open
-            Label {
-                id: reasoningLbl
-                anchors {
-                    right: parent.right
-                    rightMargin: Theme.horizontalPageMargin
-                    verticalCenter: parent.verticalCenter
-                }
-                text: qsTr("Reasoning: %1").arg(appWindow.variantLabel(appWindow.currentVariant))
-                      + (reasoningPanel.open ? "  ▴" : "  ▾")
-                font.pixelSize: appWindow.fs(Theme.fontSizeExtraSmall)
-                color: reasoningChip.highlighted ? Theme.highlightColor : Theme.secondaryHighlightColor
-            }
-            onClicked: reasoningPanel.open = !reasoningPanel.open
-        }
-
-        // Hairline separating the bar from the chat above.
-        Rectangle {
-            anchors {
-                left: parent.left
-                right: parent.right
-                top: parent.top
-            }
-            height: 1
-            color: Theme.rgba(Theme.primaryColor, 0.10)
-        }
-    }
-
-    // Quick reasoning chooser: one tap from the chat, no page change. It fades
-    // and slides in with opacity/translation only (both run on the scene
-    // graph, no layout per frame).
-    Rectangle {
-        id: reasoningPanel
-        property bool open: false
-        anchors {
-            left: parent.left
-            right: parent.right
-            bottom: modelBar.top
-        }
-        height: reasoningFlow.height + 2 * Theme.paddingMedium
-        // Opaque base so the chat does not show through, tinted with the theme.
-        color: "black"
-        z: 8
-        Rectangle {
-            anchors.fill: parent
-            color: Theme.rgba(Theme.highlightDimmerColor, 0.85)
-        }
-        visible: opacity > 0
-        opacity: open && appWindow.currentVariants.length > 0 ? 1 : 0
-        transform: Translate {
-            y: reasoningPanel.open ? 0 : Theme.paddingLarge
-            Behavior on y { NumberAnimation { duration: 140; easing.type: Easing.OutQuad } }
-        }
-        Behavior on opacity { FadeAnimation { duration: 140 } }
-
-        // Session switches or a model without levels close it.
-        Connections {
-            target: appWindow
-            onCurrentSessionIdChanged: reasoningPanel.open = false
-        }
-
-        Flow {
-            id: reasoningFlow
-            x: Theme.horizontalPageMargin
-            y: Theme.paddingMedium
-            width: parent.width - 2 * Theme.horizontalPageMargin
-            spacing: Theme.paddingMedium
-            Repeater {
-                model: appWindow.variantChoices
-                BackgroundItem {
-                    id: choice
-                    readonly property bool selected: modelData === appWindow.currentVariant
-                    width: choiceLbl.implicitWidth + 2 * Theme.paddingLarge
-                    height: Theme.itemSizeExtraSmall
-                    Rectangle {
-                        anchors.fill: parent
-                        radius: height / 2
-                        color: choice.selected ? Theme.rgba(Theme.highlightBackgroundColor, 0.35)
-                                               : "transparent"
-                        border.width: 1
-                        border.color: choice.selected ? Theme.highlightColor
-                                                      : Theme.rgba(Theme.primaryColor, 0.25)
-                    }
-                    Label {
-                        id: choiceLbl
-                        anchors.centerIn: parent
-                        text: appWindow.variantLabel(modelData)
-                        font.pixelSize: appWindow.fs(Theme.fontSizeSmall)
-                        color: (choice.selected || choice.highlighted)
-                               ? Theme.highlightColor : Theme.primaryColor
-                    }
-                    onClicked: {
-                        appWindow.setCurrentVariant(modelData)
-                        reasoningPanel.open = false
-                    }
-                }
-            }
-        }
-    }
-
     // ── Revert banner ─────────────────────────────────────────────────────
     // Shown while the session tail is reverted (worker control line
     // `[[reverted]]1`). "Restore" calls unrevert and the full history reloads.
@@ -1376,7 +1227,7 @@ Item {
         anchors {
             left: parent.left
             right: parent.right
-            bottom: modelBar.top
+            bottom: inputPanel.top
         }
 
         Rectangle {

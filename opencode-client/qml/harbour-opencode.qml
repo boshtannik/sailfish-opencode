@@ -1484,6 +1484,16 @@ ApplicationWindow {
         })
     }
 
+    // Carousel pane of the session settings (see PagedView below).
+    readonly property int kPageSessionSettings: 3
+
+    // The model button in the chat header: go to the session settings pane
+    // and open its "Switch model" page there, so Back lands on the settings.
+    function openModelPickerFromHeader() {
+        app.requestPage(app.kPageSessionSettings)
+        app.openModelPicker()
+    }
+
     // Jump to the API-key field of `provider` in Settings (locked models).
     signal providerKeyRequested(string provider)
     function openProviderKeySettings(provider) {

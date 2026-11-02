@@ -427,7 +427,7 @@ Item {
                 text: globalSettingsPage.anthropicKeyRejected
                       ? qsTr("Anthropic rejected the saved API key, so Claude models are locked. Enter a valid key to unlock them.")
                       : (globalSettingsPage.anthropicKeySet
-                         ? qsTr("API key saved ✓ Pick a Claude model from the model bar above the chat input. Enter a new key to replace it.")
+                         ? qsTr("API key saved ✓ Pick a Claude model from the model name at the top of the chat. Enter a new key to replace it.")
                          : qsTr("Add your Anthropic API key to unlock Claude models. Free OpenCode models work without a key."))
                 wrapMode: Text.Wrap
                 color: globalSettingsPage.anthropicKeyRejected
