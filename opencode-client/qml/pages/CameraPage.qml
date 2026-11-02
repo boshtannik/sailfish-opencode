@@ -96,7 +96,9 @@ Page {
         anchors.fill: parent
         source: camera
         fillMode: VideoOutput.PreserveAspectFit
-        orientation: camera.orientation
+        // gst-droid already delivers the viewfinder upright (the Jolla
+        // camera does not rotate it either); rotating by
+        // camera.orientation turned it 90° to the right.
     }
 
     Timer {
