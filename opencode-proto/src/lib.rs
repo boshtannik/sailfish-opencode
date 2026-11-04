@@ -59,6 +59,11 @@ pub const REVERTED_TAG: &str = "[[reverted]]";
 /// `callID` and replaces it in place. `status` ∈ `running` | `completed` |
 /// `error`; `text` is the command/path/pattern (newlines flattened).
 pub const TOOL_OPEN: &str = "[[tool]]";
+/// Model switch divider: `[[modelswitch]]<providerID>\u001f<modelID>\u001f<variant>`.
+/// Rendered by QML as a slim "Switched to <model> · <reasoning>" row, both live
+/// (`session.model.selected`) and from history (`model-switched` messages), so
+/// the feed shows which model answered what. QML mirror: `kModelSwitchTag`.
+pub const MODEL_SWITCH_TAG: &str = "[[modelswitch]]";
 /// Recognized STT-text label (worker sends `[[stt]] <text>`).
 pub const STT_TAG: &str = "[[stt]]";
 /// Finished TTS-WAV label (worker sends `[[tts]]<path>`).
@@ -180,9 +185,34 @@ pub fn proto_live_line(ts: u64, tag: &str, text: &str, part_id: &str) -> String 
     proto_line(ts, &format!("{tag}{text}{PART_ID_OPEN}{part_id}{TAG_CLOSE}"))
 }
 
+/// Build a model-switch divider line (see [`MODEL_SWITCH_TAG`]). An empty
+/// `variant` means the server default.
+pub fn proto_model_switch_line(ts: u64, provider: &str, model: &str, variant: &str) -> String {
+    let clean = |s: &str| -> String {
+        s.chars()
+            .map(|c| if c == '\n' || c == '\r' || c == ARG_SEP { ' ' } else { c })
+            .collect()
+    };
+    let body = format!(
+        "{MODEL_SWITCH_TAG}{}{ARG_SEP}{}{ARG_SEP}{}",
+        clean(provider),
+        clean(model),
+        clean(variant)
+    );
+    proto_line(ts, &body)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn model_switch_line_has_three_fields() {
+        let line = proto_model_switch_line(5, "opencode", "big-pickle", "");
+        assert_eq!(line, "[[t:5]][[modelswitch]]opencode\u{1f}big-pickle\u{1f}");
+        let line = proto_model_switch_line(6, "anthropic", "claude-opus-4-8", "high");
+        assert_eq!(line, "[[t:6]][[modelswitch]]anthropic\u{1f}claude-opus-4-8\u{1f}high");
+    }
 
     /// The live line must end with the part-id marker so QML can key the bubble
     /// by part, independent of its position in the feed.

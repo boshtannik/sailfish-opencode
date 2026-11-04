@@ -261,6 +261,14 @@ pub fn dispatch_v2(
                 // execution.* arm below drives the turn end. Real failures
                 // (non-aborted) still surface as errors.
                 if !is_aborted_error(d.error.as_ref()) {
+                    // A refused key: lock that provider's models again and
+                    // send the user to Settings (the error names no provider,
+                    // so take it from the session's current model).
+                    if error_type(d.error.as_ref()) == Some(k::ERR_PROVIDER_AUTH) {
+                        if let Some((provider, _)) = state.session_models.get(&d.session_id) {
+                            crate::auth::mark_rejected(provider);
+                        }
+                    }
                     on_session_error_v2(stream, d.error.as_ref());
                 }
                 // The step is over and the turn cannot make progress here: a
@@ -409,6 +417,17 @@ pub fn dispatch_v2(
                     d.session_id.clone(),
                     (d.model.providerID.clone(), d.model.id.clone()),
                 );
+                // Divider in the shown session's feed: "Switched to <model>".
+                if stream.current_session == Some(d.session_id.as_str()) {
+                    if let Ok(mut q) = stream.pending.lock() {
+                        q.push(crate::markers::proto_model_switch_line(
+                            now_ms(),
+                            &d.model.providerID,
+                            &d.model.id,
+                            d.model.variant.as_deref().unwrap_or(""),
+                        ));
+                    }
+                }
                 true
             }
             Err(e) => from_data_error(env, &e),
@@ -768,15 +787,28 @@ fn record_step_model(model: Option<&serde_json::Value>) -> Option<(String, Strin
     Some((provider, id))
 }
 
+/// `type` of a v2 structured error (`{type, message, …}`).
+fn error_type(error: Option<&serde_json::Value>) -> Option<&str> {
+    use crate::types::v2::keys as k;
+    error.and_then(|e| e.get(k::TYPE)).and_then(|v| v.as_str())
+}
+
 /// v2 `session.error`-equivalent: surface a structured error as a feed line.
+/// Key and routing failures get their own text that says what to do.
 fn on_session_error_v2(stream: &mut StreamState<'_>, error: Option<&serde_json::Value>) {
+    use crate::types::v2::keys as k;
     let msg = human_session_error_value(error);
     if msg.is_empty() {
         return;
     }
     log::error!("v2 session error: {msg}");
+    let key = match error_type(error) {
+        Some(k::ERR_PROVIDER_AUTH) => crate::i18n::K_PROVIDER_KEY_REJECTED,
+        Some(k::ERR_PROVIDER_NO_ROUTE) => crate::i18n::K_MODEL_UNAVAILABLE,
+        _ => crate::i18n::K_SERVER_ERROR,
+    };
     if let Ok(mut q) = stream.pending.lock() {
-        q.push(err_line(now_ms(), crate::i18n::K_SERVER_ERROR, &[msg]));
+        q.push(err_line(now_ms(), key, &[msg]));
     }
     // Connection/stream errors set status to "error" from run_stream (SSE closed).
     // Session execution errors (including quota/free-usage) must not flip the header

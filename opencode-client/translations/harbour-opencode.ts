@@ -33,6 +33,26 @@
         <source>Restore</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>Answer</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Thinking</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>attempt #%1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>in %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>retrying</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>GlobalSettingsPage</name>
@@ -193,6 +213,151 @@
         <source>Notification sound</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>API key saved ✓ Pick a Claude model from the model name at the top of the chat. Enter a new key to replace it.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Add your Anthropic API key to unlock Claude models. Free OpenCode models work without a key.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Anthropic API key</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Anthropic API key (sk-ant-…)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Anthropic rejected the saved API key, so Claude models are locked. Enter a valid key to unlock them.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Appearance</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Changes take effect after restarting the app</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Claude (Anthropic)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Copy button on messages</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Download and select a speech synthesis model to enable
+voice answers (Settings → Voice models).</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enter this code on the opened page:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Expand thinking</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>General</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Get a key</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Label thinking and answers</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Messages</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open browser again</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>OpenCode account</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Preview: the quick brown fox jumps over the lazy dog.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Read an answer aloud (needs a speech synthesis model)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Save key</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Show &quot;Answer&quot; above the model&apos;s replies; thinking is always marked</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Show model thinking (reasoning)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Show the model&apos;s reasoning as it works, not just final answers</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Show the whole reasoning instead of its last lines (tap &quot;Thinking&quot; on a message to toggle it)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Sign in to your opencode.ai account. The app shows a code to enter in the browser.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Sign in with OpenCode</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Sign-in failed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Signed in ✓</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Speaker button on answers</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Text size</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Thinking</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Waiting for authorization…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Working directory (restart required)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>e.g. /home/defaultuser/opencode-home</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>SessionSettingsPage</name>
@@ -335,6 +500,14 @@
     <message>
         <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="424"/>
         <source>No available models</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>How much the model thinks before it answers</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reasoning</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -659,7 +832,7 @@ long press — remove</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>OpenCode API key saved</source>
+        <source>API key saved for %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -667,11 +840,39 @@ long press — remove</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Failed to save the OpenCode API key: %1</source>
+        <source>Failed to save the API key for %1: %2</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Signed in to OpenCode</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This session is no longer available on the server, so a new session was started.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>this session no longer exists. Open another session or start a new one</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Could not switch the model: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The %1 API key was rejected (%2). Check the key and try again.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>API key saved for %1, but it could not be verified (%2)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The API key was rejected: %1. Enter a valid key in Settings to unlock these models.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1. Add the provider&apos;s API key in Settings or pick another model.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -748,6 +949,248 @@ long press — remove</source>
     <message>
         <location filename="../qml/harbour-opencode.qml" line="2396"/>
         <source>Leave empty to name automatically</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Answer required</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Confirm the opened link to continue</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Default</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Expected a URL</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Expected a date (YYYY-MM-DD)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Expected a date and time</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Expected a number</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Expected an email address</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Expected an integer</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Expected selections</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Expected text</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Expected yes or no</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Extra high</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>High</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>I have completed this step</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Invalid format</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Low</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Max</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Medium</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Minimal</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Must be at least %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Must be at least %1 characters</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Must be at most %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Must be at most %1 characters</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No model selected</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Nothing to compact: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Off</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Ready</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select an available option</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select at least %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select at least one option</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select at most %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select only available options</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Switched to %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The form is no longer available</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Working…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Yes</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Your own answer…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>busy</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>connecting</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>error</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>idle</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>ModelPickerPage</name>
+    <message>
+        <source>%1 locked</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 models</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 providers · %2 available</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>1 model</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Add your %1 API key in Settings to unlock %2.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Add your %1 API key in Settings to unlock its models.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Model</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Needs an API key</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No available models</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reasoning: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Show %1 more providers</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Show 1 more provider</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The %1 API key was rejected. Enter a valid key in Settings to unlock these models.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>locked</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>StatusHeader</name>
+    <message>
+        <source>waiting…</source>
         <translation type="unfinished"></translation>
     </message>
 </context>

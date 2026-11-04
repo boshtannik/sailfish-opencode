@@ -33,6 +33,26 @@
         <source>Restore</source>
         <translation>Wiederherstellen</translation>
     </message>
+    <message>
+        <source>Answer</source>
+        <translation>Antwort</translation>
+    </message>
+    <message>
+        <source>Thinking</source>
+        <translation>Denkt nach</translation>
+    </message>
+    <message>
+        <source>attempt #%1</source>
+        <translation>Versuch %1</translation>
+    </message>
+    <message>
+        <source>in %1</source>
+        <translation>in %1</translation>
+    </message>
+    <message>
+        <source>retrying</source>
+        <translation>erneuter Versuch</translation>
+    </message>
 </context>
 <context>
     <name>GlobalSettingsPage</name>
@@ -193,6 +213,152 @@
         <source>Notification sound</source>
         <translation>Benachrichtigungston</translation>
     </message>
+    <message>
+        <source>API key saved ✓ Pick a Claude model from the model name at the top of the chat. Enter a new key to replace it.</source>
+        <translation>API-Schlüssel gespeichert ✓ Wähle ein Claude-Modell über den Modellnamen oben im Chat. Gib einen neuen Schlüssel ein, um ihn zu ersetzen.</translation>
+    </message>
+    <message>
+        <source>Add your Anthropic API key to unlock Claude models. Free OpenCode models work without a key.</source>
+        <translation>Füge deinen Anthropic-API-Schlüssel hinzu, um die Claude-Modelle freizuschalten. Die kostenlosen OpenCode-Modelle funktionieren ohne Schlüssel.</translation>
+    </message>
+    <message>
+        <source>Anthropic API key</source>
+        <translation>Anthropic-API-Schlüssel</translation>
+    </message>
+    <message>
+        <source>Anthropic API key (sk-ant-…)</source>
+        <translation>Anthropic-API-Schlüssel (sk-ant-…)</translation>
+    </message>
+    <message>
+        <source>Anthropic rejected the saved API key, so Claude models are locked. Enter a valid key to unlock them.</source>
+        <translation>Anthropic hat den gespeicherten API-Schlüssel abgelehnt, daher sind die Claude-Modelle gesperrt. Gib einen gültigen Schlüssel ein, um sie freizuschalten.</translation>
+    </message>
+    <message>
+        <source>Appearance</source>
+        <translation>Darstellung</translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation>Abbrechen</translation>
+    </message>
+    <message>
+        <source>Changes take effect after restarting the app</source>
+        <translation>Änderungen werden nach einem Neustart der App wirksam</translation>
+    </message>
+    <message>
+        <source>Claude (Anthropic)</source>
+        <translation>Claude (Anthropic)</translation>
+    </message>
+    <message>
+        <source>Copy button on messages</source>
+        <translation>Kopier-Schaltfläche an Nachrichten</translation>
+    </message>
+    <message>
+        <source>Download and select a speech synthesis model to enable
+voice answers (Settings → Voice models).</source>
+        <translation>Lade ein Sprachsynthesemodell herunter und wähle es aus, um
+Sprachantworten zu aktivieren (Einstellungen → Sprachmodelle).</translation>
+    </message>
+    <message>
+        <source>Enter this code on the opened page:</source>
+        <translation>Gib diesen Code auf der geöffneten Seite ein:</translation>
+    </message>
+    <message>
+        <source>Expand thinking</source>
+        <translation>Denkprozess ausklappen</translation>
+    </message>
+    <message>
+        <source>General</source>
+        <translation>Allgemein</translation>
+    </message>
+    <message>
+        <source>Get a key</source>
+        <translation>Schlüssel holen</translation>
+    </message>
+    <message>
+        <source>Label thinking and answers</source>
+        <translation>Denkprozess und Antworten beschriften</translation>
+    </message>
+    <message>
+        <source>Messages</source>
+        <translation>Nachrichten</translation>
+    </message>
+    <message>
+        <source>Open browser again</source>
+        <translation>Browser erneut öffnen</translation>
+    </message>
+    <message>
+        <source>OpenCode account</source>
+        <translation>OpenCode-Konto</translation>
+    </message>
+    <message>
+        <source>Preview: the quick brown fox jumps over the lazy dog.</source>
+        <translation>Vorschau: Franz jagt im komplett verwahrlosten Taxi quer durch Bayern.</translation>
+    </message>
+    <message>
+        <source>Read an answer aloud (needs a speech synthesis model)</source>
+        <translation>Antwort vorlesen (benötigt ein Sprachsynthesemodell)</translation>
+    </message>
+    <message>
+        <source>Save key</source>
+        <translation>Schlüssel speichern</translation>
+    </message>
+    <message>
+        <source>Show &quot;Answer&quot; above the model&apos;s replies; thinking is always marked</source>
+        <translation>„Antwort“ über den Antworten des Modells anzeigen; der Denkprozess ist immer markiert</translation>
+    </message>
+    <message>
+        <source>Show model thinking (reasoning)</source>
+        <translation>Denkprozess des Modells anzeigen</translation>
+    </message>
+    <message>
+        <source>Show the model&apos;s reasoning as it works, not just final answers</source>
+        <translation>Den Denkprozess des Modells während der Arbeit zeigen, nicht nur die fertigen Antworten</translation>
+    </message>
+    <message>
+        <source>Show the whole reasoning instead of its last lines (tap &quot;Thinking&quot; on a message to toggle it)</source>
+        <translation>Den ganzen Denkprozess statt nur der letzten Zeilen zeigen (tippe in einer Nachricht auf „Denkt nach“, um umzuschalten)</translation>
+    </message>
+    <message>
+        <source>Sign in to your opencode.ai account. The app shows a code to enter in the browser.</source>
+        <translation>Melde dich bei deinem opencode.ai-Konto an. Die App zeigt einen Code, den du im Browser eingibst.</translation>
+    </message>
+    <message>
+        <source>Sign in with OpenCode</source>
+        <translation>Mit OpenCode anmelden</translation>
+    </message>
+    <message>
+        <source>Sign-in failed</source>
+        <translation>Anmeldung fehlgeschlagen</translation>
+    </message>
+    <message>
+        <source>Signed in ✓</source>
+        <translation>Angemeldet ✓</translation>
+    </message>
+    <message>
+        <source>Speaker button on answers</source>
+        <translation>Lautsprecher-Schaltfläche an Antworten</translation>
+    </message>
+    <message>
+        <source>Text size</source>
+        <translation>Textgröße</translation>
+    </message>
+    <message>
+        <source>Thinking</source>
+        <translation>Denkprozess</translation>
+    </message>
+    <message>
+        <source>Waiting for authorization…</source>
+        <translation>Warte auf Autorisierung…</translation>
+    </message>
+    <message>
+        <source>Working directory (restart required)</source>
+        <translation>Arbeitsverzeichnis (Neustart erforderlich)</translation>
+    </message>
+    <message>
+        <source>e.g. /home/defaultuser/opencode-home</source>
+        <translation>z. B. /home/defaultuser/opencode-home</translation>
+    </message>
 </context>
 <context>
     <name>SessionSettingsPage</name>
@@ -336,6 +502,14 @@
         <location filename="../../i18n/qml-src/pages/SessionSettingsPage.qml" line="424"/>
         <source>No available models</source>
         <translation>Keine verfügbaren Modelle</translation>
+    </message>
+    <message>
+        <source>How much the model thinks before it answers</source>
+        <translation>Wie viel das Modell nachdenkt, bevor es antwortet</translation>
+    </message>
+    <message>
+        <source>Reasoning</source>
+        <translation>Denkstufe</translation>
     </message>
 </context>
 <context>
@@ -721,6 +895,296 @@ lang drücken — entfernen</translation>
         <location filename="../qml/harbour-opencode.qml" line="2396"/>
         <source>Leave empty to name automatically</source>
         <translation>Leer lassen, um automatisch zu benennen</translation>
+    </message>
+    <message>
+        <source>%1. Add the provider&apos;s API key in Settings or pick another model.</source>
+        <translation>%1. Füge den API-Schlüssel des Anbieters in den Einstellungen hinzu oder wähle ein anderes Modell.</translation>
+    </message>
+    <message>
+        <source>API key saved for %1</source>
+        <translation>API-Schlüssel für %1 gespeichert</translation>
+    </message>
+    <message>
+        <source>API key saved for %1, but it could not be verified (%2)</source>
+        <translation>API-Schlüssel für %1 gespeichert, konnte aber nicht geprüft werden (%2)</translation>
+    </message>
+    <message>
+        <source>Answer required</source>
+        <translation>Antwort erforderlich</translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation>Abbrechen</translation>
+    </message>
+    <message>
+        <source>Confirm the opened link to continue</source>
+        <translation>Bestätige den geöffneten Link, um fortzufahren</translation>
+    </message>
+    <message>
+        <source>Could not switch the model: %1</source>
+        <translation>Modell konnte nicht gewechselt werden: %1</translation>
+    </message>
+    <message>
+        <source>Default</source>
+        <translation>Standard</translation>
+    </message>
+    <message>
+        <source>Enter the API key first</source>
+        <translation>Gib zuerst den API-Schlüssel ein</translation>
+    </message>
+    <message>
+        <source>Expected a URL</source>
+        <translation>URL erwartet</translation>
+    </message>
+    <message>
+        <source>Expected a date (YYYY-MM-DD)</source>
+        <translation>Datum erwartet (JJJJ-MM-TT)</translation>
+    </message>
+    <message>
+        <source>Expected a date and time</source>
+        <translation>Datum und Uhrzeit erwartet</translation>
+    </message>
+    <message>
+        <source>Expected a number</source>
+        <translation>Zahl erwartet</translation>
+    </message>
+    <message>
+        <source>Expected an email address</source>
+        <translation>E-Mail-Adresse erwartet</translation>
+    </message>
+    <message>
+        <source>Expected an integer</source>
+        <translation>Ganzzahl erwartet</translation>
+    </message>
+    <message>
+        <source>Expected selections</source>
+        <translation>Auswahl erwartet</translation>
+    </message>
+    <message>
+        <source>Expected text</source>
+        <translation>Text erwartet</translation>
+    </message>
+    <message>
+        <source>Expected yes or no</source>
+        <translation>Ja oder Nein erwartet</translation>
+    </message>
+    <message>
+        <source>Extra high</source>
+        <translation>Sehr hoch</translation>
+    </message>
+    <message>
+        <source>Failed to save the API key for %1: %2</source>
+        <translation>API-Schlüssel für %1 konnte nicht gespeichert werden: %2</translation>
+    </message>
+    <message>
+        <source>High</source>
+        <translation>Hoch</translation>
+    </message>
+    <message>
+        <source>I have completed this step</source>
+        <translation>Ich habe diesen Schritt erledigt</translation>
+    </message>
+    <message>
+        <source>Invalid format</source>
+        <translation>Ungültiges Format</translation>
+    </message>
+    <message>
+        <source>Low</source>
+        <translation>Niedrig</translation>
+    </message>
+    <message>
+        <source>Max</source>
+        <translation>Maximum</translation>
+    </message>
+    <message>
+        <source>Medium</source>
+        <translation>Mittel</translation>
+    </message>
+    <message>
+        <source>Minimal</source>
+        <translation>Minimal</translation>
+    </message>
+    <message>
+        <source>Must be at least %1</source>
+        <translation>Muss mindestens %1 sein</translation>
+    </message>
+    <message>
+        <source>Must be at least %1 characters</source>
+        <translation>Mindestens %1 Zeichen</translation>
+    </message>
+    <message>
+        <source>Must be at most %1</source>
+        <translation>Darf höchstens %1 sein</translation>
+    </message>
+    <message>
+        <source>Must be at most %1 characters</source>
+        <translation>Höchstens %1 Zeichen</translation>
+    </message>
+    <message>
+        <source>No</source>
+        <translation>Nein</translation>
+    </message>
+    <message>
+        <source>No model selected</source>
+        <translation>Kein Modell ausgewählt</translation>
+    </message>
+    <message>
+        <source>Nothing to compact: %1</source>
+        <translation>Nichts zu komprimieren: %1</translation>
+    </message>
+    <message>
+        <source>Off</source>
+        <translation>Aus</translation>
+    </message>
+    <message>
+        <source>OpenCode sign-in failed: %1</source>
+        <translation>Anmeldung bei OpenCode fehlgeschlagen: %1</translation>
+    </message>
+    <message>
+        <source>Ready</source>
+        <translation>Bereit</translation>
+    </message>
+    <message>
+        <source>Select an available option</source>
+        <translation>Wähle eine verfügbare Option</translation>
+    </message>
+    <message>
+        <source>Select at least %1</source>
+        <translation>Wähle mindestens %1</translation>
+    </message>
+    <message>
+        <source>Select at least one option</source>
+        <translation>Wähle mindestens eine Option</translation>
+    </message>
+    <message>
+        <source>Select at most %1</source>
+        <translation>Wähle höchstens %1</translation>
+    </message>
+    <message>
+        <source>Select only available options</source>
+        <translation>Wähle nur verfügbare Optionen</translation>
+    </message>
+    <message>
+        <source>Signed in to OpenCode</source>
+        <translation>Bei OpenCode angemeldet</translation>
+    </message>
+    <message>
+        <source>Switched to %1</source>
+        <translation>Gewechselt zu %1</translation>
+    </message>
+    <message>
+        <source>The %1 API key was rejected (%2). Check the key and try again.</source>
+        <translation>Der %1-API-Schlüssel wurde abgelehnt (%2). Prüfe den Schlüssel und versuche es erneut.</translation>
+    </message>
+    <message>
+        <source>The API key was rejected: %1. Enter a valid key in Settings to unlock these models.</source>
+        <translation>Der API-Schlüssel wurde abgelehnt: %1. Gib in den Einstellungen einen gültigen Schlüssel ein, um diese Modelle freizuschalten.</translation>
+    </message>
+    <message>
+        <source>The form is no longer available</source>
+        <translation>Das Formular ist nicht mehr verfügbar</translation>
+    </message>
+    <message>
+        <source>This session is no longer available on the server, so a new session was started.</source>
+        <translation>Diese Sitzung ist auf dem Server nicht mehr verfügbar, daher wurde eine neue Sitzung gestartet.</translation>
+    </message>
+    <message>
+        <source>Working…</source>
+        <translation>Arbeitet…</translation>
+    </message>
+    <message>
+        <source>Yes</source>
+        <translation>Ja</translation>
+    </message>
+    <message>
+        <source>Your own answer…</source>
+        <translation>Eigene Antwort…</translation>
+    </message>
+    <message>
+        <source>this session no longer exists. Open another session or start a new one</source>
+        <translation>diese Sitzung existiert nicht mehr. Öffne eine andere Sitzung oder starte eine neue</translation>
+    </message>
+    <message>
+        <source>busy</source>
+        <translation>beschäftigt</translation>
+    </message>
+    <message>
+        <source>connecting</source>
+        <translation>verbinde</translation>
+    </message>
+    <message>
+        <source>error</source>
+        <translation>Fehler</translation>
+    </message>
+    <message>
+        <source>idle</source>
+        <translation>bereit</translation>
+    </message>
+</context>
+<context>
+    <name>ModelPickerPage</name>
+    <message>
+        <source>%1 locked</source>
+        <translation>%1 gesperrt</translation>
+    </message>
+    <message>
+        <source>%1 models</source>
+        <translation>%1 Modelle</translation>
+    </message>
+    <message>
+        <source>%1 providers · %2 available</source>
+        <translation>%1 Anbieter · %2 verfügbar</translation>
+    </message>
+    <message>
+        <source>1 model</source>
+        <translation>1 Modell</translation>
+    </message>
+    <message>
+        <source>Add your %1 API key in Settings to unlock %2.</source>
+        <translation>Füge deinen %1-API-Schlüssel in den Einstellungen hinzu, um %2 freizuschalten.</translation>
+    </message>
+    <message>
+        <source>Add your %1 API key in Settings to unlock its models.</source>
+        <translation>Füge deinen %1-API-Schlüssel in den Einstellungen hinzu, um seine Modelle freizuschalten.</translation>
+    </message>
+    <message>
+        <source>Model</source>
+        <translation>Modell</translation>
+    </message>
+    <message>
+        <source>Needs an API key</source>
+        <translation>Benötigt einen API-Schlüssel</translation>
+    </message>
+    <message>
+        <source>No available models</source>
+        <translation>Keine verfügbaren Modelle</translation>
+    </message>
+    <message>
+        <source>Reasoning: %1</source>
+        <translation>Denkstufe: %1</translation>
+    </message>
+    <message>
+        <source>Show %1 more providers</source>
+        <translation>%1 weitere Anbieter anzeigen</translation>
+    </message>
+    <message>
+        <source>Show 1 more provider</source>
+        <translation>1 weiteren Anbieter anzeigen</translation>
+    </message>
+    <message>
+        <source>The %1 API key was rejected. Enter a valid key in Settings to unlock these models.</source>
+        <translation>Der %1-API-Schlüssel wurde abgelehnt. Gib in den Einstellungen einen gültigen Schlüssel ein, um diese Modelle freizuschalten.</translation>
+    </message>
+    <message>
+        <source>locked</source>
+        <translation>gesperrt</translation>
+    </message>
+</context>
+<context>
+    <name>StatusHeader</name>
+    <message>
+        <source>waiting…</source>
+        <translation>warte…</translation>
     </message>
 </context>
 </TS>

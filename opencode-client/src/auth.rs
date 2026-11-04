@@ -2,7 +2,8 @@
 //!
 //! The OpenCode provider ("big-pickle" models) is authenticated either with a
 //! plain API key (see [`has_api_key`]) or with the OpenCode Console account
-//! (device login, see [`ConsoleLogin`]).
+//! (device login, see [`ConsoleLogin`]). Other providers, such as Anthropic
+//! (Claude), take a plain API key.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -27,33 +28,206 @@ const CONSOLE_METHOD: &str = "device";
 /// the "signed in" feedback prompt without hammering the daemon.
 const POLL_MS: u64 = 1_500;
 
-/// Path to opencode's credential store (`$XDG_DATA_HOME/opencode/auth.json`,
-/// defaulting to `~/.local/share/opencode/auth.json`).
-pub fn auth_json_path() -> Option<std::path::PathBuf> {
-    let data_home = std::env::var_os("XDG_DATA_HOME")
-        .map(std::path::PathBuf::from)
-        .or_else(|| {
-            std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/share"))
-        })?;
-    Some(data_home.join("opencode").join("auth.json"))
+/// Provider id of Anthropic (Claude models), stored as a plain API key.
+pub const ANTHROPIC_PROVIDER: &str = "anthropic";
+
+/// Browser page where the user creates an Anthropic API key.
+pub const ANTHROPIC_KEYS_URL: &str = "https://platform.claude.com/settings/keys";
+
+/// Providers with an active credential on the server, as last reported by
+/// `GET /api/credential`. opencode v2 keeps credentials in its own database
+/// (the v1 `auth.json` is no longer written), so the worker refreshes this
+/// cache from the server and QML reads it synchronously.
+static CONNECTED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// Replace the cached set of connected providers.
+pub fn set_connected(providers: Vec<String>) {
+    if let Ok(mut g) = CONNECTED.lock() {
+        *g = providers;
+    }
 }
 
-/// Whether an API-key credential is stored for `provider`.
+/// Whether a credential (API key or account sign-in) is stored for `provider`.
 pub fn has_api_key(provider: &str) -> bool {
-    let Some(path) = auth_json_path() else {
-        return false;
-    };
-    let Ok(text) = std::fs::read_to_string(&path) else {
-        return false;
-    };
-    let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) else {
-        return false;
-    };
-    json.get(provider)
-        .and_then(|v| v.get("key"))
-        .and_then(|k| k.as_str())
-        .map(|k| !k.trim().is_empty())
+    CONNECTED
+        .lock()
+        .map(|g| g.iter().any(|p| p == provider))
         .unwrap_or(false)
+}
+
+// ── Rejected keys ─────────────────────────────────────────────────────────────
+//
+// The server stores a key without checking it. When a provider later answers
+// a turn with `provider.auth` (HTTP 401, e.g. "invalid x-api-key"), the key is
+// marked rejected here: its models are listed as locked again and Settings
+// asks for a new key. Saving a key clears the mark.
+
+static REJECTED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+/// Set when the locked/unlocked state changed and the model catalog must be
+/// rebuilt; the worker polls it with [`take_models_dirty`].
+static MODELS_DIRTY: AtomicBool = AtomicBool::new(false);
+
+/// Mark `provider`'s stored key as rejected by the provider.
+pub fn mark_rejected(provider: &str) {
+    if provider.is_empty() {
+        return;
+    }
+    if let Ok(mut g) = REJECTED.lock() {
+        if !g.iter().any(|p| p == provider) {
+            log::warn!("auth: the {provider} API key was rejected; locking its models");
+            g.push(provider.to_string());
+            MODELS_DIRTY.store(true, Ordering::SeqCst);
+        }
+    }
+}
+
+/// Forget a rejection (a new key was saved for `provider`).
+pub fn clear_rejected(provider: &str) {
+    if let Ok(mut g) = REJECTED.lock() {
+        let before = g.len();
+        g.retain(|p| p != provider);
+        if g.len() != before {
+            MODELS_DIRTY.store(true, Ordering::SeqCst);
+        }
+    }
+}
+
+/// Whether the stored key of `provider` was rejected by the provider.
+pub fn is_rejected(provider: &str) -> bool {
+    REJECTED
+        .lock()
+        .map(|g| g.iter().any(|p| p == provider))
+        .unwrap_or(false)
+}
+
+/// True once after the locked state changed (see [`MODELS_DIRTY`]).
+pub fn take_models_dirty() -> bool {
+    MODELS_DIRTY.swap(false, Ordering::SeqCst)
+}
+
+// ── Key validation (Anthropic) ────────────────────────────────────────────────
+
+/// Anthropic endpoint used to check a key before it is stored: listing models
+/// is free and needs only a valid key.
+pub const ANTHROPIC_MODELS_URL: &str = "https://api.anthropic.com/v1/models";
+const ANTHROPIC_KEY_HEADER: &str = "x-api-key";
+const ANTHROPIC_VERSION_HEADER: &str = "anthropic-version";
+const ANTHROPIC_VERSION: &str = "2023-06-01";
+const KEY_CHECK_TIMEOUT_SECS: u64 = 12;
+
+/// Outcome of checking a key with its provider before saving it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum KeyCheck {
+    /// The provider accepted the key.
+    Valid,
+    /// The provider refused the key (HTTP 401/403); it must not be stored.
+    Rejected(String),
+    /// The provider could not be asked (offline, timeout, 5xx…). The key is
+    /// stored anyway: refusing it would lock out a user who is just offline.
+    Unverified(String),
+}
+
+/// Classify an HTTP status of the key check.
+pub fn key_check_from_status(status: u16) -> KeyCheck {
+    match status {
+        200..=299 => KeyCheck::Valid,
+        401 | 403 => KeyCheck::Rejected(format!("HTTP {status}")),
+        other => KeyCheck::Unverified(format!("HTTP {other}")),
+    }
+}
+
+/// Ask Anthropic whether `key` is valid.
+pub async fn check_anthropic_key(key: &str) -> KeyCheck {
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(KEY_CHECK_TIMEOUT_SECS))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => return KeyCheck::Unverified(e.to_string()),
+    };
+    match client
+        .get(ANTHROPIC_MODELS_URL)
+        .header(ANTHROPIC_KEY_HEADER, key)
+        .header(ANTHROPIC_VERSION_HEADER, ANTHROPIC_VERSION)
+        .send()
+        .await
+    {
+        Ok(resp) => key_check_from_status(resp.status().as_u16()),
+        Err(e) => KeyCheck::Unverified(e.to_string()),
+    }
+}
+
+// ── Locked catalog ────────────────────────────────────────────────────────────
+//
+// Providers the app can unlock in-app (Settings → API key). Without a key the
+// server lists none of their models, so the picker reads them from opencode's
+// own copy of the models.dev catalog (`$XDG_CACHE_HOME/opencode/models.json`,
+// `{provider: {models: {id: {name}}}}`) to show them greyed out.
+
+/// Providers whose models are shown locked until a key is saved.
+pub const LOCKABLE_PROVIDERS: &[&str] = &[ANTHROPIC_PROVIDER];
+
+const CATALOG_MODELS: &str = "models";
+const CATALOG_NAME: &str = "name";
+
+/// Path to opencode's cached models.dev catalog.
+pub fn models_catalog_path() -> Option<std::path::PathBuf> {
+    let cache = std::env::var_os("XDG_CACHE_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".cache")))?;
+    Some(cache.join("opencode").join("models.json"))
+}
+
+/// `(model id, display name)` of `provider` from a models.dev catalog value,
+/// sorted by id. Empty when the provider or its models are missing.
+pub fn catalog_models(catalog: &serde_json::Value, provider: &str) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = catalog
+        .get(provider)
+        .and_then(|p| p.get(CATALOG_MODELS))
+        .and_then(|m| m.as_object())
+        .map(|models| {
+            models
+                .iter()
+                .map(|(id, m)| {
+                    let name = m.get(CATALOG_NAME).and_then(|n| n.as_str()).unwrap_or(id);
+                    (id.clone(), name.to_string())
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    out.sort();
+    out
+}
+
+/// Read the cached catalog; `None` when it is missing or unreadable (the
+/// picker then shows the provider with an "add a key" hint and no models).
+pub fn read_models_catalog() -> Option<serde_json::Value> {
+    let path = models_catalog_path()?;
+    let text = match std::fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(e) => {
+            log::warn!("auth: no models catalog at {path:?}: {e}");
+            return None;
+        }
+    };
+    match serde_json::from_str(&text) {
+        Ok(v) => Some(v),
+        Err(e) => {
+            log::warn!("auth: models catalog {path:?} is not valid JSON: {e}");
+            None
+        }
+    }
+}
+
+/// Ask the server which providers are connected and update the cache.
+pub async fn refresh_connected(client: &impl OpenCodeApi) {
+    match client.connected_providers().await {
+        Ok(list) => {
+            log::info!("auth: connected providers: {list:?}");
+            set_connected(list);
+        }
+        Err(e) => log::warn!("auth: failed to list credentials: {e}"),
+    }
 }
 
 // ── OpenCode Console account login ────────────────────────────────────────────
@@ -308,5 +482,49 @@ mod tests {
         assert_eq!(v["state"], "waiting");
         assert_eq!(v["code"], "AB");
         assert_eq!(v["url"], "https://example.org/device?user_code=AB");
+    }
+
+    /// Only 401/403 refuse a key; anything else (rate limit, outage) must not
+    /// lock a user out.
+    #[test]
+    fn key_check_classifies_status() {
+        assert_eq!(key_check_from_status(200), KeyCheck::Valid);
+        assert_eq!(key_check_from_status(401), KeyCheck::Rejected("HTTP 401".into()));
+        assert_eq!(key_check_from_status(403), KeyCheck::Rejected("HTTP 403".into()));
+        assert_eq!(key_check_from_status(429), KeyCheck::Unverified("HTTP 429".into()));
+        assert_eq!(key_check_from_status(529), KeyCheck::Unverified("HTTP 529".into()));
+    }
+
+    /// models.dev shape (`{provider:{models:{id:{name}}}}`), sorted by id;
+    /// a missing name falls back to the id, a missing provider gives nothing.
+    #[test]
+    fn catalog_models_reads_provider() {
+        let v = serde_json::json!({
+            "anthropic": { "id": "anthropic", "models": {
+                "claude-opus-5-5": { "name": "Claude Opus 5.5" },
+                "claude-haiku-5-5": { "name": "Claude Haiku 5.5" },
+                "claude-x": {}
+            } }
+        });
+        assert_eq!(
+            catalog_models(&v, ANTHROPIC_PROVIDER),
+            vec![
+                ("claude-haiku-5-5".to_string(), "Claude Haiku 5.5".to_string()),
+                ("claude-opus-5-5".to_string(), "Claude Opus 5.5".to_string()),
+                ("claude-x".to_string(), "claude-x".to_string()),
+            ]
+        );
+        assert!(catalog_models(&v, "openai").is_empty());
+    }
+
+    #[test]
+    fn rejection_marks_and_clears() {
+        let p = "test-provider-rejection";
+        assert!(!is_rejected(p));
+        mark_rejected(p);
+        assert!(is_rejected(p));
+        assert!(take_models_dirty());
+        clear_rejected(p);
+        assert!(!is_rejected(p));
     }
 }

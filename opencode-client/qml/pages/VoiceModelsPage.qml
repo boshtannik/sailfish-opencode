@@ -339,7 +339,7 @@ Page {
                 text: qsTr("↓ download\n→ start using\n✓ selected\n✕ cancel\nlong press — remove")
                 wrapMode: Text.Wrap
                 color: Theme.secondaryColor
-                font.pixelSize: Theme.fontSizeExtraSmall
+                font.pixelSize: appWindow.fs(Theme.fontSizeExtraSmall)
             }
 
             ComboBox {
@@ -371,7 +371,7 @@ Page {
                       .arg((appWindow.voiceModels || []).length)
                       .arg(appWindow.humanSize(vmPage.downloadedBytes()))
                 color: Theme.secondaryColor
-                font.pixelSize: Theme.fontSizeExtraSmall
+                font.pixelSize: appWindow.fs(Theme.fontSizeExtraSmall)
                 wrapMode: Text.Wrap
             }
         }
@@ -398,7 +398,7 @@ textCol.height
                 anchors.verticalCenter: parent.verticalCenter
                 text: vmPage.sectionExpanded(kind) ? "▾" : "▸"
                 color: parent.highlighted ? Theme.highlightColor : Theme.secondaryColor
-                font.pixelSize: Theme.fontSizeSmall
+                font.pixelSize: appWindow.fs(Theme.fontSizeSmall)
             }
 
             Label {
@@ -411,7 +411,7 @@ textCol.height
                       ? title + " (" + done + ")"
                       : title + " (" + done + "/" + total + ")"
                 color: parent.highlighted ? Theme.highlightColor : Theme.primaryColor
-                font.pixelSize: Theme.fontSizeSmall
+                font.pixelSize: appWindow.fs(Theme.fontSizeSmall)
                 truncationMode: TruncationMode.Fade
             }
 
@@ -431,14 +431,14 @@ textCol.height
                     color: vmPage.isSelected({ model_id: modelId, downloaded: downloaded })
                            ? Theme.highlightColor
                            : (item.highlighted ? Theme.highlightColor : Theme.primaryColor)
-                    font.pixelSize: Theme.fontSizeSmall
+                    font.pixelSize: appWindow.fs(Theme.fontSizeSmall)
                 }
                 Label {
                     width: parent.width
                     text: sub
                     wrapMode: Text.Wrap
                     color: Theme.secondaryColor
-                    font.pixelSize: Theme.fontSizeExtraSmall
+                    font.pixelSize: appWindow.fs(Theme.fontSizeExtraSmall)
                 }
                 Row {
                     visible: dlstate === appWindow.stateDownloading
@@ -454,7 +454,7 @@ textCol.height
                         width: parent.width - Theme.paddingMedium - Theme.iconSizeSmall
                         text: vmPage.liveInfo(modelId)
                         color: Theme.primaryColor
-                        font.pixelSize: Theme.fontSizeSmall
+                        font.pixelSize: appWindow.fs(Theme.fontSizeSmall)
                         truncationMode: TruncationMode.Fade
                     }
                 }
@@ -474,7 +474,7 @@ textCol.height
                 color: vmPage.glyphColor({ state: dlstate,
                                           model_id: modelId,
                                           downloaded: downloaded })
-                font.pixelSize: Theme.fontSizeSmall
+                font.pixelSize: appWindow.fs(Theme.fontSizeSmall)
             }
 
             Rectangle {

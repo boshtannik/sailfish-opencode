@@ -1,6 +1,7 @@
 import QtQuick 2.6
 import Sailfish.Silica 1.0
 import "../components"
+import "../components/MdCache.js" as MdCache
 
 Item {
     id: chatPage
@@ -23,6 +24,12 @@ Item {
     function dimColor(c, f) {
         return Qt.rgba(c.r * f, c.g * f, c.b * f, 1)
     }
+
+    // Message buttons follow the text size setting (Settings → Chat display).
+    readonly property int msgButtonSize: Math.round(Theme.itemSizeMedium * appWindow.fontScale)
+    readonly property int msgIconSize: Math.round(Theme.iconSizeMedium * appWindow.fontScale)
+    readonly property int smallButtonSize: Math.round(Theme.itemSizeSmall * appWindow.fontScale)
+    readonly property int smallIconSize: Math.round(Theme.iconSizeSmallPlus * appWindow.fontScale)
 
     // ── Mini-markdown → HTML (Text.RichText) ──────────────────────────────
     // No third-party libraries: headings, lists, quotes, bold/italic,
@@ -69,6 +76,17 @@ Item {
         s = s.replace(/(^|[\s(])_([^_]+)_(?=\s|[)\]!.,:;]|$)/g, "$1<i>$2</i>")
         s = s.replace(/(^|[\s(])[*]([^*]+)[*](?=\s|[)\]!.,:;]|$)/g, "$1<i>$2</i>")
         return s
+    }
+
+    // Rendered prose per source text: a delegate re-created while scrolling
+    // reuses the HTML instead of re-running the regex pipeline (MdCache.js).
+    function mdRender(text) {
+        var hit = MdCache.get(text)
+        if (hit !== undefined)
+            return hit
+        var html = chatPage.mdBlock(chatPage.mdEscape(text))
+        MdCache.put(text, html)
+        return html
     }
 
     // Block-level per line: headings, lists, quotes, rules, fenced code.
@@ -168,6 +186,14 @@ Item {
                 var url = lm[2] !== undefined ? lm[2] : lm[3]
                 var title = lm[1] !== undefined ? lm[1] : url
                 segs.push({ code: false, link: true, text: title, url: url, lang: "" })
+                continue
+            }
+            // A blank line ends a paragraph: each paragraph is its own segment,
+            // so while an answer streams only the paragraph being written is
+            // laid out again (one long rich-text block re-laid out the whole
+            // answer on every update and made the feed stutter).
+            if (l.trim() === "") {
+                flush()
                 continue
             }
             prose.push(l)
@@ -273,7 +299,7 @@ Item {
 
         Label {
             text: retryBannerText
-            font.pixelSize: Theme.fontSizeSmall
+            font.pixelSize: appWindow.fs(Theme.fontSizeSmall)
             color: Theme.primaryColor
             elide: Text.ElideRight
             anchors {
@@ -314,7 +340,7 @@ Item {
         }
         Label {
             text: chatPage.appWindow.kCompactingNotice
-            font.pixelSize: Theme.fontSizeSmall
+            font.pixelSize: appWindow.fs(Theme.fontSizeSmall)
             color: Theme.primaryColor
             anchors {
                 left: compactionSpinner.right
@@ -341,11 +367,173 @@ Item {
         // yanking the view. `stickBottom` is re-evaluated on every user scroll
         // (movementEnded) and reset when the session changes.
         property bool stickBottom: true
-        onCountChanged: if (stickBottom) positionViewAtEnd()
-        onContentHeightChanged: if (stickBottom) positionViewAtEnd()
-        onMovementEnded: stickBottom = atYEnd
-        onFlickEnded: stickBottom = atYEnd
-        VerticalScrollDecorator {}
+        // Keep bubbles built a few screens beyond the viewport: creating a
+        // delegate parses markdown and lays out rich text, which stalled the
+        // flick each time a bubble scrolled into view.
+        cacheBuffer: Math.max(0, height * 3)
+        // Long answers make tall bubbles on a large screen and the stock flick
+        // speed needed many swipes to move through them: allow faster flicks
+        // (relative to the platform default, whatever the screen density).
+        readonly property real flickBoost: 1.75
+        Component.onCompleted: {
+            console.log("chat list flick: default max velocity " + maximumFlickVelocity
+                        + ", deceleration " + flickDeceleration
+                        + ", pixel ratio " + Theme.pixelRatio)
+            maximumFlickVelocity = maximumFlickVelocity * flickBoost
+        }
+        // Following the end: growth of the feed (a new bubble, a streamed
+        // paragraph) glides the view down instead of jumping, coalesced to one
+        // move per frame. Big jumps (opening a session) go straight to the end.
+        // The user touching the list stops following; it resumes when they come
+        // back near the bottom or send a message.
+        readonly property real bottomSlack: Theme.itemSizeLarge
+        function nearEnd() {
+            return contentY + height >= originY + contentHeight - bottomSlack
+        }
+        function followEnd() {
+            if (!stickBottom || moving || dragging)
+                return
+            var target = Math.max(originY, originY + contentHeight - height)
+            var delta = target - contentY
+            if (Math.abs(delta) < 1)
+                return
+            if (delta < 0 || delta > height * 1.5) {
+                followAnim.stop()
+                positionViewAtEnd()
+                return
+            }
+            followAnim.to = target
+            followAnim.restart()
+        }
+        NumberAnimation {
+            id: followAnim
+            target: chatList
+            property: "contentY"
+            duration: 180
+            easing.type: Easing.OutCubic
+        }
+        Timer {
+            id: followTick
+            interval: 16
+            onTriggered: chatList.followEnd()
+        }
+        // New lines arrived while the user reads further up (jump button dot).
+        property bool unseen: false
+        onStickBottomChanged: if (stickBottom) unseen = false
+        onCountChanged: {
+            if (!stickBottom)
+                unseen = true
+            // The user's own new message always brings the feed back to the end.
+            if (count > 0) {
+                var last = appWindow.chatModel.get(count - 1)
+                if (last && appWindow.lineIs(appWindow.stripTs("" + last.text), appWindow.kUserPrefix))
+                    stickBottom = true
+            }
+            if (stickBottom)
+                followTick.restart()
+        }
+        onContentHeightChanged: if (stickBottom) followTick.restart()
+        onHeightChanged: if (stickBottom) followTick.restart()
+        onMovementStarted: {
+            followAnim.stop()
+            stickBottom = false
+        }
+        onMovementEnded: stickBottom = nearEnd()
+        onFlickEnded: stickBottom = nearEnd()
+    }
+
+    // Jump to the latest message: shown while the user is reading further up;
+    // a dot marks content that arrived meanwhile.
+    Item {
+        id: jumpToEnd
+        anchors {
+            right: parent.right
+            rightMargin: Theme.horizontalPageMargin
+            bottom: inputPanel.top
+            bottomMargin: Theme.paddingLarge
+        }
+        width: Math.round(Theme.itemSizeMedium * appWindow.fontScale)
+        height: width
+        z: 7
+        visible: opacity > 0
+        opacity: (!chatList.stickBottom && chatList.count > 0 && !chatList.nearEnd()) ? 1 : 0
+        Behavior on opacity { FadeAnimation { duration: 180 } }
+        Rectangle {
+            anchors.fill: parent
+            radius: width / 2
+            color: Theme.rgba(Theme.highlightDimmerColor, 0.92)
+            border.width: 1
+            border.color: jumpArea.pressed ? Theme.highlightColor
+                                           : Theme.rgba(Theme.highlightColor, 0.6)
+        }
+        Image {
+            anchors.centerIn: parent
+            width: Math.round(Theme.iconSizeMedium * appWindow.fontScale)
+            height: width
+            sourceSize.width: width
+            sourceSize.height: height
+            source: "image://theme/icon-m-down?" + (jumpArea.pressed ? Theme.highlightColor : Theme.primaryColor)
+        }
+        Rectangle {
+            visible: chatList.unseen
+            anchors { top: parent.top; right: parent.right }
+            width: Theme.paddingLarge
+            height: width
+            radius: width / 2
+            color: Theme.highlightColor
+        }
+        MouseArea {
+            id: jumpArea
+            anchors.fill: parent
+            onClicked: {
+                chatList.stickBottom = true
+                chatList.positionViewAtEnd()
+            }
+        }
+    }
+
+    // Scroll position thumb for the chat. Silica's VerticalScrollDecorator
+    // eases its thumb towards the position, so during continuous scrolling it
+    // visibly trailed the content. This one is bound straight to the view's
+    // visible area and moves in the same frame as the content.
+    Item {
+        id: chatScrollBar
+        anchors {
+            top: chatList.top
+            bottom: chatList.bottom
+            right: chatList.right
+        }
+        width: Theme.paddingMedium
+        z: 6
+        readonly property real ratio: Math.min(1, chatList.visibleArea.heightRatio)
+        readonly property bool needed: ratio < 1 && chatList.contentHeight > chatList.height
+        visible: opacity > 0
+        opacity: needed && (chatList.moving || scrollBarLinger.running) ? 1 : 0
+        Behavior on opacity { FadeAnimation { duration: 250 } }
+
+        // Keep it up briefly after the movement ends, like the stock decorator.
+        Timer { id: scrollBarLinger; interval: 700 }
+        Connections {
+            target: chatList
+            onMovementEnded: scrollBarLinger.restart()
+        }
+
+        Rectangle {
+            readonly property real minH: Theme.itemSizeSmall
+            width: Theme.paddingSmall
+            radius: width / 2
+            x: parent.width - width - Theme.paddingSmall / 2
+            height: Math.max(minH, chatScrollBar.height * chatScrollBar.ratio)
+            // Position over the free track, so the thumb reaches both ends
+            // even when it is taller than the true visible ratio.
+            y: {
+                var free = 1 - chatScrollBar.ratio
+                var pos = free > 0 ? chatList.visibleArea.yPosition / free : 0
+                return Math.max(0, Math.min(1, pos)) * (chatScrollBar.height - height)
+            }
+            color: Theme.highlightColor
+            opacity: 0.8
+        }
     }
 
     // Opening/switching a session jumps back to the bottom (fresh history).
@@ -486,11 +674,16 @@ Item {
             // Grow the item by the menu height while it is open so every menu
             // entry fits (without this only the first entry was visible on
             // short bubbles).
-            property bool menuOpen: userMenu._open
+            // The menu is created on first long-press only: a ContextMenu per
+            // bubble was a large share of each delegate's creation cost.
+            property Item userMenu: null
+            property bool menuOpen: line.userMenu !== null && line.userMenu._open
             height: visible ? (line.isTool
                                ? toolRow.height + Theme.paddingSmall
-                               : bubble.height + Theme.paddingSmall
-                                 + (line.menuOpen ? userMenu.height : 0)) : 0
+                               : (line.isModelSwitch
+                                  ? switchRow.height
+                                  : bubble.height + Theme.paddingSmall
+                                    + (line.menuOpen ? line.userMenu.height : 0))) : 0
 
             // Raw line from the worker: `[[t:<ms>]]>>> text` (user) or
             // `[[t:<ms>]]text` (agent); a live user line from `send()` — `[[t:<ms>]]>>> text`.
@@ -519,6 +712,17 @@ Item {
             property bool isTool: appWindow.lineIs(appWindow.stripTs(line.raw),
                                                    appWindow.kToolTag)
             property bool isSystem: line.isError || line.isSvc
+            // "Switched to <model>" divider (see kModelSwitchTag).
+            property bool isModelSwitch: appWindow.lineIs(appWindow.stripTs(line.raw),
+                                                          appWindow.kModelSwitchTag)
+            // The model's own answer (not thinking, not a tool row, not a notice).
+            property bool isAnswer: !line.isUser && !line.isThink && !line.isSystem && !line.isTool
+                                    && !line.isModelSwitch
+            // Thinking bubbles start compact (last lines only) unless the user
+            // chose "Expand thinking"; tapping the caption toggles one bubble.
+            property bool thinkOpen: appWindow.expandThinking
+            readonly property bool thinkCollapsed: line.isThink && !line.thinkOpen
+            readonly property real collapsedThinkHeight: 3 * appWindow.fs(Theme.fontSizeSmall) * 1.45
             // Tool-row fields (empty for non-tool lines).
             property string toolName: appWindow.toolField(line.raw, 1)
             property string toolStatus: appWindow.toolField(line.raw, 2)
@@ -550,7 +754,35 @@ Item {
             // The body split into display segments: prose, fenced-code blocks
             // and whole-line links — so copy buttons can sit next to each block.
             // `{code, link, text, url, lang}` (see chatPage.splitBody).
-            property var segments: line.isTool ? [] : chatPage.splitBody(line.body)
+            property var segments: (line.isTool || line.isModelSwitch) ? [] : chatPage.splitBody(line.body)
+            // Segments mirrored into a ListModel in place: while an answer
+            // streams, only the segment that grew is laid out again. A plain
+            // array model rebuilt every segment (and its rich text) on every
+            // update, which stalled scrolling during generation.
+            ListModel { id: segModel }
+            function syncSegments() {
+                var s = line.segments
+                while (segModel.count > s.length)
+                    segModel.remove(segModel.count - 1)
+                for (var i = 0; i < s.length; i++) {
+                    var it = { code: !!s[i].code, link: !!s[i].link, text: s[i].text || "",
+                               url: s[i].url || "", lang: s[i].lang || "" }
+                    if (i >= segModel.count) {
+                        segModel.append(it)
+                        continue
+                    }
+                    var cur = segModel.get(i)
+                    if (cur.code !== it.code || cur.link !== it.link) {
+                        segModel.set(i, it)
+                        continue
+                    }
+                    if (cur.text !== it.text) segModel.setProperty(i, "text", it.text)
+                    if (cur.url !== it.url) segModel.setProperty(i, "url", it.url)
+                    if (cur.lang !== it.lang) segModel.setProperty(i, "lang", it.lang)
+                }
+            }
+            onSegmentsChanged: syncSegments()
+            Component.onCompleted: syncSegments()
             // Server messageID of this bubble (user lines only): enables the
             // long-press revert/fork menu. Empty for agent/system bubbles.
             property string msgId: appWindow.msgIdOf(line.raw)
@@ -558,7 +790,7 @@ Item {
 
             Rectangle {
                 id: bubble
-                visible: !line.isTool
+                visible: !line.isTool && !line.isModelSwitch
                 radius: Theme.paddingMedium
                 color: line.isThink
                        ? Theme.rgba(Theme.primaryColor, 0.05)
@@ -570,148 +802,213 @@ Item {
                                 ? Theme.rgba(Theme.secondaryColor, 0.10)
                                 : Theme.rgba(Theme.primaryColor, 0.12))))
                 width: line.maxW
-                height: bodyCol.height
+                height: bodyClip.y + bodyClip.height
                         + (footRow.height > 0 ? footRow.height + Theme.paddingSmall : 0)
-                        + 2 * Theme.paddingSmall
+                        + Theme.paddingSmall
                 anchors.right: line.isUser ? parent.right : undefined
                 anchors.left: line.isUser ? undefined : parent.left
                 anchors.rightMargin: line.isUser ? Theme.horizontalPageMargin : 0
                 anchors.leftMargin: line.isUser ? 0 : Theme.horizontalPageMargin
 
+                // Thinking is marked by an accent bar on its left edge.
+                Rectangle {
+                    visible: line.isThink
+                    x: Theme.paddingSmall / 2
+                    y: bubble.radius
+                    width: Math.max(2, Theme.paddingSmall / 2)
+                    height: bubble.height - 2 * bubble.radius
+                    radius: width / 2
+                    color: Theme.secondaryHighlightColor
+                    opacity: 0.8
+                }
+
+                // Caption: "Thinking ▸/▾" (tap to expand) or "Answer".
+                Item {
+                    id: caption
+                    readonly property bool shown: line.isThink || (line.isAnswer && appWindow.labelRoles)
+                    visible: shown
+                    x: bodyClip.x
+                    y: Theme.paddingSmall
+                    width: bodyClip.width
+                    height: shown ? captionLbl.height + Theme.paddingSmall : 0
+                    Label {
+                        id: captionLbl
+                        text: line.isThink
+                              ? qsTr("Thinking") + (line.thinkOpen ? "  ▾" : "  ▸")
+                              : qsTr("Answer")
+                        font.pixelSize: appWindow.fs(Theme.fontSizeExtraSmall)
+                        font.bold: true
+                        color: line.isThink ? Theme.secondaryHighlightColor : Theme.highlightColor
+                    }
+                    MouseArea {
+                        // Generous touch target around the small caption.
+                        anchors.fill: parent
+                        anchors.margins: -Theme.paddingMedium
+                        enabled: line.isThink
+                        onClicked: line.thinkOpen = !line.thinkOpen
+                    }
+                }
+
+                // Collapsed thinking shows its last lines (the live tail while
+                // it streams); expanded shows everything.
+                Item {
+                    id: bodyClip
+                    x: Theme.paddingSmall + (line.isThink ? Theme.paddingSmall : 0)
+                    y: caption.y + caption.height
+                    width: bubble.width - Theme.paddingSmall - x
+                    height: line.thinkCollapsed ? Math.min(bodyCol.height, line.collapsedThinkHeight)
+                                                : bodyCol.height
+                    clip: line.thinkCollapsed && bodyCol.height > line.collapsedThinkHeight
+
                 Column {
                     id: bodyCol
-                    x: Theme.paddingSmall
-                    y: Theme.paddingSmall
-                    width: bubble.width - 2 * Theme.paddingSmall
+                    y: line.thinkCollapsed ? Math.min(0, bodyClip.height - bodyCol.height) : 0
+                    width: bodyClip.width
                     spacing: Theme.paddingSmall
 
                     Repeater {
-                        model: line.segments
-                        delegate: Item {
+                        model: segModel
+                        // Each segment builds only the layout of its own kind.
+                        // Before, every segment created the prose label, the link
+                        // row and a whole code card (flickable, two buttons,
+                        // scroll decorator) and hid two of them, which made each
+                        // bubble cost dozens of objects as it scrolled into view.
+                        delegate: Loader {
                             id: segItem
-                            width: bodyCol.width
-                            property var seg: modelData
-                            height: segItem.seg.code ? segBox.height
-                                    : segItem.seg.link ? linkRow.height
-                                                       : proseLbl.height
+                            // Role object of segModel: code/link/text/url/lang.
+                            property var seg: model
+                            sourceComponent: segItem.seg.code ? codeSegment
+                                             : (segItem.seg.link ? linkSegment : proseSegment)
 
                             // Free-form prose (markdown → rich text).
-                            Label {
-                                id: proseLbl
-                                visible: !segItem.seg.code && !segItem.seg.link
-                                width: parent.width
-                                text: chatPage.mdBlock(chatPage.mdEscape(segItem.seg.text))
-                                textFormat: Text.RichText
-                                wrapMode: Text.Wrap
-                                onLinkActivated: Qt.openUrlExternally(link)
-                                font.pixelSize: Theme.fontSizeSmall
-                                font.italic: line.isThink
-                                color: (line.isThink || line.isSvc)
-                                       ? Theme.secondaryColor : Theme.primaryColor
+                            Component {
+                                id: proseSegment
+                                Label {
+                                    width: bodyCol.width
+                                    text: chatPage.mdRender(segItem.seg.text)
+                                    textFormat: Text.RichText
+                                    wrapMode: Text.Wrap
+                                    onLinkActivated: Qt.openUrlExternally(link)
+                                    font.pixelSize: appWindow.fs(Theme.fontSizeSmall)
+                                    font.italic: line.isThink
+                                    color: (line.isThink || line.isSvc)
+                                           ? Theme.secondaryColor : Theme.primaryColor
+                                }
                             }
 
-                            // A whole-line link: the URL itself + a copy button
-                            // right beside it.
                             // Whole-line link: label + copy button. The button is pinned to the row's
                             // right edge and the label is cut off at the icon's edge —
                             // the icon can never sit ON the text.
-                            Item {
-                                id: linkRow
-                                visible: segItem.seg.link
-                                width: parent.width
-                                height: Math.max(urlLbl.height, copyLinkBtn.height)
-                                Label {
-                                    id: urlLbl
-                                    anchors.left: parent.left
-                                    anchors.right: copyLinkBtn.left
-                                    anchors.rightMargin: Theme.paddingSmall
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    text: segItem.seg.text || segItem.seg.url
-                                    wrapMode: Text.Wrap
-                                    clip: true
-                                    font.pixelSize: Theme.fontSizeSmall
-                                    font.family: "monospace"
-                                    color: Theme.highlightColor
-                                }
-                                // Tap the URL itself to open it (the copy button
-                                // sits to the right).
-                                MouseArea {
-                                    anchors.fill: urlLbl
-                                    onClicked: Qt.openUrlExternally(segItem.seg.url)
-                                }
-                                IconButton {
-                                    id: copyLinkBtn
-                                    width: Theme.itemSizeSmall
-                                    height: Theme.itemSizeSmall
-                                    anchors.right: parent.right
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    icon.source: "image://theme/icon-m-clipboard"
-                                    onClicked: appWindow.copyText(segItem.seg.url)
+                            Component {
+                                id: linkSegment
+                                Item {
+                                    id: linkRow
+                                    width: bodyCol.width
+                                    height: Math.max(urlLbl.height, copyLinkBtn.height)
+                                    Label {
+                                        id: urlLbl
+                                        anchors.left: parent.left
+                                        anchors.right: copyLinkBtn.left
+                                        anchors.rightMargin: Theme.paddingSmall
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: segItem.seg.text || segItem.seg.url
+                                        wrapMode: Text.Wrap
+                                        clip: true
+                                        font.pixelSize: appWindow.fs(Theme.fontSizeSmall)
+                                        font.family: "monospace"
+                                        color: Theme.highlightColor
+                                    }
+                                    // Tap the URL itself to open it (the copy button
+                                    // sits to the right).
+                                    MouseArea {
+                                        anchors.fill: urlLbl
+                                        onClicked: Qt.openUrlExternally(segItem.seg.url)
+                                    }
+                                    IconButton {
+                                        id: copyLinkBtn
+                                        width: chatPage.smallButtonSize
+                                        height: chatPage.smallButtonSize
+                                        anchors.right: parent.right
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        icon.source: "image://theme/icon-m-clipboard"
+                                        icon.width: chatPage.smallIconSize
+                                        icon.height: chatPage.smallIconSize
+                                        icon.sourceSize.width: chatPage.smallIconSize
+                                        icon.sourceSize.height: chatPage.smallIconSize
+                                        onClicked: appWindow.copyText(segItem.seg.url)
+                                    }
                                 }
                             }
 
                             // Fenced code block: own card with a light header bar
                             // and a copy button in its top-right corner.
-                            Rectangle {
-                                id: segBox
-                                visible: segItem.seg.code
-                                width: parent.width
-                                radius: Theme.paddingSmall
-                                color: Theme.rgba(Theme.highlightColor, 0.08)
-                                height: codeHeader.height
-                                        + codeLbl.height + 2 * Theme.paddingSmall
+                            Component {
+                                id: codeSegment
                                 Rectangle {
-                                    id: codeHeader
-                                    width: parent.width
-                                    height: Theme.itemSizeSmall
+                                    id: segBox
+                                    width: bodyCol.width
                                     radius: Theme.paddingSmall
-                                    color: Theme.rgba(Theme.highlightColor, 0.15)
-                                    Label {
+                                    color: Theme.rgba(Theme.highlightColor, 0.08)
+                                    height: codeHeader.height
+                                            + codeLbl.height + 2 * Theme.paddingSmall
+                                    Rectangle {
+                                        id: codeHeader
+                                        width: parent.width
+                                        height: chatPage.smallButtonSize
+                                        radius: Theme.paddingSmall
+                                        color: Theme.rgba(Theme.highlightColor, 0.15)
+                                        Label {
+                                            anchors.left: parent.left
+                                            anchors.leftMargin: Theme.paddingSmall
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: segItem.seg.lang
+                                            visible: segItem.seg.lang.length > 0
+                                            color: Theme.secondaryColor
+                                            font.pixelSize: appWindow.fs(Theme.fontSizeExtraSmall)
+                                        }
+                                        IconButton {
+                                            id: copyCodeBtn
+                                            anchors.right: parent.right
+                                            anchors.rightMargin: Theme.paddingSmall
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            width: chatPage.smallButtonSize
+                                            height: chatPage.smallButtonSize
+                                            icon.source: "image://theme/icon-m-clipboard"
+                                            icon.width: chatPage.smallIconSize
+                                            icon.height: chatPage.smallIconSize
+                                            icon.sourceSize.width: chatPage.smallIconSize
+                                            icon.sourceSize.height: chatPage.smallIconSize
+                                            onClicked: appWindow.copyText(segItem.seg.text)
+                                        }
+                                    }
+                                    SilicaFlickable {
+                                        id: codeFlick
                                         anchors.left: parent.left
-                                        anchors.leftMargin: Theme.paddingSmall
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        text: segItem.seg.lang
-                                        visible: segItem.seg.lang.length > 0
-                                        color: Theme.secondaryColor
-                                        font.pixelSize: Theme.fontSizeExtraSmall
-                                    }
-                                    IconButton {
-                                        id: copyCodeBtn
                                         anchors.right: parent.right
-                                        anchors.rightMargin: Theme.paddingSmall
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        width: Theme.itemSizeSmall
-                                        height: Theme.itemSizeSmall
-                                        icon.source: "image://theme/icon-m-clipboard"
-                                        onClicked: appWindow.copyText(segItem.seg.text)
+                                        anchors.top: codeHeader.bottom
+                                        height: Math.max(Theme.itemSizeMedium,
+                                                         codeLbl.paintedHeight + 2 * Theme.paddingSmall)
+                                        contentWidth: codeLbl.paintedWidth + 2 * Theme.paddingSmall
+                                        contentHeight: height
+                                        clip: true
+                                        flickableDirection: Flickable.HorizontalFlick
+                                        Label {
+                                            id: codeLbl
+                                            x: Theme.paddingSmall
+                                            y: Theme.paddingSmall
+                                            text: chatPage.mdCode(segItem.seg.text)
+                                            textFormat: Text.RichText
+                                            wrapMode: Text.NoWrap
+                                            font.pixelSize: appWindow.fs(Theme.fontSizeSmall)
+                                            color: Theme.primaryColor
+                                        }
+                                        HorizontalScrollDecorator {}
                                     }
-                                }
-                                SilicaFlickable {
-                                    id: codeFlick
-                                    anchors.left: parent.left
-                                    anchors.right: parent.right
-                                    anchors.top: codeHeader.bottom
-                                    height: Math.max(Theme.itemSizeMedium,
-                                                     codeLbl.paintedHeight + 2 * Theme.paddingSmall)
-                                    contentWidth: codeLbl.paintedWidth + 2 * Theme.paddingSmall
-                                    contentHeight: height
-                                    clip: true
-                                    flickableDirection: Flickable.HorizontalFlick
-                                    Label {
-                                        id: codeLbl
-                                        x: Theme.paddingSmall
-                                        y: Theme.paddingSmall
-                                        text: chatPage.mdCode(segItem.seg.text)
-                                        textFormat: Text.RichText
-                                        wrapMode: Text.NoWrap
-                                        font.pixelSize: Theme.fontSizeSmall
-                                        color: Theme.primaryColor
-                                    }
-                                    HorizontalScrollDecorator {}
                                 }
                             }
                         }
                     }
+                }
                 }
 
                 // Bottom line: time (+ copy and, for the agent, the TTS button).
@@ -723,18 +1020,27 @@ Item {
                     anchors.left: line.isUser ? bubble.left : undefined
                     anchors.rightMargin: Theme.paddingSmall + 1
                     anchors.leftMargin: Theme.paddingSmall
-                    y: bodyCol.y + bodyCol.height + Theme.paddingSmall
+                    y: bodyClip.y + bodyClip.height + Theme.paddingSmall
                     spacing: Theme.paddingMedium
 
                     // 📋 copy this bubble to the clipboard — the agent's answer
                     // (or thinking) and the user's own messages alike.
-                    IconButton {
-                        id: copyBtn
-                        visible: !line.isSystem
-                        width: visible ? Theme.itemSizeMedium : 0
-                        height: visible ? Theme.itemSizeMedium : 0
-                        icon.source: "image://theme/icon-m-clipboard"
-                        onClicked: appWindow.copyText(line.body)
+                    // Created only when enabled (Settings → Chat display).
+                    Loader {
+                        active: !line.isSystem && appWindow.showCopyButton
+                        visible: active
+                        sourceComponent: Component {
+                            IconButton {
+                                width: chatPage.msgButtonSize
+                                height: chatPage.msgButtonSize
+                                icon.source: "image://theme/icon-m-clipboard"
+                                icon.width: chatPage.msgIconSize
+                                icon.height: chatPage.msgIconSize
+                                icon.sourceSize.width: chatPage.msgIconSize
+                                icon.sourceSize.height: chatPage.msgIconSize
+                                onClicked: appWindow.copyText(line.body)
+                            }
+                        }
                     }
 
                     // 🔊 speak this bubble: agent answers only (not user).
@@ -744,25 +1050,40 @@ Item {
                     // turns into "stop" (stop icon + loader during synthesis),
                     // so TTS can be interrupted right on the bubble itself, not via a separate
                     // button below.
+                    Loader {
+                        active: !line.isUser && !line.isSystem
+                                && appWindow.showSpeakButton
+                                && appWindow.ttsModelReady
+                                && appWindow.ttsMode !== "off"
+                        visible: active
+                        sourceComponent: speakButtonComponent
+                    }
+                    Component {
+                        id: speakButtonComponent
                     IconButton {
                         id: speakBtn
-                        visible: !line.isUser && !line.isSystem
-                                 && appWindow.ttsModelReady
-                                 && appWindow.ttsMode !== "off"
-                        width: visible ? Theme.itemSizeMedium : 0
-                        height: visible ? Theme.itemSizeMedium : 0
+                        width: chatPage.msgButtonSize
+                        height: chatPage.msgButtonSize
+                        icon.width: chatPage.msgIconSize
+                        icon.height: chatPage.msgIconSize
+                        icon.sourceSize.width: chatPage.msgIconSize
+                        icon.sourceSize.height: chatPage.msgIconSize
                         property bool active: appWindow.speakingBubble === line.body
                                               && (appWindow.ttsSynth || appWindow.ttsPlaying)
                         icon.source: active
                                      ? "image://theme/icon-m-stop"
                                      : "image://theme/icon-m-speaker-on"
                         highlighted: active
-                        // While this bubble is being synthesised — a loader instead of the icon.
-                        BusyIndicator {
+                        // While this bubble is being synthesised — a spinner over
+                        // the icon. Created only then: a BusyIndicator per bubble
+                        // added to every bubble's creation cost while scrolling.
+                        Loader {
                             anchors.centerIn: parent
-                            running: visible
-                            visible: appWindow.ttsSynth
-                                     && appWindow.speakingBubble === line.body
+                            active: appWindow.ttsSynth
+                                    && appWindow.speakingBubble === line.body
+                            sourceComponent: Component {
+                                BusyIndicator { running: true }
+                            }
                         }
                         onClicked: {
                             if (active)
@@ -771,12 +1092,13 @@ Item {
                                 appWindow.speakText(line.body)
                         }
                     }
+                    }
 
                     Label {
                         id: tsLabel
                         text: chatPage.tsLabel(line.tsMs)
                         anchors.verticalCenter: parent.verticalCenter
-                        font.pixelSize: Theme.fontSizeExtraSmall
+                        font.pixelSize: appWindow.fs(Theme.fontSizeExtraSmall)
                         color: Theme.secondaryColor
                     }
                 }
@@ -786,14 +1108,19 @@ Item {
                 MouseArea {
                     anchors.fill: parent
                     enabled: line.isUser && line.msgId !== "" && !chatPage.busy
-                    onPressAndHold: userMenu.open(line)
+                    onPressAndHold: {
+                        if (line.userMenu === null)
+                            line.userMenu = userMenuComponent.createObject(line)
+                        line.userMenu.open(line)
+                    }
                 }
             }
 
             // Revert/fork actions for this user message. ContextMenu reparents
             // itself to the delegate item when opened (Silica ContextMenu.open).
-            ContextMenu {
-                id: userMenu
+            Component {
+                id: userMenuComponent
+                ContextMenu {
                 MenuItem {
                     // TUI parity: revert to this message AND put its text back
                     // into the prompt field, so it can be edited and re-sent.
@@ -808,6 +1135,43 @@ Item {
                 MenuItem {
                     text: qsTr("Fork")
                     onClicked: appWindow.forkFrom(line.msgId)
+                }
+                }
+            }
+
+            // Model switch divider: ── Switched to <model> ──
+            Item {
+                id: switchRow
+                visible: line.isModelSwitch
+                width: chatList.width
+                height: visible ? switchLbl.height + 2 * Theme.paddingMedium : 0
+                Rectangle {
+                    anchors.left: parent.left
+                    anchors.leftMargin: Theme.horizontalPageMargin
+                    anchors.right: switchLbl.left
+                    anchors.rightMargin: Theme.paddingMedium
+                    anchors.verticalCenter: parent.verticalCenter
+                    height: 1
+                    color: Theme.rgba(Theme.secondaryHighlightColor, 0.4)
+                }
+                Label {
+                    id: switchLbl
+                    anchors.centerIn: parent
+                    width: Math.min(implicitWidth, parent.width - 4 * Theme.horizontalPageMargin)
+                    horizontalAlignment: Text.AlignHCenter
+                    wrapMode: Text.Wrap
+                    text: line.isModelSwitch ? appWindow.modelSwitchText(line.raw) : ""
+                    font.pixelSize: appWindow.fs(Theme.fontSizeExtraSmall)
+                    color: Theme.secondaryHighlightColor
+                }
+                Rectangle {
+                    anchors.left: switchLbl.right
+                    anchors.leftMargin: Theme.paddingMedium
+                    anchors.right: parent.right
+                    anchors.rightMargin: Theme.horizontalPageMargin
+                    anchors.verticalCenter: parent.verticalCenter
+                    height: 1
+                    color: Theme.rgba(Theme.secondaryHighlightColor, 0.4)
                 }
             }
 
@@ -845,7 +1209,7 @@ Item {
                     text: line.toolHtml
                     textFormat: Text.RichText
                     wrapMode: Text.Wrap
-                    font.pixelSize: Theme.fontSizeSmall
+                    font.pixelSize: appWindow.fs(Theme.fontSizeSmall)
                     color: Theme.secondaryColor
                 }
             }
@@ -878,7 +1242,7 @@ Item {
                 verticalCenter: parent.verticalCenter
             }
             text: qsTr("History reverted")
-            font.pixelSize: Theme.fontSizeExtraSmall
+            font.pixelSize: appWindow.fs(Theme.fontSizeExtraSmall)
             color: Theme.secondaryColor
         }
 
@@ -1102,6 +1466,7 @@ Item {
             // `false` forever, which locked the user out of the composer.
             enabled: !chatPage.busy || chatPage.retryInfo !== null
             background: null
+            font.pixelSize: appWindow.fs(Theme.fontSizeMedium)
             // We draw the placeholder inside the field, not as a layer on top — otherwise
             // the field looks two-level.
             labelVisible: false

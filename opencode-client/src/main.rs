@@ -391,7 +391,8 @@ async fn run_stream_adapter(
     settings: Arc<std::sync::Mutex<String>>,
     console_login: opencode_client::auth::ConsoleLogin,
 ) -> Result<StreamEnd, String> {
-    let client = api::V2Adapter::new(base.clone(), auth.clone());
+    // Same directory the server was started in (Settings::workdir).
+    let client = api::V2Adapter::new(base.clone(), auth.clone()).with_directory(Settings::load().workdir);
     run_stream(
         client,
         dispatcher,
@@ -722,6 +723,10 @@ async fn run_stream<A: api::OpenCodeApi>(
     // repeat `message.part.updated` for the same compaction does not stack a
     // second bubble (the dispatcher fills/reads this; see `StreamState`).
     let mut compaction_seen: Option<String> = None;
+    // Time of the last automatic "session gone" recovery (see
+    // session_recovery_allowed) and the model to apply to the fresh session.
+    let mut last_session_recovery: u64 = 0;
+    let mut pending_model: Option<(String, String, Option<String>)> = None;
     // IDs of `mode:"compaction"` assistant messages (the compressed-history
     // summary). They render as a normal growing bubble, but auto-TTS must skip
     // them — the summary is internal machinery, not an answer to the user.
@@ -729,6 +734,7 @@ async fn run_stream<A: api::OpenCodeApi>(
 
     // Show previously started sessions and available models immediately.
     refresh_sessions(&client, &sessions, &dispatcher).await;
+    opencode_client::auth::refresh_connected(&client).await;
     refresh_models(&client, &models).await;
     refresh_sounds(&sounds);
     // Resume the last session on startup — the chat shows its history.
@@ -932,6 +938,20 @@ async fn run_stream<A: api::OpenCodeApi>(
                                     }
                                     clear_tools(&dispatcher, &tools).await;
                                     ensure_session_model(&client, id, &dispatcher).await;
+                                    // A model chosen for a session that turned out to
+                                    // be gone goes to this fresh one.
+                                    if let Some((provider, model, variant)) = pending_model.take() {
+                                        match client.set_model(id, &provider, &model, variant.as_deref()).await {
+                                            Ok(()) => {
+                                                dispatcher
+                                                    .lock()
+                                                    .await
+                                                    .session_models
+                                                    .insert(id.to_string(), (provider, model));
+                                            }
+                                            Err(e) => log::error!("set_model (new session): {e}"),
+                                        }
+                                    }
                                     refresh_sessions(&client, &sessions, &dispatcher).await;
                                     set_current_session(&current_session_shared, &current_session);
                                     sync_status_from_fsm(&dispatcher, &status, current_session.as_deref()).await;
@@ -1256,13 +1276,13 @@ async fn run_stream<A: api::OpenCodeApi>(
                                 Err(e) => log::error!("abort: {e}"),
                             }
                         }
-                        Cmd::SetModel { id, provider, model } => {
+                        Cmd::SetModel { id, provider, model, variant } => {
                             if id.is_empty() {
                                 continue;
                             }
-                            match client.set_model(id, provider, model).await {
+                            match client.set_model(id, provider, model, variant.as_deref()).await {
                                 Ok(()) => {
-                                    log::info!("set_model {id} -> {provider}/{model}");
+                                    log::info!("set_model {id} -> {provider}/{model} variant={variant:?}");
                                     // Record it immediately so the picker/sessions
                                     // list reflect the change even before the
                                     // `session.model.selected` event arrives.
@@ -1272,7 +1292,24 @@ async fn run_stream<A: api::OpenCodeApi>(
                                     );
                                     refresh_sessions(&client, &sessions, &dispatcher).await;
                                 }
-                                Err(e) => log::error!("set_model: {e}"),
+                                // Same "session gone" case as a prompt: open a
+                                // fresh session and apply the chosen model to it.
+                                Err(e) if is_http_not_found(&e) && session_recovery_allowed(&mut last_session_recovery) => {
+                                    log::warn!("set_model: session {id} not found; starting a new session with {provider}/{model}");
+                                    pending_model = Some((provider.clone(), model.clone(), variant.clone()));
+                                    if let Ok(mut q) = worker_pending.lock() {
+                                        q.push(svc_line(now_ms(), i18n::K_SESSION_GONE, &[]));
+                                    }
+                                    if let Ok(mut q) = commands.lock() {
+                                        q.push(Cmd::New { title: None }.to_value().to_string());
+                                    }
+                                }
+                                Err(e) => {
+                                    log::error!("set_model: {e}");
+                                    if let Ok(mut q) = worker_pending.lock() {
+                                        q.push(err_line(now_ms(), i18n::K_MODEL_SWITCH_FAILED, &[e]));
+                                    }
+                                }
                             }
                         }
                         Cmd::SetMode { id, mode } => {
@@ -1442,17 +1479,58 @@ async fn run_stream<A: api::OpenCodeApi>(
                                     q.push(svc_line(now_ms(), i18n::K_AUTH_EMPTY, &[]));
                                 }
                             } else {
+                                // Check the key with the provider first (Anthropic
+                                // only): a refused key is not stored at all; an
+                                // unreachable provider does not block saving.
+                                use opencode_client::auth::{self as oauth, KeyCheck};
+                                let check = if provider == oauth::ANTHROPIC_PROVIDER {
+                                    oauth::check_anthropic_key(&key).await
+                                } else {
+                                    KeyCheck::Valid
+                                };
+                                if let KeyCheck::Rejected(why) = &check {
+                                    log::warn!("auth: {provider:?} refused the new key ({why}); not saving it");
+                                    if let Ok(mut q) = worker_pending.lock() {
+                                        q.push(err_line(
+                                            now_ms(),
+                                            i18n::K_AUTH_KEY_INVALID,
+                                            &[provider.clone(), why.clone()],
+                                        ));
+                                    }
+                                    continue;
+                                }
                                 match client.set_api_key(&provider, &key).await {
                                     Ok(()) => {
-                                        log::info!("auth: saved API key for provider {provider:?}");
+                                        log::info!("auth: saved API key for provider {provider:?} ({check:?})");
+                                        oauth::clear_rejected(&provider);
+                                        // The provider's models appear in the
+                                        // catalog at once; reload the picker
+                                        // and the "key set" state.
+                                        oauth::refresh_connected(&client).await;
+                                        refresh_models(&client, &models).await;
                                         if let Ok(mut q) = worker_pending.lock() {
-                                            q.push(svc_line(now_ms(), i18n::K_AUTH_SAVED, &[]));
+                                            match &check {
+                                                KeyCheck::Unverified(why) => q.push(svc_line(
+                                                    now_ms(),
+                                                    i18n::K_AUTH_KEY_UNVERIFIED,
+                                                    &[provider.clone(), why.clone()],
+                                                )),
+                                                KeyCheck::Valid | KeyCheck::Rejected(_) => q.push(svc_line(
+                                                    now_ms(),
+                                                    i18n::K_AUTH_SAVED,
+                                                    &[provider.clone()],
+                                                )),
+                                            }
                                         }
                                     }
                                     Err(e) => {
                                         log::warn!("auth: failed to save key for {provider:?}: {e}");
                                         if let Ok(mut q) = worker_pending.lock() {
-                                            q.push(err_line(now_ms(), i18n::K_AUTH_SAVE_FAILED, &[e]));
+                                            q.push(err_line(
+                                                now_ms(),
+                                                i18n::K_AUTH_SAVE_FAILED,
+                                                &[provider.clone(), e],
+                                            ));
                                         }
                                     }
                                 }
@@ -1475,6 +1553,12 @@ async fn run_stream<A: api::OpenCodeApi>(
                 // polls the provider itself); this only reads its answer.
                 console_login.poll(&client).await;
 
+                // A key was rejected mid-session: rebuild the catalog so that
+                // provider's models are shown locked again.
+                if opencode_client::auth::take_models_dirty() {
+                    refresh_models(&client, &models).await;
+                }
+
                 // Device login finished: on success reload the server config so
                 // the fresh account (org/models) is used, then tell the user.
                 if let Some(ok) = console_login.take_finished() {
@@ -1484,6 +1568,7 @@ async fn run_stream<A: api::OpenCodeApi>(
                         if let Err(e) = client.global_dispose().await {
                             log::warn!("console login: /global/dispose failed: {e}");
                         }
+                        opencode_client::auth::refresh_connected(&client).await;
                         refresh_models(&client, &models).await;
                         if let Ok(mut q) = worker_pending.lock() {
                             q.push(svc_line(now_ms(), i18n::K_AUTH_SIGNED_IN, &[]));
@@ -1548,9 +1633,28 @@ async fn run_stream<A: api::OpenCodeApi>(
                             q.push(format!("{REVERTED_TAG}0"));
                         }
                         match client.prompt_async(&sid, &prompt, session_agents.get(&sid).cloned()).await {
+                            // The session is gone on this server (deleted, or it
+                            // belongs to a directory that no longer exists): start
+                            // a fresh session and resend the prompt there, once.
+                            Err(e) if is_http_not_found(&e) && session_recovery_allowed(&mut last_session_recovery) => {
+                                log::warn!("prompt_async: session {sid} not found; starting a new session and resending");
+                                if let Ok(mut q) = worker_pending.lock() {
+                                    q.push(svc_line(now_ms(), i18n::K_SESSION_GONE, &[]));
+                                }
+                                if let Ok(mut q) = commands.lock() {
+                                    q.push(Cmd::New { title: None }.to_value().to_string());
+                                }
+                                if let Ok(mut q) = worker_prompts.lock() {
+                                    q.push(prompt.clone());
+                                }
+                            }
                             Err(e) => {
                                 log::error!("prompt_async: {e}");
-                                let emsg = e.to_string();
+                                let emsg = if is_http_not_found(&e) {
+                                    i18n::K_SESSION_GONE_RETRY.to_string()
+                                } else {
+                                    e.to_string()
+                                };
                                 if let Ok(mut q) = worker_pending.lock() {
                                     q.push(svc_line(now_ms(), i18n::K_PROMPT_ERROR, &[emsg]));
                                 }
@@ -1573,8 +1677,14 @@ async fn run_stream<A: api::OpenCodeApi>(
                     }
                 }
 
+                // Safety-net refreshes; the SSE stream is the fast path. Every ~3 s
+                // while the app is on screen, every ~30 s in the background
+                // (each round is four HTTP requests to the local server).
+                let app_active = opencode_client::bridge::app::APP_ACTIVE
+                    .load(std::sync::atomic::Ordering::Relaxed);
+                let (slow_every, snap_every) = if app_active { (15, 5) } else { (150, 25) };
                 // Every ~3 seconds refresh sessions list and TODOs for current session.
-                if ticks % 15 == 0 {
+                if ticks % slow_every == 0 {
                     refresh_sessions(&client, &sessions, &dispatcher).await;
                     if let Some(sid) = current_session.clone() {
                         refresh_todo(&client, &sid, &todos).await;
@@ -1594,7 +1704,7 @@ async fn run_stream<A: api::OpenCodeApi>(
                 }
 
                 // Every ~1 second — snapshot of tools and permission requests for QML.
-                if ticks % 5 == 0 {
+                if ticks % snap_every == 0 {
                     refresh_tools_json(&dispatcher, &tools).await;
                     refresh_permissions_json(&dispatcher, &permissions).await;
                     refresh_forms_json(&dispatcher, &forms).await;
@@ -1659,6 +1769,13 @@ async fn refresh_sessions(
                                         tracked.map(|(_, m)| m.clone()).unwrap_or_default(),
                                     )
                                 });
+                            // Reasoning preset; "" when the server list has
+                            // no model yet (the picker then shows "Default").
+                            let variant = s
+                                .get(keys::MODEL)
+                                .and_then(|m| m.get(keys::VARIANT))
+                                .cloned()
+                                .unwrap_or(serde_json::Value::String(String::new()));
                             let cost = s
                                 .get(keys::COST)
                                 .cloned()
@@ -1673,6 +1790,7 @@ async fn refresh_sessions(
                                 "updated": updated,
                                 "providerID": provider_id,
                                 "modelID": model_id,
+                                "variant": variant,
                                 "cost": cost,
                                 "tokens": tokens,
                             }))
@@ -1705,6 +1823,58 @@ async fn refresh_todo(
     }
 }
 
+// Model-catalog fields for QML (the picker greys out and explains locked rows).
+const QML_LOCKED: &str = "locked";
+const QML_LOCK_REASON: &str = "lockReason";
+/// No key stored for the provider.
+const LOCK_NO_KEY: &str = "nokey";
+/// A key is stored but the provider refused it.
+const LOCK_REJECTED: &str = "rejected";
+
+/// Add the models of key-unlockable providers that the server does not list
+/// (no key yet) as locked rows, from opencode's cached models.dev catalog. When
+/// the catalog is unavailable, a single row with an empty `modelID` keeps the
+/// provider visible so the picker can still say "add a key to unlock".
+fn append_locked_models(flat: &mut Vec<serde_json::Value>) {
+    let mut catalog: Option<Option<serde_json::Value>> = None;
+    for provider in opencode_client::auth::LOCKABLE_PROVIDERS {
+        let listed = flat
+            .iter()
+            .any(|m| m["providerID"].as_str() == Some(*provider));
+        if listed {
+            continue;
+        }
+        let cat = catalog.get_or_insert_with(opencode_client::auth::read_models_catalog);
+        let models = cat
+            .as_ref()
+            .map(|c| opencode_client::auth::catalog_models(c, provider))
+            .unwrap_or_default();
+        if models.is_empty() {
+            flat.push(serde_json::json!({
+                "providerID": provider,
+                "providerName": provider,
+                "modelID": "",
+                "modelName": "",
+                "variants": [],
+                QML_LOCKED: true,
+                QML_LOCK_REASON: LOCK_NO_KEY,
+            }));
+            continue;
+        }
+        for (id, name) in models {
+            flat.push(serde_json::json!({
+                "providerID": provider,
+                "providerName": provider,
+                "modelID": id,
+                "modelName": name,
+                "variants": [],
+                QML_LOCKED: true,
+                QML_LOCK_REASON: LOCK_NO_KEY,
+            }));
+        }
+    }
+}
+
 /// Load providers/models and flatten for QML.
 async fn refresh_models(client: &impl api::OpenCodeApi, models: &Arc<std::sync::Mutex<String>>) {
     let v = match client.providers().await {
@@ -1724,16 +1894,25 @@ async fn refresh_models(client: &impl api::OpenCodeApi, models: &Arc<std::sync::
                 entries.sort_by(|a, b| a.0.cmp(b.0));
                 for (mid, m) in entries {
                     let mname = m["name"].as_str().unwrap_or(mid);
+                    let variants = m
+                        .get(v2keys::VARIANTS)
+                        .cloned()
+                        .unwrap_or_else(|| serde_json::Value::Array(Vec::new()));
+                    let rejected = opencode_client::auth::is_rejected(pid);
                     flat.push(serde_json::json!({
                         "providerID": pid,
                         "providerName": pname,
                         "modelID": mid,
                         "modelName": mname,
+                        "variants": variants,
+                        QML_LOCKED: rejected,
+                        QML_LOCK_REASON: if rejected { LOCK_REJECTED } else { "" },
                     }));
                 }
             }
         }
     }
+    append_locked_models(&mut flat);
     let json = serde_json::Value::Array(flat).to_string();
     if let Ok(mut g) = models.lock() {
         *g = json;
@@ -1905,9 +2084,19 @@ fn history_lines_v2(
                     ),
                 }
             }
-            // Switches, synthetic/system/skill/shell/idle messages and unknown
-            // kinds do not render in the feed (mirrors the v1 path skipping
-            // non-user/assistant roles).
+            // A model switch renders as a slim divider, so the feed shows which
+            // model answered what.
+            MessageBody::ModelSwitched { model, .. } => {
+                lines.push(proto_model_switch_line(
+                    created,
+                    &model.providerID,
+                    &model.id,
+                    model.variant.as_deref().unwrap_or(""),
+                ));
+            }
+            // Agent/location switches, synthetic/system/skill/shell/idle messages
+            // and unknown kinds do not render in the feed (mirrors the v1 path
+            // skipping non-user/assistant roles).
             _ => {}
         }
     }
@@ -2163,6 +2352,25 @@ fn persist_last_session(session: Option<&str>) {
     }
 }
 
+/// True for an API error that is an HTTP 404 (the adapters format errors as
+/// `HTTP <status>`).
+fn is_http_not_found(e: &str) -> bool {
+    const NOT_FOUND: &str = "HTTP 404";
+    e.starts_with(NOT_FOUND)
+}
+
+/// Rate-limit automatic session recovery to once per window, so a server that
+/// keeps answering 404 cannot make the worker create sessions in a loop.
+fn session_recovery_allowed(last: &mut u64) -> bool {
+    const WINDOW_MS: u64 = 15_000;
+    let now = now_ms();
+    if now.saturating_sub(*last) < WINDOW_MS {
+        return false;
+    }
+    *last = now;
+    true
+}
+
 /// On startup, open the last session: check existence, load history.
 /// If there is no last session — create a new one (chat must not be empty).
 async fn resume_last_session(
@@ -2179,27 +2387,28 @@ async fn resume_last_session(
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
 
-    // Check if the remembered session still exists.
+    // Check if the remembered session still exists in this directory; if not,
+    // fall back to the newest session there (the list is limited to the app's
+    // working directory and comes newest first), and only then create one.
+    let listed = match client.list_sessions().await {
+        Ok(v) => v.as_array().cloned().unwrap_or_default(),
+        Err(e) => {
+            log::error!("resume: list_sessions: {e}");
+            Vec::new()
+        }
+    };
+    let ids: Vec<String> = listed
+        .iter()
+        .filter_map(|s| s[keys::ID].as_str().map(str::to_string))
+        .collect();
     let resume_id = match last {
-        Some(id) => match client.list_sessions().await {
-            Ok(v) => {
-                let exists = v
-                    .as_array()
-                    .map(|a| a.iter().any(|s| s["id"].as_str() == Some(id.as_str())))
-                    .unwrap_or(false);
-                if exists {
-                    Some(id)
-                } else {
-                    log::info!("последняя сессия {id} больше не существует, создаю новую");
-                    None
-                }
-            }
-            Err(e) => {
-                log::error!("resume: list_sessions: {e}");
-                None
-            }
-        },
-        None => None,
+        Some(id) if ids.iter().any(|i| *i == id) => Some(id),
+        Some(id) => {
+            let newest = ids.first().cloned();
+            log::info!("resume: last session {id} is gone; using {newest:?} instead");
+            newest
+        }
+        None => ids.first().cloned(),
     };
 
     // No last session (first run or after deleting all) — create a new one.
@@ -2253,6 +2462,29 @@ async fn ensure_session_model(
     {
         return;
     }
+    // The server may already hold a model for the session (chosen elsewhere,
+    // or before its first message): keep it instead of overwriting it with the
+    // default. Only a session with no model at all gets the default.
+    if let Ok(sess) = client.get_session(session_id).await {
+        let provider = sess
+            .get(keys::MODEL)
+            .and_then(|m| m.get(keys::PROVIDER_ID))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let model = sess
+            .get(keys::MODEL)
+            .and_then(|m| m.get(keys::ID))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        if !provider.is_empty() && !model.is_empty() {
+            dispatcher
+                .lock()
+                .await
+                .session_models
+                .insert(session_id.to_string(), (provider.to_string(), model.to_string()));
+            return;
+        }
+    }
     let default = match client.default_model().await {
         Ok(m) => m,
         Err(e) => {
@@ -2263,7 +2495,7 @@ async fn ensure_session_model(
     let Some((provider, model)) = default else {
         return;
     };
-    match client.set_model(session_id, &provider, &model).await {
+    match client.set_model(session_id, &provider, &model, None).await {
         Ok(()) => {
             log::info!("bound default model {provider}/{model} to {session_id}");
             dispatcher

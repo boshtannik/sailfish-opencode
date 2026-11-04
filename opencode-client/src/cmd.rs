@@ -99,13 +99,18 @@ pub enum Cmd {
         id: String,
         provider: String,
         model: String,
+        /// Reasoning/effort preset (`Model.Info.variants[].id`); absent =
+        /// the server default (it resets the variant when none is sent).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        variant: Option<String>,
     },
     /// Switch the session agent/mode: Build | Plan.
     SetMode {
         id: String,
         mode: String,
     },
-    /// Store an API-key credential for a provider (PUT /auth/{provider}).
+    /// Store an API-key credential for a provider
+    /// (POST /api/integration/{provider}/connect/key).
     SetProviderKey {
         provider: String,
         key: String,

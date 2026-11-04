@@ -5,6 +5,11 @@ Item {
     id: globalSettingsPage
 
     property bool providerKeySet: false
+    // Mirrors `auth::ANTHROPIC_PROVIDER` in Rust.
+    readonly property string kAnthropicProvider: "anthropic"
+    property bool anthropicKeySet: false
+    // The saved key was refused by Anthropic (a turn failed with 401).
+    property bool anthropicKeyRejected: false
     // OpenCode Console device-login state, mirrored from the root poll().
     readonly property var login: (typeof appWindow !== "undefined" && appWindow
                                   && appWindow.consoleLogin)
@@ -14,16 +19,41 @@ Item {
     Component.onCompleted: refreshProviderKey()
 
     function refreshProviderKey() {
-        if (typeof appWindow !== "undefined" && appWindow)
+        if (typeof appWindow !== "undefined" && appWindow) {
             providerKeySet = appWindow.providerKeySet()
+            anthropicKeySet = appWindow.providerKeySetFor(kAnthropicProvider)
+            anthropicKeyRejected = appWindow.providerKeyRejectedFor(kAnthropicProvider)
+        }
     }
 
-    function saveProviderKey() {
-        if (typeof appWindow === "undefined" || !appWindow || apiKeyField.text.length === 0)
+    // "Unlock" from the model picker: bring the key field into view and focus it.
+    Connections {
+        target: globalSettingsPage.appWindow
+        onProviderKeyRequested: {
+            if (provider !== globalSettingsPage.kAnthropicProvider)
+                return
+            settingsFlick.contentY = Math.max(0, Math.min(
+                claudeHeader.y + column.y - Theme.paddingLarge,
+                settingsFlick.contentHeight - settingsFlick.height))
+            anthropicKeyField.forceActiveFocus()
+        }
+    }
+
+    function saveAnthropicKey() {
+        if (typeof appWindow === "undefined" || !appWindow
+                || anthropicKeyField.text.trim().length === 0)
             return
-        appWindow.saveProviderKey(apiKeyField.text)
-        apiKeyField.text = ""
-        keyRefreshTimer.restart()
+        appWindow.saveProviderKeyFor(kAnthropicProvider, anthropicKeyField.text)
+        anthropicKeyField.text = ""
+        anthropicKeyField.focus = false
+    }
+
+    // The worker refreshes the connected-provider cache together with the
+    // model catalog (at start-up and after a key is saved), and the root
+    // poll re-assigns `models` each round, so re-read the key state then.
+    Connections {
+        target: globalSettingsPage.appWindow
+        onModelsChanged: globalSettingsPage.refreshProviderKey()
     }
 
     property var appWindow
@@ -52,6 +82,7 @@ Item {
     }
 
     SilicaFlickable {
+        id: settingsFlick
         anchors.fill: parent
         contentHeight: pageHeader.height + column.height + Theme.paddingLarge
 
@@ -66,6 +97,69 @@ Item {
                 top: pageHeader.bottom
                 left: parent.left
                 right: parent.right
+            }
+
+            SectionHeader { text: qsTr("Appearance") }
+
+            Slider {
+                id: fontScaleSlider
+                width: parent.width
+                label: qsTr("Text size")
+                minimumValue: appWindow.fontScaleMin * 100
+                maximumValue: appWindow.fontScaleMax * 100
+                stepSize: 5
+                value: Math.round(appWindow.fontScale * 100)
+                valueText: Math.round(sliderValue) + " %"
+                // Apply on release: re-laying out the whole feed on every
+                // slider step would make dragging stutter.
+                onDownChanged: if (!down) appWindow.setFontScale(sliderValue / 100)
+            }
+
+            Label {
+                x: Theme.horizontalPageMargin
+                width: parent.width - 2 * Theme.horizontalPageMargin
+                text: qsTr("Preview: the quick brown fox jumps over the lazy dog.")
+                wrapMode: Text.Wrap
+                font.pixelSize: Math.round(Theme.fontSizeSmall * fontScaleSlider.sliderValue / 100)
+                color: Theme.secondaryHighlightColor
+            }
+
+            SectionHeader { text: qsTr("Messages") }
+
+            TextSwitch {
+                text: qsTr("Copy button on messages")
+                checked: appWindow.showCopyButton
+                onCheckedChanged: appWindow.setShowCopyButton(checked)
+            }
+
+            TextSwitch {
+                text: qsTr("Speaker button on answers")
+                description: qsTr("Read an answer aloud (needs a speech synthesis model)")
+                checked: appWindow.showSpeakButton
+                onCheckedChanged: appWindow.setShowSpeakButton(checked)
+            }
+
+            TextSwitch {
+                text: qsTr("Label thinking and answers")
+                description: qsTr("Show \"Answer\" above the model's replies; thinking is always marked")
+                checked: appWindow.labelRoles
+                onCheckedChanged: appWindow.setLabelRoles(checked)
+            }
+
+            SectionHeader { text: qsTr("Thinking") }
+
+            TextSwitch {
+                text: qsTr("Show model thinking (reasoning)")
+                description: qsTr("Show the model's reasoning as it works, not just final answers")
+                checked: appWindow.showReasoning
+                onCheckedChanged: appWindow.setShowReasoning(checked)
+            }
+
+            TextSwitch {
+                text: qsTr("Expand thinking")
+                description: qsTr("Show the whole reasoning instead of its last lines (tap \"Thinking\" on a message to toggle it)")
+                checked: appWindow.expandThinking
+                onCheckedChanged: appWindow.setExpandThinking(checked)
             }
 
             SectionHeader { text: qsTr("Input") }
@@ -179,7 +273,7 @@ Item {
                 text: qsTr("Download and select a speech synthesis model to enable\nvoice answers (Settings → Voice models).")
                 wrapMode: Text.Wrap
                 color: Theme.secondaryColor
-                font.pixelSize: Theme.fontSizeExtraSmall
+                font.pixelSize: appWindow.fs(Theme.fontSizeExtraSmall)
             }
 
             ComboBox {
@@ -196,131 +290,6 @@ Item {
                     if (currentIndex >= 0 && currentIndex < v.length)
                         appWindow.ttsMode = v[currentIndex]
                 }
-            }
-
-            SectionHeader { text: qsTr("OpenCode account") }
-
-            Label {
-                visible: globalSettingsPage.login.state !== "waiting"
-                x: Theme.horizontalPageMargin
-                width: parent.width - 2 * Theme.horizontalPageMargin
-                text: qsTr("Sign in to your opencode.ai account. The app shows a code to enter in the browser.")
-                wrapMode: Text.Wrap
-                color: Theme.secondaryColor
-                font.pixelSize: Theme.fontSizeExtraSmall
-            }
-
-            Button {
-                visible: globalSettingsPage.login.state !== "waiting"
-                anchors.horizontalCenter: parent.horizontalCenter
-                text: qsTr("Sign in with OpenCode")
-                onClicked: globalSettingsPage.appWindow.startConsoleLogin()
-            }
-
-            Label {
-                visible: globalSettingsPage.login.state === "waiting"
-                x: Theme.horizontalPageMargin
-                width: parent.width - 2 * Theme.horizontalPageMargin
-                text: qsTr("Enter this code on the opened page:")
-                wrapMode: Text.Wrap
-                color: Theme.secondaryColor
-                font.pixelSize: Theme.fontSizeExtraSmall
-            }
-
-            Label {
-                visible: globalSettingsPage.login.state === "waiting"
-                anchors.horizontalCenter: parent.horizontalCenter
-                text: globalSettingsPage.login.code
-                font.pixelSize: Theme.fontSizeExtraLarge
-                font.bold: true
-                color: Theme.highlightColor
-            }
-
-            Button {
-                visible: globalSettingsPage.login.state === "waiting"
-                        && globalSettingsPage.login.url !== ""
-                anchors.horizontalCenter: parent.horizontalCenter
-                text: qsTr("Open browser again")
-                onClicked: Qt.openUrlExternally(globalSettingsPage.login.url)
-            }
-
-            Row {
-                visible: globalSettingsPage.login.state === "waiting"
-                anchors.horizontalCenter: parent.horizontalCenter
-                spacing: Theme.paddingMedium
-                BusyIndicator {
-                    size: BusyIndicatorSize.Small
-                    running: parent.visible
-                }
-                Label {
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: qsTr("Waiting for authorization…")
-                    color: Theme.secondaryColor
-                    font.pixelSize: Theme.fontSizeExtraSmall
-                }
-            }
-
-            Button {
-                visible: globalSettingsPage.login.state === "waiting"
-                anchors.horizontalCenter: parent.horizontalCenter
-                text: qsTr("Cancel")
-                onClicked: globalSettingsPage.appWindow.cancelConsoleLogin()
-            }
-
-            Label {
-                visible: globalSettingsPage.login.state === "success"
-                         || globalSettingsPage.login.state === "error"
-                x: Theme.horizontalPageMargin
-                width: parent.width - 2 * Theme.horizontalPageMargin
-                text: globalSettingsPage.login.state === "success"
-                      ? qsTr("Signed in ✓")
-                      : qsTr("Sign-in failed") + (globalSettingsPage.login.message !== ""
-                            ? ": " + globalSettingsPage.login.message : "")
-                wrapMode: Text.Wrap
-                color: globalSettingsPage.login.state === "success"
-                       ? Theme.highlightColor : Theme.secondaryColor
-                font.pixelSize: Theme.fontSizeExtraSmall
-            }
-
-            SectionHeader { text: qsTr("General") }
-
-            TextField {
-                id: workdirField
-                width: parent.width
-                text: (typeof appWindow.workdir !== "undefined") ? appWindow.workdir : ""
-                placeholderText: qsTr("e.g. /home/defaultuser/opencode-home")
-                label: qsTr("Working directory (restart required)")
-                onActiveFocusChanged: {
-                    if (!activeFocus && typeof appWindow !== "undefined" && appWindow) {
-                        appWindow.workdir = text
-                        appWindow.setWorkdir(text)
-                    }
-                }
-                EnterKey.enabled: text.length > 0
-                EnterKey.iconSource: "image://theme/icon-m-enter-accept"
-                EnterKey.onClicked: {
-                    if (typeof appWindow !== "undefined" && appWindow) {
-                        appWindow.workdir = text
-                        appWindow.setWorkdir(text)
-                    }
-                    focus = false
-                }
-            }
-
-            Label {
-                x: Theme.horizontalPageMargin
-                width: parent.width - 2 * Theme.horizontalPageMargin
-                text: qsTr("Changes take effect after restarting the app")
-                color: Theme.secondaryColor
-                font.pixelSize: Theme.fontSizeExtraSmall
-                wrapMode: Text.Wrap
-            }
-
-            TextSwitch {
-                text: qsTr("Show model thinking (reasoning)")
-                description: qsTr("Show the model's reasoning as it works, not just final answers")
-                checked: appWindow.showReasoning
-                onCheckedChanged: appWindow.setShowReasoning(checked)
             }
 
             SectionHeader { text: qsTr("Notifications") }
@@ -364,6 +333,173 @@ Item {
                 }
                 onClicked: appWindow.publishNotification(qsTr("opencode"),
                                                          qsTr("Test notification"))
+            }
+
+            SectionHeader { text: qsTr("OpenCode account") }
+
+            Label {
+                visible: globalSettingsPage.login.state !== "waiting"
+                x: Theme.horizontalPageMargin
+                width: parent.width - 2 * Theme.horizontalPageMargin
+                text: qsTr("Sign in to your opencode.ai account. The app shows a code to enter in the browser.")
+                wrapMode: Text.Wrap
+                color: Theme.secondaryColor
+                font.pixelSize: appWindow.fs(Theme.fontSizeExtraSmall)
+            }
+
+            Button {
+                visible: globalSettingsPage.login.state !== "waiting"
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: qsTr("Sign in with OpenCode")
+                onClicked: globalSettingsPage.appWindow.startConsoleLogin()
+            }
+
+            Label {
+                visible: globalSettingsPage.login.state === "waiting"
+                x: Theme.horizontalPageMargin
+                width: parent.width - 2 * Theme.horizontalPageMargin
+                text: qsTr("Enter this code on the opened page:")
+                wrapMode: Text.Wrap
+                color: Theme.secondaryColor
+                font.pixelSize: appWindow.fs(Theme.fontSizeExtraSmall)
+            }
+
+            Label {
+                visible: globalSettingsPage.login.state === "waiting"
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: globalSettingsPage.login.code
+                font.pixelSize: appWindow.fs(Theme.fontSizeExtraLarge)
+                font.bold: true
+                color: Theme.highlightColor
+            }
+
+            Button {
+                visible: globalSettingsPage.login.state === "waiting"
+                        && globalSettingsPage.login.url !== ""
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: qsTr("Open browser again")
+                onClicked: Qt.openUrlExternally(globalSettingsPage.login.url)
+            }
+
+            Row {
+                visible: globalSettingsPage.login.state === "waiting"
+                anchors.horizontalCenter: parent.horizontalCenter
+                spacing: Theme.paddingMedium
+                BusyIndicator {
+                    size: BusyIndicatorSize.Small
+                    running: parent.visible
+                }
+                Label {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: qsTr("Waiting for authorization…")
+                    color: Theme.secondaryColor
+                    font.pixelSize: appWindow.fs(Theme.fontSizeExtraSmall)
+                }
+            }
+
+            Button {
+                visible: globalSettingsPage.login.state === "waiting"
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: qsTr("Cancel")
+                onClicked: globalSettingsPage.appWindow.cancelConsoleLogin()
+            }
+
+            Label {
+                visible: globalSettingsPage.login.state === "success"
+                         || globalSettingsPage.login.state === "error"
+                x: Theme.horizontalPageMargin
+                width: parent.width - 2 * Theme.horizontalPageMargin
+                text: globalSettingsPage.login.state === "success"
+                      ? qsTr("Signed in ✓")
+                      : qsTr("Sign-in failed") + (globalSettingsPage.login.message !== ""
+                            ? ": " + globalSettingsPage.login.message : "")
+                wrapMode: Text.Wrap
+                color: globalSettingsPage.login.state === "success"
+                       ? Theme.highlightColor : Theme.secondaryColor
+                font.pixelSize: appWindow.fs(Theme.fontSizeExtraSmall)
+            }
+
+            SectionHeader { id: claudeHeader; text: qsTr("Claude (Anthropic)") }
+
+            Label {
+                x: Theme.horizontalPageMargin
+                width: parent.width - 2 * Theme.horizontalPageMargin
+                text: globalSettingsPage.anthropicKeyRejected
+                      ? qsTr("Anthropic rejected the saved API key, so Claude models are locked. Enter a valid key to unlock them.")
+                      : (globalSettingsPage.anthropicKeySet
+                         ? qsTr("API key saved ✓ Pick a Claude model from the model name at the top of the chat. Enter a new key to replace it.")
+                         : qsTr("Add your Anthropic API key to unlock Claude models. Free OpenCode models work without a key."))
+                wrapMode: Text.Wrap
+                color: globalSettingsPage.anthropicKeyRejected
+                       ? "#ff8a80"
+                       : (globalSettingsPage.anthropicKeySet ? Theme.highlightColor : Theme.secondaryColor)
+                font.pixelSize: appWindow.fs(Theme.fontSizeExtraSmall)
+            }
+
+            // A plain field, not PasswordField: a password-type field makes
+            // keyboards with a password manager (FUTO Keyboard) pop a "save this
+            // login" prompt that asks for the device security code when the
+            // field loses focus. ImhSensitiveData keeps the key out of the
+            // keyboard's learning/suggestions; the field is cleared on save.
+            TextField {
+                id: anthropicKeyField
+                width: parent.width
+                label: qsTr("Anthropic API key")
+                placeholderText: qsTr("Anthropic API key (sk-ant-…)")
+                inputMethodHints: Qt.ImhSensitiveData | Qt.ImhNoPredictiveText
+                                  | Qt.ImhNoAutoUppercase | Qt.ImhPreferLatin
+                EnterKey.enabled: text.trim().length > 0
+                EnterKey.iconSource: "image://theme/icon-m-enter-accept"
+                EnterKey.onClicked: globalSettingsPage.saveAnthropicKey()
+            }
+
+            Row {
+                anchors.horizontalCenter: parent.horizontalCenter
+                spacing: Theme.paddingMedium
+                Button {
+                    text: qsTr("Save key")
+                    enabled: anthropicKeyField.text.trim().length > 0
+                    onClicked: globalSettingsPage.saveAnthropicKey()
+                }
+                Button {
+                    text: qsTr("Get a key")
+                    onClicked: Qt.openUrlExternally(
+                                   globalSettingsPage.appWindow.anthropicKeysUrl())
+                }
+            }
+
+            SectionHeader { text: qsTr("General") }
+
+            TextField {
+                id: workdirField
+                width: parent.width
+                text: (typeof appWindow.workdir !== "undefined") ? appWindow.workdir : ""
+                placeholderText: qsTr("e.g. /home/defaultuser/opencode-home")
+                label: qsTr("Working directory (restart required)")
+                onActiveFocusChanged: {
+                    if (!activeFocus && typeof appWindow !== "undefined" && appWindow) {
+                        appWindow.workdir = text
+                        appWindow.setWorkdir(text)
+                    }
+                }
+                EnterKey.enabled: text.length > 0
+                EnterKey.iconSource: "image://theme/icon-m-enter-accept"
+                EnterKey.onClicked: {
+                    if (typeof appWindow !== "undefined" && appWindow) {
+                        appWindow.workdir = text
+                        appWindow.setWorkdir(text)
+                    }
+                    focus = false
+                }
+            }
+
+            Label {
+                x: Theme.horizontalPageMargin
+                width: parent.width - 2 * Theme.horizontalPageMargin
+                text: qsTr("Changes take effect after restarting the app")
+                color: Theme.secondaryColor
+                font.pixelSize: appWindow.fs(Theme.fontSizeExtraSmall)
+                wrapMode: Text.Wrap
             }
 
             // The UI language is the system one; translations are loaded natively (.qm).
