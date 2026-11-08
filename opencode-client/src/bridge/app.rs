@@ -14,6 +14,52 @@ pub struct GuiMark {
     pub t: u64,
 }
 
+/// One prompt from QML to the worker: the text and the absolute paths of the
+/// files attached to it (sent to the server as `file://` uris).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct OutgoingPrompt {
+    pub text: String,
+    pub files: Vec<String>,
+}
+
+impl OutgoingPrompt {
+    /// Build a prompt from QML input: the text (trimmed) and a JSON array of
+    /// file paths. Unreadable JSON or non-string entries are dropped with a
+    /// warning. `None` when there is neither text nor a file to send.
+    pub fn from_qml(text: &str, files_json: &str) -> Option<Self> {
+        let text = text.trim().to_string();
+        let files: Vec<String> = if files_json.trim().is_empty() {
+            Vec::new()
+        } else {
+            match serde_json::from_str::<serde_json::Value>(files_json) {
+                Ok(serde_json::Value::Array(items)) => items
+                    .into_iter()
+                    .filter_map(|v| match v {
+                        serde_json::Value::String(p) if !p.trim().is_empty() => Some(p),
+                        other => {
+                            log::warn!("send_prompt_files: ignoring attachment entry {other} (not a path)");
+                            None
+                        }
+                    })
+                    .collect(),
+                Ok(other) => {
+                    log::warn!("send_prompt_files: attachments are not a JSON array ({other}); sending without them");
+                    Vec::new()
+                }
+                Err(e) => {
+                    log::warn!("send_prompt_files: bad attachments JSON ({e}); sending without them");
+                    Vec::new()
+                }
+            }
+        };
+        if text.is_empty() && files.is_empty() {
+            None
+        } else {
+            Some(Self { text, files })
+        }
+    }
+}
+
 /// Whether the app window is on screen, as reported by QML. The worker reads
 /// it to space out its safety-net server polls while the app is in the
 /// background (battery). Starts `true`: the app opens in the foreground.
@@ -39,7 +85,7 @@ pub struct AppBridge {
     pending_messages: Arc<Mutex<Vec<String>>>,
     /// Queue of outgoing prompts (QML → worker).
     #[allow(dead_code)]
-    outgoing_prompts: Arc<Mutex<Vec<String>>>,
+    outgoing_prompts: Arc<Mutex<Vec<OutgoingPrompt>>>,
     /// Status written by the worker (non-Qt thread) and read by QML via polling.
     /// We don't emit Qt signals from foreign threads — hence a separate Arc.
     #[allow(dead_code)]
@@ -116,11 +162,23 @@ pub struct AppBridge {
     }),
     /// QML: accept a prompt from the user.
     send_prompt: qt_method!(fn send_prompt(&self, text: QString) {
-        let t = text.to_string().trim().to_string();
+        let t = text.to_string();
         log::info!("QML send_prompt -> {t:?}");
-        if !t.is_empty() {
+        if let Some(p) = OutgoingPrompt::from_qml(&t, "") {
             if let Ok(mut q) = self.outgoing_prompts.lock() {
-                q.push(t);
+                q.push(p);
+            }
+        }
+    }),
+    /// QML: a prompt with attachments; `files_json` is a JSON array of
+    /// absolute file paths. The text may be empty when files are attached.
+    send_prompt_files: qt_method!(fn send_prompt_files(&self, text: QString, files_json: QString) {
+        let t = text.to_string();
+        let f = files_json.to_string();
+        log::info!("QML send_prompt_files -> {t:?} files {f}");
+        if let Some(p) = OutgoingPrompt::from_qml(&t, &f) {
+            if let Ok(mut q) = self.outgoing_prompts.lock() {
+                q.push(p);
             }
         }
     }),
@@ -571,12 +629,12 @@ impl AppBridge {
     }
 
     /// Worker: take outgoing prompts from QML.
-    pub fn take_prompts(&self) -> Vec<String> {
+    pub fn take_prompts(&self) -> Vec<OutgoingPrompt> {
         self.outgoing_prompts.lock().map(|mut q| std::mem::take(&mut *q)).unwrap_or_default()
     }
 
     /// Clones of the queues for passing to the tokio worker (Send + 'static).
-    pub fn queues(&self) -> (Arc<Mutex<Vec<String>>>, Arc<Mutex<Vec<String>>>) {
+    pub fn queues(&self) -> (Arc<Mutex<Vec<String>>>, Arc<Mutex<Vec<OutgoingPrompt>>>) {
         (self.pending_messages.clone(), self.outgoing_prompts.clone())
     }
 
@@ -682,5 +740,28 @@ impl AppBridge {
         if let Ok(mut q) = self.commands_shared.lock() {
             q.push(v.to_string());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::OutgoingPrompt;
+
+    #[test]
+    fn outgoing_prompt_from_qml() {
+        assert_eq!(
+            OutgoingPrompt::from_qml("  hi  ", r#"["/home/u/a.png"]"#),
+            Some(OutgoingPrompt { text: "hi".into(), files: vec!["/home/u/a.png".into()] })
+        );
+        // Files alone are a valid prompt; bad entries and bad JSON are dropped.
+        assert_eq!(
+            OutgoingPrompt::from_qml("", r#"["/home/u/a.png", 5, ""]"#),
+            Some(OutgoingPrompt { text: String::new(), files: vec!["/home/u/a.png".into()] })
+        );
+        assert_eq!(
+            OutgoingPrompt::from_qml("text", "not json"),
+            Some(OutgoingPrompt { text: "text".into(), files: vec![] })
+        );
+        assert_eq!(OutgoingPrompt::from_qml("   ", "[]"), None);
     }
 }

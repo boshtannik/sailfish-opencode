@@ -192,6 +192,13 @@ Page {
         pageStack.pop()
     }
 
+    // Hold a model: pick it together with a reasoning level in one step.
+    function pickWithVariant(row, v) {
+        pickerPage.appWindow.setModel(pickerPage.sessionId, row.pid, row.mid,
+                                      v === pickerPage.appWindow.kVariantDefault ? "" : v)
+        pageStack.pop()
+    }
+
     Component.onCompleted: rebuild()
     Connections {
         target: pickerPage.appWindow
@@ -203,7 +210,9 @@ Page {
         anchors.fill: parent
         model: pickerPage.rows
 
-        header: PageHeader {
+        header: Column {
+            width: modelList.width
+            PageHeader {
             title: qsTr("Model")
             description: {
                 if (pickerPage.providerCount === 0)
@@ -214,6 +223,18 @@ Page {
                     s += " · " + qsTr("%1 locked").arg(pickerPage.lockedCount)
                 return s
             }
+            }
+            Label {
+                x: Theme.horizontalPageMargin
+                width: parent.width - 2 * Theme.horizontalPageMargin
+                visible: pickerPage.providerCount > 0
+                wrapMode: Text.Wrap
+                horizontalAlignment: Text.AlignRight
+                text: qsTr("Hold a model to choose its reasoning level")
+                color: Theme.secondaryColor
+                font.pixelSize: pickerPage.appWindow.fs(Theme.fontSizeExtraSmall)
+            }
+            Item { width: 1; height: Theme.paddingMedium }
         }
 
         delegate: ListItem {
@@ -227,6 +248,27 @@ Page {
             readonly property bool isCurrent: isModel
                                               && row.pid === pickerPage.currentProvider
                                               && row.mid === pickerPage.currentModel
+            // Long press on a model with reasoning levels: choose one.
+            menu: (isModel && !isLocked && row.variants.length > 0) ? variantMenu : null
+            Component {
+                id: variantMenu
+                ContextMenu {
+                    MenuLabel {
+                        text: qsTr("Reasoning for %1").arg(rowItem.row.name)
+                    }
+                    Repeater {
+                        model: [pickerPage.appWindow.kVariantDefault].concat(rowItem.row.variants)
+                        MenuItem {
+                            text: pickerPage.appWindow.variantLabel(modelData)
+                                  + ((rowItem.isCurrent && modelData === pickerPage.currentVariant)
+                                     ? "  ✓" : "")
+                            // After the menu has closed, so the page pop does
+                            // not start while the menu animation still runs.
+                            onDelayedClick: pickerPage.pickWithVariant(rowItem.row, modelData)
+                        }
+                    }
+                }
+            }
             contentHeight: isModel ? Theme.itemSizeSmall
                                    : (isUnlock ? unlockLbl.height + 2 * Theme.paddingMedium
                                                : Theme.itemSizeExtraSmall)

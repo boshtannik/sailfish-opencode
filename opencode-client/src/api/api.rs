@@ -180,6 +180,7 @@ pub trait OpenCodeApi: Clone + Send + Sync + 'static {
         &self,
         session_id: &str,
         text: &str,
+        files: &[String],
         agent: Option<String>,
     ) -> impl Future<Output = Result<Option<String>, String>> + Send;
 

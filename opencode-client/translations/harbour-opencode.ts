@@ -53,6 +53,34 @@
         <source>retrying</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>Attach a file</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>this model can&apos;t read it</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Camera</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Files</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Gallery</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Videos</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Marked files can&apos;t be read by this model and won&apos;t be sent</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>GlobalSettingsPage</name>
@@ -356,6 +384,14 @@ voice answers (Settings → Voice models).</source>
     </message>
     <message>
         <source>e.g. /home/defaultuser/opencode-home</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Icon size</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Message buttons and the input bar (mic, attach, send)</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -1186,11 +1222,37 @@ long press — remove</source>
         <source>locked</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>Hold a model to choose its reasoning level</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reasoning for %1</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>StatusHeader</name>
     <message>
         <source>waiting…</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>CameraPage</name>
+    <message>
+        <source>Photo</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Video</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>ImageViewerPage</name>
+    <message>
+        <source>Remove attachment</source>
         <translation type="unfinished"></translation>
     </message>
 </context>

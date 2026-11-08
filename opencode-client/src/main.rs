@@ -19,6 +19,7 @@ use opencode_client::server;
 use opencode_client::settings::Settings;
 use opencode_client::types::keys;
 use opencode_client::types::tool::ToolState;
+use opencode_client::bridge::app::OutgoingPrompt;
 use opencode_client::types::v2::keys as v2keys;
 use opencode_client::types::v2::permission::PermissionReplyKind;
 use opencode_client::voice;
@@ -303,7 +304,7 @@ async fn run_worker(
     auth: Option<(String, String)>,
     dispatcher: event::dispatcher::SharedState,
     worker_pending: Arc<std::sync::Mutex<Vec<String>>>,
-    worker_prompts: Arc<std::sync::Mutex<Vec<String>>>,
+    worker_prompts: Arc<std::sync::Mutex<Vec<OutgoingPrompt>>>,
     status: Arc<std::sync::Mutex<String>>,
     sessions: Arc<std::sync::Mutex<String>>,
     commands: Arc<std::sync::Mutex<Vec<String>>>,
@@ -372,7 +373,7 @@ async fn run_stream_adapter(
     auth: Option<(String, String)>,
     dispatcher: event::dispatcher::SharedState,
     worker_pending: Arc<std::sync::Mutex<Vec<String>>>,
-    worker_prompts: Arc<std::sync::Mutex<Vec<String>>>,
+    worker_prompts: Arc<std::sync::Mutex<Vec<OutgoingPrompt>>>,
     status: Arc<std::sync::Mutex<String>>,
     sessions: Arc<std::sync::Mutex<String>>,
     commands: Arc<std::sync::Mutex<Vec<String>>>,
@@ -626,7 +627,7 @@ async fn run_stream<A: api::OpenCodeApi>(
     client: A,
     dispatcher: event::dispatcher::SharedState,
     worker_pending: Arc<std::sync::Mutex<Vec<String>>>,
-    worker_prompts: Arc<std::sync::Mutex<Vec<String>>>,
+    worker_prompts: Arc<std::sync::Mutex<Vec<OutgoingPrompt>>>,
     status: Arc<std::sync::Mutex<String>>,
     sessions: Arc<std::sync::Mutex<String>>,
     commands: Arc<std::sync::Mutex<Vec<String>>>,
@@ -1582,7 +1583,7 @@ async fn run_stream<A: api::OpenCodeApi>(
                 }
 
                 for prompt in worker_prompts.lock().map(|mut q| std::mem::take(&mut *q)).unwrap_or_default() {
-                    log::info!("QML промпт: {prompt}");
+                    log::info!("QML prompt: {:?} ({} attachment(s))", prompt.text, prompt.files.len());
                     set_server_status(&status, &markers::ServerConnectionStatus::Busy);
                     // Create a session if there is none.
                     if current_session.is_none() {
@@ -1632,7 +1633,7 @@ async fn run_stream<A: api::OpenCodeApi>(
                         if let Ok(mut q) = worker_pending.lock() {
                             q.push(format!("{REVERTED_TAG}0"));
                         }
-                        match client.prompt_async(&sid, &prompt, session_agents.get(&sid).cloned()).await {
+                        match client.prompt_async(&sid, &prompt.text, &prompt.files, session_agents.get(&sid).cloned()).await {
                             // The session is gone on this server (deleted, or it
                             // belongs to a directory that no longer exists): start
                             // a fresh session and resend the prompt there, once.
@@ -1898,6 +1899,10 @@ async fn refresh_models(client: &impl api::OpenCodeApi, models: &Arc<std::sync::
                         .get(v2keys::VARIANTS)
                         .cloned()
                         .unwrap_or_else(|| serde_json::Value::Array(Vec::new()));
+                    let inputs = m
+                        .get(v2keys::INPUTS)
+                        .cloned()
+                        .unwrap_or_else(|| serde_json::Value::Array(Vec::new()));
                     let rejected = opencode_client::auth::is_rejected(pid);
                     flat.push(serde_json::json!({
                         "providerID": pid,
@@ -1905,6 +1910,7 @@ async fn refresh_models(client: &impl api::OpenCodeApi, models: &Arc<std::sync::
                         "modelID": mid,
                         "modelName": mname,
                         "variants": variants,
+                        v2keys::INPUTS: inputs,
                         QML_LOCKED: rejected,
                         QML_LOCK_REASON: if rejected { LOCK_REJECTED } else { "" },
                     }));
@@ -2015,9 +2021,11 @@ fn history_lines_v2(
         }
         let created = m.time.created;
         match &m.body {
-            MessageBody::User { text, .. } => {
-                if !text.trim().is_empty() {
-                    lines.push(proto_user_line(created, &m.id, text));
+            MessageBody::User { text, files } => {
+                let names: Vec<String> = files.iter().map(|f| f.display_name()).collect();
+                let shown = user_text_with_attachments(text, &names);
+                if !shown.trim().is_empty() {
+                    lines.push(proto_user_line(created, &m.id, &shown));
                 }
             }
             MessageBody::Assistant(a) => {

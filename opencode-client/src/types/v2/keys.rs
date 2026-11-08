@@ -100,6 +100,18 @@ pub const MODELS: &str = "models";
 pub const VARIANTS: &str = "variants";
 /// `Model.Ref.variant` — the preset a session uses (`"default"` = none chosen).
 pub const VARIANT: &str = "variant";
+/// `Model.Info.capabilities` (`{tools, input[], output[], temperature}`).
+pub const CAPABILITIES: &str = "capabilities";
+// `Model.Capabilities.input` (what the model reads: `text`, `image`, `pdf`,
+// `audio`, `video`) uses [`INPUT`] above; it is folded into the QML model
+// list as [`INPUTS`].
+/// QML model-list field carrying `capabilities.input`.
+pub const INPUTS: &str = "inputs";
+/// Prompt body `files: [PromptInput.FileAttachment {uri, name?}]`; the
+/// server reads a `file://` uri itself and inlines it as base64.
+pub const FILES: &str = "files";
+/// `PromptInput.FileAttachment.uri` / `Prompt.FileSource.uri`.
+pub const URI: &str = "uri";
 
 // ── Permission source discriminators ─────────────────────────────────────
 pub const SOURCE_TOOL: &str = "tool";

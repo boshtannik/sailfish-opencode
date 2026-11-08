@@ -53,6 +53,34 @@
         <source>retrying</source>
         <translation>повтор</translation>
     </message>
+    <message>
+        <source>Attach a file</source>
+        <translation>Прикрепить файл</translation>
+    </message>
+    <message>
+        <source>this model can&apos;t read it</source>
+        <translation>эта модель не может его прочитать</translation>
+    </message>
+    <message>
+        <source>Camera</source>
+        <translation>Камера</translation>
+    </message>
+    <message>
+        <source>Files</source>
+        <translation>Файлы</translation>
+    </message>
+    <message>
+        <source>Gallery</source>
+        <translation>Галерея</translation>
+    </message>
+    <message>
+        <source>Videos</source>
+        <translation>Видео</translation>
+    </message>
+    <message>
+        <source>Marked files can&apos;t be read by this model and won&apos;t be sent</source>
+        <translation>Отмеченные файлы эта модель прочитать не может, они не будут отправлены</translation>
+    </message>
 </context>
 <context>
     <name>GlobalSettingsPage</name>
@@ -360,6 +388,14 @@ voice answers (Settings → Voice models).</source>
     <message>
         <source>e.g. /home/defaultuser/opencode-home</source>
         <translation>например, /home/defaultuser/opencode-home</translation>
+    </message>
+    <message>
+        <source>Icon size</source>
+        <translation>Размер значков</translation>
+    </message>
+    <message>
+        <source>Message buttons and the input bar (mic, attach, send)</source>
+        <translation>Кнопки сообщений и панель ввода (микрофон, вложение, отправка)</translation>
     </message>
 </context>
 <context>
@@ -1193,12 +1229,38 @@ long press — remove</source>
         <source>locked</source>
         <translation>заблокировано</translation>
     </message>
+    <message>
+        <source>Hold a model to choose its reasoning level</source>
+        <translation>Удерживайте модель, чтобы выбрать уровень рассуждения</translation>
+    </message>
+    <message>
+        <source>Reasoning for %1</source>
+        <translation>Рассуждение для %1</translation>
+    </message>
 </context>
 <context>
     <name>StatusHeader</name>
     <message>
         <source>waiting…</source>
         <translation>ожидание…</translation>
+    </message>
+</context>
+<context>
+    <name>CameraPage</name>
+    <message>
+        <source>Photo</source>
+        <translation>Фото</translation>
+    </message>
+    <message>
+        <source>Video</source>
+        <translation>Видео</translation>
+    </message>
+</context>
+<context>
+    <name>ImageViewerPage</name>
+    <message>
+        <source>Remove attachment</source>
+        <translation>Удалить вложение</translation>
     </message>
 </context>
 </TS>

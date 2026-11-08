@@ -33,7 +33,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 5. Промпт.
     client
-        .prompt_async(&session_id, "Ответь одним числом: 2+2=?", None)
+        .prompt_async(&session_id, "Ответь одним числом: 2+2=?", &[], None)
         .await?;
     println!("PASS: промпт отправлен");
 

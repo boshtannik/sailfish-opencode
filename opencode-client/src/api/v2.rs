@@ -592,12 +592,17 @@ impl OpenCodeApi for V2Adapter {
         &self,
         session_id: &str,
         text: &str,
+        files: &[String],
         agent: Option<String>,
     ) -> impl Future<Output = Result<Option<String>, String>> + Send {
+        let attachments = file_attachments(files);
         async move {
             let url = format!("{}/api/session/{}/prompt", self.base, session_id);
             let mut body = serde_json::Map::new();
             body.insert(k::TEXT.into(), serde_json::Value::String(text.to_string()));
+            if !attachments.is_empty() {
+                body.insert(k::FILES.into(), serde_json::Value::Array(attachments));
+            }
             if let Some(a) = agent {
                 body.insert(k::AGENTS.into(), serde_json::json!([{ k::NAME: a }]));
             }
@@ -985,6 +990,28 @@ fn urlencode(s: &str) -> String {
 /// within a provider sorted by id via the `BTreeMap`); each model carries the
 /// `name` and the ids of its reasoning `variants`, which `refresh_models` reads. A model without `id`/`providerID`
 /// is skipped. Kept free so it can be unit-tested without an HTTP server.
+/// Prompt `files` entries for local paths: `{uri: "file://…", name}`. The
+/// server reads each file, detects its type and inlines it for the model.
+/// A path that is not absolute cannot become a file uri and is skipped.
+fn file_attachments(paths: &[String]) -> Vec<serde_json::Value> {
+    paths
+        .iter()
+        .filter_map(|p| match reqwest::Url::from_file_path(p) {
+            Ok(uri) => {
+                let name = std::path::Path::new(p)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| p.clone());
+                Some(serde_json::json!({ k::URI: uri.as_str(), k::NAME: name }))
+            }
+            Err(()) => {
+                log::warn!("prompt attachment {p:?} is not an absolute path; not sent");
+                None
+            }
+        })
+        .collect()
+}
+
 fn fold_models_into_providers(v: &serde_json::Value) -> serde_json::Value {
     let empty = Vec::new();
     let models = v[k::DATA].as_array().unwrap_or(&empty);
@@ -1012,10 +1039,16 @@ fn fold_models_into_providers(v: &serde_json::Value) -> serde_json::Value {
                     .collect()
             })
             .unwrap_or_default();
+        // Input kinds the model reads (`text`, `image`, `pdf`, …): the chat
+        // offers attachments only for models that read images or PDFs.
+        let inputs = m[k::CAPABILITIES][k::INPUT]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
         if let Some(ms) = by_provider.get_mut(pid) {
             ms.insert(
                 id.to_string(),
-                serde_json::json!({ k::NAME: name, k::VARIANTS: variants }),
+                serde_json::json!({ k::NAME: name, k::VARIANTS: variants, k::INPUTS: inputs }),
             );
         }
     }
@@ -1167,6 +1200,38 @@ mod tests {
             json!(["none", "low"])
         );
         assert_eq!(provs[1]["models"]["big-pickle"]["variants"], json!([]));
+    }
+
+    /// Local paths become `file://` uris (spaces percent-encoded) with the
+    /// file name; relative paths are dropped.
+    #[test]
+    fn file_attachments_build_file_uris() {
+        let out = file_attachments(&[
+            "/home/defaultuser/Pictures/my photo.jpg".to_string(),
+            "relative.png".to_string(),
+        ]);
+        assert_eq!(
+            out,
+            vec![json!({ "uri": "file:///home/defaultuser/Pictures/my%20photo.jpg",
+                         "name": "my photo.jpg" })]
+        );
+    }
+
+    /// `capabilities.input` reaches the model list as `inputs`.
+    #[test]
+    fn fold_models_keeps_input_kinds() {
+        let v = json!({ "data": [
+            { "id": "claude-haiku-5-5", "providerID": "anthropic", "name": "Claude Haiku 5.5",
+              "capabilities": { "tools": true, "input": ["text", "image", "pdf"], "output": ["text"] } },
+            { "id": "big-pickle", "providerID": "opencode", "name": "Big Pickle" }
+        ] });
+        let out = fold_models_into_providers(&v);
+        let provs = out["providers"].as_array().unwrap();
+        assert_eq!(
+            provs[0]["models"]["claude-haiku-5-5"]["inputs"],
+            json!(["text", "image", "pdf"])
+        );
+        assert_eq!(provs[1]["models"]["big-pickle"]["inputs"], json!([]));
     }
 
     #[test]

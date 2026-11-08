@@ -1,5 +1,7 @@
 import QtQuick 2.6
 import Sailfish.Silica 1.0
+import Sailfish.Pickers 1.0
+import Nemo.Thumbnailer 1.0
 import "../components"
 import "../components/MdCache.js" as MdCache
 
@@ -9,6 +11,9 @@ Item {
     property var appWindow
 
     readonly property bool busy: appWindow.statusBase(appWindow.statusText) === "busy"
+    // Attached files the current model can read (they make Send usable even
+    // with an empty text field).
+    readonly property int sendableAttachments: appWindow.attachments.filter(appWindow.attachmentSupported).length
 
     // ms (unix) → "HH:MM" local time.
     function tsLabel(ms) {
@@ -26,10 +31,14 @@ Item {
     }
 
     // Message buttons follow the text size setting (Settings → Chat display).
-    readonly property int msgButtonSize: Math.round(Theme.itemSizeMedium * appWindow.fontScale)
-    readonly property int msgIconSize: Math.round(Theme.iconSizeMedium * appWindow.fontScale)
-    readonly property int smallButtonSize: Math.round(Theme.itemSizeSmall * appWindow.fontScale)
-    readonly property int smallIconSize: Math.round(Theme.iconSizeSmallPlus * appWindow.fontScale)
+    // Message icons follow Settings → Icon size (not the text size).
+    readonly property int msgButtonSize: Math.round(Theme.itemSizeMedium * appWindow.iconScale)
+    readonly property int msgIconSize: Math.round(Theme.iconSizeMedium * appWindow.iconScale)
+    readonly property int smallButtonSize: Math.round(Theme.itemSizeSmall * appWindow.iconScale)
+    readonly property int smallIconSize: Math.round(Theme.iconSizeSmallPlus * appWindow.iconScale)
+    // Input bar buttons (mic, send/stop, paperclip) follow Icon size too.
+    readonly property int barButtonSize: Math.round(Theme.itemSizeMedium * appWindow.iconScale)
+    readonly property int barIconSize: Math.round(Theme.iconSizeMedium * appWindow.iconScale)
 
     // ── Mini-markdown → HTML (Text.RichText) ──────────────────────────────
     // No third-party libraries: headings, lists, quotes, bold/italic,
@@ -356,7 +365,7 @@ Item {
             top: compactionBanner.visible ? compactionBanner.bottom : (retryBanner.visible ? retryBanner.bottom : header.bottom)
             left: parent.left
             right: parent.right
-            bottom: revertStrip.visible ? revertStrip.top : inputPanel.top
+            bottom: revertStrip.visible ? revertStrip.top : attachStrip.top
         }
         model: appWindow.chatModel
         clip: true
@@ -449,14 +458,15 @@ Item {
         anchors {
             right: parent.right
             rightMargin: Theme.horizontalPageMargin
-            bottom: inputPanel.top
+            bottom: attachStrip.top
             bottomMargin: Theme.paddingLarge
         }
         width: Math.round(Theme.itemSizeMedium * appWindow.fontScale)
         height: width
         z: 7
         visible: opacity > 0
-        opacity: (!chatList.stickBottom && chatList.count > 0 && !chatList.nearEnd()) ? 1 : 0
+        opacity: (!chatList.stickBottom && chatList.count > 0 && !chatList.nearEnd()
+                  && !attachSheet.open) ? 1 : 0
         Behavior on opacity { FadeAnimation { duration: 180 } }
         Rectangle {
             anchors.fill: parent
@@ -1216,6 +1226,305 @@ Item {
         }
     }
 
+    // ── Attachments for the next prompt ──────────────────────────────────
+    // One chip per picked file (✕ removes it). A file the current model
+    // cannot read stays listed, marked, and is not sent.
+    Item {
+        id: attachStrip
+        anchors {
+            left: parent.left
+            right: parent.right
+            bottom: inputPanel.top
+        }
+        visible: appWindow.attachments.length > 0
+        height: visible ? attachFlow.height + 2 * Theme.paddingSmall : 0
+
+        Flow {
+            id: attachFlow
+            x: Theme.horizontalPageMargin
+            y: Theme.paddingSmall
+            width: parent.width - 2 * Theme.horizontalPageMargin
+            spacing: Theme.paddingSmall
+            Repeater {
+                model: appWindow.attachments
+                Loader {
+                    readonly property var att: modelData
+                    readonly property int attIndex: index
+                    readonly property bool ok: appWindow.attachmentSupported(modelData)
+                    sourceComponent: (modelData.kind === appWindow.kInputImage
+                                      || modelData.kind === appWindow.kInputVideo)
+                                     ? thumbTile : fileChip
+                }
+            }
+        }
+    }
+
+    // Image/video attachment: a thumbnail tile with a ✕ badge. Tap an image
+    // to see it full screen, a video to play it.
+    Component {
+        id: thumbTile
+        BackgroundItem {
+            id: thumbItem
+            readonly property var att: parent ? parent.att : null
+            readonly property int attIndex: parent ? parent.attIndex : -1
+            readonly property bool ok: parent ? parent.ok : true
+            width: Theme.itemSizeExtraLarge
+            height: width
+            Thumbnail {
+                id: thumb
+                anchors.fill: parent
+                source: thumbItem.att ? "file://" + thumbItem.att.path : ""
+                mimeType: thumbItem.att && thumbItem.att.kind === appWindow.kInputVideo ? "video/mp4" : ""
+                sourceSize.width: width
+                sourceSize.height: height
+                fillMode: Thumbnail.PreserveAspectCrop
+                opacity: thumbItem.ok ? 1 : 0.4
+            }
+            Rectangle {
+                anchors.fill: parent
+                color: "transparent"
+                radius: Theme.paddingSmall
+                border.width: thumbItem.ok ? 1 : 2
+                border.color: thumbItem.ok ? Theme.rgba(Theme.highlightColor, 0.6) : Theme.errorColor
+            }
+            Image {
+                visible: thumbItem.att && thumbItem.att.kind === appWindow.kInputVideo
+                anchors.centerIn: parent
+                source: "image://theme/icon-m-play?white"
+            }
+            // ✕: remove this attachment.
+            MouseArea {
+                anchors {
+                    top: parent.top
+                    right: parent.right
+                }
+                width: Theme.itemSizeExtraSmall
+                height: width
+                onClicked: appWindow.removeAttachment(thumbItem.attIndex)
+                Rectangle {
+                    anchors {
+                        top: parent.top
+                        right: parent.right
+                        margins: Theme.paddingSmall / 2
+                    }
+                    width: Theme.iconSizeSmall + Theme.paddingSmall
+                    height: width
+                    radius: width / 2
+                    color: Theme.rgba("black", 0.65)
+                    Label {
+                        anchors.centerIn: parent
+                        text: "✕"
+                        color: "white"
+                        font.pixelSize: Theme.fontSizeExtraSmall
+                    }
+                }
+            }
+            onClicked: {
+                if (!thumbItem.att)
+                    return
+                if (thumbItem.att.kind === appWindow.kInputVideo)
+                    Qt.openUrlExternally("file://" + thumbItem.att.path)
+                else
+                    pageStack.push(Qt.resolvedUrl("ImageViewerPage.qml"),
+                                   { appWindow: appWindow, path: thumbItem.att.path,
+                                     name: thumbItem.att.name, index: thumbItem.attIndex })
+            }
+        }
+    }
+
+    // Other attachments (PDF…): a name chip; tap removes it.
+    Component {
+        id: fileChip
+        BackgroundItem {
+            id: chip
+            readonly property var att: parent ? parent.att : null
+            readonly property int attIndex: parent ? parent.attIndex : -1
+            readonly property bool ok: parent ? parent.ok : true
+            width: Math.min(attachFlow.width, chipRow.width + 2 * Theme.paddingMedium)
+            height: Theme.itemSizeExtraSmall
+            Rectangle {
+                anchors.fill: parent
+                radius: height / 2
+                color: "transparent"
+                border.width: 1
+                border.color: chip.ok ? Theme.rgba(Theme.highlightColor, 0.6)
+                                      : Theme.rgba(Theme.errorColor, 0.8)
+            }
+            Row {
+                id: chipRow
+                anchors.centerIn: parent
+                spacing: Theme.paddingSmall
+                Label {
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: Math.min(implicitWidth, attachFlow.width - Theme.itemSizeExtraSmall
+                                    - 3 * Theme.paddingMedium)
+                    truncationMode: TruncationMode.Fade
+                    text: chip.att ? appWindow.kAttachmentPrefix + chip.att.name : ""
+                    color: chip.ok ? Theme.highlightColor : Theme.errorColor
+                    font.pixelSize: appWindow.fs(Theme.fontSizeExtraSmall)
+                }
+                Label {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "✕"
+                    color: chip.highlighted ? Theme.highlightColor : Theme.secondaryColor
+                    font.pixelSize: appWindow.fs(Theme.fontSizeSmall)
+                }
+            }
+            onClicked: appWindow.removeAttachment(chip.attIndex)
+        }
+    }
+
+    // A file the current model cannot read: say so once under the tiles.
+    Label {
+        id: attachWarning
+        visible: attachStrip.visible
+                 && appWindow.attachments.length > chatPage.sendableAttachments
+        anchors {
+            left: parent.left
+            leftMargin: Theme.horizontalPageMargin
+            right: parent.right
+            rightMargin: Theme.horizontalPageMargin
+            bottom: attachStrip.top
+        }
+        z: 7
+        text: qsTr("Marked files can't be read by this model and won't be sent")
+        wrapMode: Text.Wrap
+        color: Theme.errorColor
+        font.pixelSize: appWindow.fs(Theme.fontSizeExtraSmall)
+    }
+
+
+    // ── Attach menu ──────────────────────────────────────────────────────
+    // The paperclip opens this panel above the input: camera, gallery,
+    // videos (models that read video) and files (models that read PDFs).
+    Component {
+        id: imagePickerPage
+        ImagePickerPage {
+            onSelectedContentPropertiesChanged: {
+                if (selectedContentProperties && selectedContentProperties.filePath)
+                    appWindow.addAttachment(selectedContentProperties.filePath)
+            }
+        }
+    }
+    Component {
+        id: videoPickerPage
+        VideoPickerPage {
+            onSelectedContentPropertiesChanged: {
+                if (selectedContentProperties && selectedContentProperties.filePath)
+                    appWindow.addAttachment(selectedContentProperties.filePath)
+            }
+        }
+    }
+    Component {
+        id: filePickerPage
+        FilePickerPage {
+            title: qsTr("Attach a file")
+            nameFilters: {
+                var f = []
+                if (appWindow.canAttachPdf) f.push("*.pdf")
+                if (appWindow.canAttachImages) f = f.concat(["*.png", "*.jpg", "*.jpeg", "*.gif", "*.webp"])
+                if (appWindow.canAttachVideo) f = f.concat(["*.mp4", "*.mov", "*.webm"])
+                return f
+            }
+            onSelectedContentPropertiesChanged: {
+                if (selectedContentProperties && selectedContentProperties.filePath)
+                    appWindow.addAttachment(selectedContentProperties.filePath)
+            }
+        }
+    }
+    function openAttach(what) {
+        attachSheet.open = false
+        if (what === "camera")
+            pageStack.push(Qt.resolvedUrl("CameraPage.qml"),
+                           { appWindow: appWindow, allowVideo: appWindow.canAttachVideo })
+        else if (what === "gallery")
+            pageStack.push(imagePickerPage)
+        else if (what === "videos")
+            pageStack.push(videoPickerPage)
+        else
+            pageStack.push(filePickerPage)
+    }
+
+    Rectangle {
+        id: attachSheet
+        property bool open: false
+        anchors {
+            left: parent.left
+            right: parent.right
+            bottom: attachStrip.top
+        }
+        height: attachRow.height + 2 * Theme.paddingLarge
+        // Opaque base so the chat does not show through, tinted with the theme.
+        color: "black"
+        z: 8
+        Rectangle {
+            anchors.fill: parent
+            color: Theme.rgba(Theme.highlightDimmerColor, 0.85)
+        }
+        visible: opacity > 0
+        opacity: open && appWindow.canAttach ? 1 : 0
+        transform: Translate {
+            y: attachSheet.open ? 0 : Theme.paddingLarge
+            Behavior on y { NumberAnimation { duration: 140; easing.type: Easing.OutQuad } }
+        }
+        Behavior on opacity { FadeAnimation { duration: 140 } }
+        // A model without file input (or another session) closes it.
+        Connections {
+            target: appWindow
+            onCurrentSessionIdChanged: attachSheet.open = false
+            onCanAttachChanged: if (!appWindow.canAttach) attachSheet.open = false
+        }
+
+        Row {
+            id: attachRow
+            anchors.centerIn: parent
+            spacing: Theme.paddingLarge * 1.5
+            Repeater {
+                model: {
+                    var m = [{ id: "camera", icon: "image://theme/icon-m-camera", text: qsTr("Camera") },
+                             { id: "gallery", icon: "image://theme/icon-m-image", text: qsTr("Gallery") }]
+                    if (appWindow.canAttachVideo)
+                        m.push({ id: "videos", icon: "image://theme/icon-m-video", text: qsTr("Videos") })
+                    if (appWindow.canAttachPdf)
+                        m.push({ id: "files", icon: "image://theme/icon-m-document", text: qsTr("Files") })
+                    return m
+                }
+                BackgroundItem {
+                    id: tile
+                    width: Theme.itemSizeLarge
+                    height: tileCol.height
+                    onClicked: chatPage.openAttach(modelData.id)
+                    Column {
+                        id: tileCol
+                        width: parent.width
+                        spacing: Theme.paddingSmall
+                        Rectangle {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            width: Theme.itemSizeMedium
+                            height: width
+                            radius: width / 2
+                            color: tile.highlighted ? Theme.rgba(Theme.highlightBackgroundColor, 0.5)
+                                                    : Theme.rgba(Theme.primaryColor, 0.12)
+                            Icon {
+                                anchors.centerIn: parent
+                                source: modelData.icon
+                                highlighted: tile.highlighted
+                            }
+                        }
+                        Label {
+                            width: parent.width
+                            horizontalAlignment: Text.AlignHCenter
+                            text: modelData.text
+                            truncationMode: TruncationMode.Fade
+                            font.pixelSize: appWindow.fs(Theme.fontSizeExtraSmall)
+                            color: tile.highlighted ? Theme.highlightColor : Theme.primaryColor
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // ── Revert banner ─────────────────────────────────────────────────────
     // Shown while the session tail is reverted (worker control line
     // `[[reverted]]1`). "Restore" calls unrevert and the full history reloads.
@@ -1227,7 +1536,7 @@ Item {
         anchors {
             left: parent.left
             right: parent.right
-            bottom: inputPanel.top
+            bottom: attachStrip.top
         }
 
         Rectangle {
@@ -1276,8 +1585,31 @@ Item {
             right: parent.right
             bottom: parent.bottom
         }
-        // Single input level: the panel height = the height of one row of buttons.
-        height: Theme.itemSizeMedium + Theme.paddingMedium
+        // One row of buttons; the text field grows with its text up to two
+        // lines, then scrolls; the buttons stay on the bottom line.
+        height: Math.max(chatPage.barButtonSize, input.visible ? input.height : 0) + Theme.paddingMedium
+        Behavior on height { NumberAnimation { duration: 100; easing.type: Easing.OutQuad } }
+        readonly property int maxInputHeight: input._totalVerticalMargins + 2 * inputMetrics.height
+        FontMetrics {
+            id: inputMetrics
+            font: input.font
+        }
+
+        // Rounded field behind the text input.
+        Rectangle {
+            visible: input.visible
+            x: input.x
+            width: input.width
+            height: Math.max(chatPage.barButtonSize - Theme.paddingMedium, input.height)
+            // Centred on the text: the field has a little more margin below
+            // its text than above.
+            y: input.y + (input.height - height) / 2
+               - (Theme.paddingMedium - Theme.paddingSmall) / 2
+            radius: Math.min(height / 2, chatPage.barButtonSize / 2)
+            color: Theme.rgba(Theme.primaryColor, input.activeFocus ? 0.10 : 0.06)
+            border.width: input.activeFocus ? 1 : 0
+            border.color: Theme.rgba(Theme.highlightColor, 0.4)
+        }
 
         // ── Fixed input panel layouts ──────────────────────────────────────
         // There are few variants — we define each explicitly via State (anchors), without
@@ -1393,9 +1725,14 @@ Item {
         IconButton {
             id: mic
             visible: false
-            width: Theme.itemSizeMedium
-            height: Theme.itemSizeMedium
-            anchors.verticalCenter: inputPanel.verticalCenter
+            width: chatPage.barButtonSize
+            height: chatPage.barButtonSize
+            icon.width: chatPage.barIconSize
+            icon.height: chatPage.barIconSize
+            icon.sourceSize.width: chatPage.barIconSize
+            icon.sourceSize.height: chatPage.barIconSize
+            anchors.bottom: inputPanel.bottom
+            anchors.bottomMargin: Theme.paddingMedium / 2
             // The horizontal anchor is set only by state (left/center/right),
             // so that no anchor conflict arises when centering.
             icon.source: (appWindow.recording || appWindow.recognizing)
@@ -1425,18 +1762,24 @@ Item {
             // During a retry the agent is "busy" but nothing is generating:
             // show the (disabled) send button instead of an unusable stop.
             visible: !chatPage.busy || chatPage.retryInfo !== null
-            width: Theme.itemSizeMedium
-            height: Theme.itemSizeMedium
+            width: chatPage.barButtonSize
+            height: chatPage.barButtonSize
+            icon.width: chatPage.barIconSize
+            icon.height: chatPage.barIconSize
+            icon.sourceSize.width: chatPage.barIconSize
+            icon.sourceSize.height: chatPage.barIconSize
             anchors {
                 right: inputPanel.right
                 rightMargin: Theme.paddingSmall
-                verticalCenter: inputPanel.verticalCenter
+                bottom: inputPanel.bottom
+                bottomMargin: Theme.paddingMedium / 2
             }
             icon.source: "image://theme/icon-m-enter-accept"
             // A pending retry is "busy" for the agent but not for the user: the
             // button stays visible (disabled) so it does not turn into a useless
             // stop button, and the composer keeps accepting text (see `input`).
-            enabled: input.text.length > 0 && header.retry === null
+            enabled: (input.text.length > 0 || chatPage.sendableAttachments > 0)
+                     && header.retry === null
             onClicked: {
                 appWindow.send(input.text)
                 input.text = ""
@@ -1446,12 +1789,17 @@ Item {
         IconButton {
             id: stop
             visible: chatPage.busy && header.retry === null
-            width: Theme.itemSizeMedium
-            height: Theme.itemSizeMedium
+            width: chatPage.barButtonSize
+            height: chatPage.barButtonSize
+            icon.width: chatPage.barIconSize
+            icon.height: chatPage.barIconSize
+            icon.sourceSize.width: chatPage.barIconSize
+            icon.sourceSize.height: chatPage.barIconSize
             anchors {
                 right: inputPanel.right
                 rightMargin: Theme.paddingSmall
-                verticalCenter: inputPanel.verticalCenter
+                bottom: inputPanel.bottom
+                bottomMargin: Theme.paddingMedium / 2
             }
             icon.source: "image://theme/icon-m-stop"
             onClicked: appWindow.stopAgent()
@@ -1472,9 +1820,12 @@ Item {
             labelVisible: false
             verticalAlignment: Text.AlignVCenter
             horizontalAlignment: Text.AlignLeft
-            // One line of the same height as the buttons: the bottom aligns to one level.
-            height: Theme.itemSizeMedium
-            anchors.verticalCenter: inputPanel.verticalCenter
+            // Natural height, growing with the text; while shorter than the
+            // button row it sits centred on it.
+            height: Math.min(implicitHeight, inputPanel.maxInputHeight)
+            anchors.bottom: inputPanel.bottom
+            anchors.bottomMargin: Theme.paddingMedium / 2
+                                  + Math.max(0, (chatPage.barButtonSize - height) / 2)
             // Default anchors (width in the initial layout [input, send]);
             // the state overrides them for the chosen scheme.
             anchors.left: inputPanel.left
@@ -1484,12 +1835,38 @@ Item {
             placeholderText: chatPage.busy
                              ? qsTr("Agent is working…")
                              : qsTr("Agent prompt…")
+            // Room for the paperclip, which sits on the bottom line of the
+            // field (not on its first line, as a rightItem would).
+            textRightMargin: attachButton.visible ? attachButton.width + Theme.paddingSmall
+                                                  : Theme.horizontalPageMargin
             EnterKey.enabled: text.length > 0 && !chatPage.busy
             EnterKey.iconSource: "image://theme/icon-m-enter-accept"
             EnterKey.onClicked: {
                 appWindow.send(input.text)
                 input.text = ""
             }
+        }
+
+        IconButton {
+            id: attachButton
+            visible: appWindow.canAttach && input.visible
+            z: 1
+            width: chatPage.barIconSize + Theme.paddingMedium
+            height: chatPage.barButtonSize
+            anchors {
+                right: input.right
+                rightMargin: Theme.paddingSmall
+                bottom: inputPanel.bottom
+                bottomMargin: Theme.paddingMedium / 2
+            }
+            icon.source: "image://theme/icon-m-attach"
+            icon.width: chatPage.barIconSize
+            icon.height: chatPage.barIconSize
+            icon.sourceSize.width: chatPage.barIconSize
+            icon.sourceSize.height: chatPage.barIconSize
+            enabled: !chatPage.busy || chatPage.retryInfo !== null
+            highlighted: down || attachSheet.open
+            onClicked: attachSheet.open = !attachSheet.open
         }
     }
 }

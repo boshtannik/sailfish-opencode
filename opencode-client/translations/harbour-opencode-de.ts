@@ -53,6 +53,34 @@
         <source>retrying</source>
         <translation>erneuter Versuch</translation>
     </message>
+    <message>
+        <source>Attach a file</source>
+        <translation>Datei anhängen</translation>
+    </message>
+    <message>
+        <source>this model can&apos;t read it</source>
+        <translation>dieses Modell kann sie nicht lesen</translation>
+    </message>
+    <message>
+        <source>Camera</source>
+        <translation>Kamera</translation>
+    </message>
+    <message>
+        <source>Files</source>
+        <translation>Dateien</translation>
+    </message>
+    <message>
+        <source>Gallery</source>
+        <translation>Galerie</translation>
+    </message>
+    <message>
+        <source>Videos</source>
+        <translation>Videos</translation>
+    </message>
+    <message>
+        <source>Marked files can&apos;t be read by this model and won&apos;t be sent</source>
+        <translation>Markierte Dateien kann dieses Modell nicht lesen; sie werden nicht gesendet</translation>
+    </message>
 </context>
 <context>
     <name>GlobalSettingsPage</name>
@@ -358,6 +386,14 @@ Sprachantworten zu aktivieren (Einstellungen → Sprachmodelle).</translation>
     <message>
         <source>e.g. /home/defaultuser/opencode-home</source>
         <translation>z. B. /home/defaultuser/opencode-home</translation>
+    </message>
+    <message>
+        <source>Icon size</source>
+        <translation>Symbolgröße</translation>
+    </message>
+    <message>
+        <source>Message buttons and the input bar (mic, attach, send)</source>
+        <translation>Nachrichtenschaltflächen und die Eingabeleiste (Mikrofon, Anhang, Senden)</translation>
     </message>
 </context>
 <context>
@@ -1179,12 +1215,38 @@ lang drücken — entfernen</translation>
         <source>locked</source>
         <translation>gesperrt</translation>
     </message>
+    <message>
+        <source>Hold a model to choose its reasoning level</source>
+        <translation>Halte ein Modell gedrückt, um die Denkstufe zu wählen</translation>
+    </message>
+    <message>
+        <source>Reasoning for %1</source>
+        <translation>Denkstufe für %1</translation>
+    </message>
 </context>
 <context>
     <name>StatusHeader</name>
     <message>
         <source>waiting…</source>
         <translation>warte…</translation>
+    </message>
+</context>
+<context>
+    <name>CameraPage</name>
+    <message>
+        <source>Photo</source>
+        <translation>Foto</translation>
+    </message>
+    <message>
+        <source>Video</source>
+        <translation>Video</translation>
+    </message>
+</context>
+<context>
+    <name>ImageViewerPage</name>
+    <message>
+        <source>Remove attachment</source>
+        <translation>Anhang entfernen</translation>
     </message>
 </context>
 </TS>

@@ -17,7 +17,7 @@ pub use event::EventEnvelope;
 pub use form::{Choice, Condition, Field, FormInfo};
 pub use integration::{Attempt, AttemptMode, AttemptStatus};
 pub use message::{
-    AssistantFields, CompactionReason, CompactionStatus, Content, FileAttachment, IdleOutcome,
+    AssistantFields, CompactionReason, CompactionStatus, Content, FileAttachment, FileSource, IdleOutcome,
     MessageBody, MessageInfo, MessageTime, ModelRef, SessionError, ShellStatus, ToolContent,
     ToolState, TokenUsage,
 };

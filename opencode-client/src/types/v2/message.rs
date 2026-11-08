@@ -314,14 +314,48 @@ pub struct ModelRef {
     pub variant: Option<String>,
 }
 
-/// A prompt/message file attachment (`uri`, optional `name`/`description`).
-#[derive(Debug, Clone, Deserialize)]
+/// A file attached to a user message. The stored form is
+/// `Prompt.FileAttachment {data, mime, source:{type,uri?}, name?}` (the server
+/// inlines the file as base64 `data`, which is not kept here); a bare
+/// `{uri, name?}` (prompt input form) is accepted too. Every field is optional
+/// so one odd entry never breaks the whole history page.
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct FileAttachment {
-    pub uri: String,
+    #[serde(default)]
+    pub uri: Option<String>,
     #[serde(default)]
     pub name: Option<String>,
     #[serde(default)]
     pub description: Option<String>,
+    #[serde(default)]
+    pub mime: Option<String>,
+    #[serde(default)]
+    pub source: Option<FileSource>,
+}
+
+/// `Prompt.FileSource`: `{type:"inline"}` or `{type:"uri", uri}`.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct FileSource {
+    #[serde(default)]
+    pub uri: Option<String>,
+}
+
+impl FileAttachment {
+    /// Name shown in the feed: the given name, else the last path segment of
+    /// the uri, else the mime type.
+    pub fn display_name(&self) -> String {
+        if let Some(n) = self.name.as_deref().filter(|n| !n.is_empty()) {
+            return n.to_string();
+        }
+        let uri = self
+            .uri
+            .as_deref()
+            .or_else(|| self.source.as_ref().and_then(|s| s.uri.as_deref()));
+        if let Some(seg) = uri.and_then(|u| u.rsplit('/').next()).filter(|s| !s.is_empty()) {
+            return seg.to_string();
+        }
+        self.mime.clone().unwrap_or_else(|| "file".to_string())
+    }
 }
 
 /// `Session.StructuredError {type, message, status?, response?{body}}`.
@@ -349,4 +383,34 @@ pub struct TokenUsage {
 pub struct CacheUsage {
     pub read: u64,
     pub write: u64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A user message as the server stores it after a prompt with a file: the
+    /// attachment is `{data, mime, source:{type,uri}}` with no top-level `uri`.
+    #[test]
+    fn user_message_with_stored_attachment_parses() {
+        let v = serde_json::json!({
+            "id": "msg_1", "time": { "created": 1 }, "type": "user",
+            "text": "What colour?",
+            "files": [
+                { "data": "iVBORw0KGgo=", "mime": "image/png",
+                  "source": { "type": "uri", "uri": "file:///home/defaultuser/square.png" } },
+                { "data": "JVBERi0=", "mime": "application/pdf", "name": "report.pdf",
+                  "source": { "type": "inline" } }
+            ]
+        });
+        let m: MessageInfo = serde_json::from_value(v).expect("parses");
+        match m.body {
+            MessageBody::User { text, files } => {
+                assert_eq!(text, "What colour?");
+                let names: Vec<String> = files.iter().map(|f| f.display_name()).collect();
+                assert_eq!(names, vec!["square.png".to_string(), "report.pdf".to_string()]);
+            }
+            other => panic!("expected a user message, got {other:?}"),
+        }
+    }
 }
