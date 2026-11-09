@@ -2,55 +2,55 @@
   <img src="icons/172x172/harbour-opencode.png" width="128" alt="harbour-opencode icon">
 </p>
 
-<h1 align="center">opencode для Sailfish OS</h1>
+<h1 align="center">opencode for Sailfish OS</h1>
 
-<p align="center"><strong>Ваш умный помощник, который всегда в кармане.</strong></p>
+<p align="center"><strong>Your smart assistant, always in your pocket.</strong></p>
 
-**opencode** превращает ваш телефон на Sailfish OS в помощника для работы, учёбы и повседневных дел. Просто напишите или скажите, что нужно — и приложение поможет.
+**opencode** turns your Sailfish OS phone into a helpful assistant for work, study, and everyday tasks. Just type or speak — and get things done.
 
-## Что можно делать прямо на телефоне
+## What you can do right on your phone
 
-- **Диктовать заметки голосом.** Надиктуйте мысль, идею или список дел — приложение превратит речь в текст.
-- **Планировать день и проекты.** Составляйте планы, списки задач и расписания в удобном диалоге.
-- **Разбираться в больших документах.** Откройте длинный текст — получите краткое содержание, главные мысли и ответы на вопросы.
-- **Прослушать сводку голосом.** Попросите озвучить краткий пересказ документа или ответа, чтобы не читать с экрана.
-- **Сформировать PDF из текста.** Превратите заметки, черновики или итоги разговора в аккуратный PDF-документ.
-- **Подключаться к своим компьютерам.** Работайте с другими устройствами удалённо: проверяйте файлы, запускайте команды и продолжайте дела с того места, где остановились.
-- **Разрабатывать и править приложения.** Обсуждайте код, находите ошибки, получайте подсказки и вносите изменения — даже когда рядом нет ноутбука.
-- **Управлять удалёнными серверами.** Подключайтесь к серверам и выполняйте привычные задачи администрирования через диалог.
-- **Работать с почтой и другими инструментами.** С помощью консольных программ можно читать и писать письма, искать информацию и автоматизировать рутинные действия.
-- **Быстро получать ответы и идеи.** Попросите объяснить тему, переписать текст, подготовить черновик сообщения или придумать варианты решения.
+- **Dictate notes by voice.** Capture an idea, a thought, or a to-do list — the app turns your speech into text.
+- **Plan your day and projects.** Create plans, task lists, and schedules in a simple chat.
+- **Understand large documents.** Open long text and get a clear summary, key points, and answers to your questions.
+- **Listen to summaries out loud.** Ask the app to read a short summary of a document or response so you don’t have to read from the screen.
+- **Create PDF documents from text.** Turn notes, drafts, or conversation results into a neat PDF document.
+- **Connect to your other computers.** Work with your devices remotely: check files, run commands, and continue where you left off.
+- **Build and improve apps.** Discuss code, find issues, get suggestions, and make changes — even without a laptop nearby.
+- **Manage remote servers.** Connect to your servers and handle everyday admin tasks through the chat.
+- **Work with email and other tools.** Use console tools to read and write emails, search for information, and automate routine work.
+- **Get quick answers and ideas.** Ask for explanations, rewrites, message drafts, or different ways to solve a problem.
 
-## Почему это удобно
+## Why it’s convenient
 
-- Всё в одном месте — чат, голос и работа с задачами.
-- Подходит и для быстрых дел, и для серьёзной работы.
-- Помогает экономить время: меньше ручной рутины, больше готовых результатов.
-- Работает на вашем телефоне Sailfish OS — помощник всегда под рукой.
+- Everything in one place — chat, voice, and task workflows.
+- Great for quick tasks and serious work alike.
+- Saves time: less routine, more ready-to-use results.
+- Built for Sailfish OS — your assistant is always at hand.
 
-## Скриншоты
+## Screenshots
 
 <table>
   <tr>
-    <td align="center"><img src="screenshots/photo_1_2026-10-18_01-46-12.jpg" width="240" alt="Скриншот 1"></td>
-    <td align="center"><img src="screenshots/photo_2_2026-10-18_01-46-12.jpg" width="240" alt="Скриншот 2"></td>
+    <td align="center"><img src="screenshots/photo_1_2026-10-18_01-46-12.jpg" width="240" alt="Screenshot 1"></td>
+    <td align="center"><img src="screenshots/photo_2_2026-10-18_01-46-12.jpg" width="240" alt="Screenshot 2"></td>
   </tr>
   <tr>
-    <td align="center"><img src="screenshots/photo_3_2026-10-18_01-46-12.jpg" width="240" alt="Скриншот 3"></td>
-    <td align="center"><img src="screenshots/photo_4_2026-10-18_01-46-12.jpg" width="240" alt="Скриншот 4"></td>
+    <td align="center"><img src="screenshots/photo_3_2026-10-18_01-46-12.jpg" width="240" alt="Screenshot 3"></td>
+    <td align="center"><img src="screenshots/photo_4_2026-10-18_01-46-12.jpg" width="240" alt="Screenshot 4"></td>
   </tr>
 </table>
 
-## Совместимость
+## Compatibility
 
-Пока приложение распространяется как **harbour-opencode** для устройств **aarch64** на **Sailfish OS 5.1**.
+Currently distributed as **harbour-opencode** for **aarch64** devices running **Sailfish OS 5.1**.
 
-## Для разработчиков
+## For developers
 
-Техническое описание, архитектура, сборка и деплой перенесены в [DEVELOPMENT.md](DEVELOPMENT.md).
+Technical details, architecture, build, and deployment instructions are in [DEVELOPMENT.md](DEVELOPMENT.md).
 
-## Лицензия
+## License
 
-MIT. См. [LICENSE](LICENSE) и [AUTHORS.md](AUTHORS.md).
+MIT. See [LICENSE](LICENSE) and [AUTHORS.md](AUTHORS.md).
 
-> Независимый клиент, не аффилирован с Jolla Ltd. и проектом opencode. `opencode` — отдельный продукт его авторов (см. [opencode.ai](https://opencode.ai)).
+> Independent client, not affiliated with Jolla Ltd. or the opencode project. `opencode` is a separate product by its authors (see [opencode.ai](https://opencode.ai)).
