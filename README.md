@@ -20,6 +20,7 @@
 - **Manage remote servers.** Connect to your servers and handle everyday admin tasks through the chat.
 - **Work with email and other tools.** Use console tools to read and write emails, search for information, and automate routine work.
 - **Get quick answers and ideas.** Ask for explanations, rewrites, message drafts, or different ways to solve a problem.
+- **Choose from supported AI providers.** Use the providers available through opencode, including Claude (Anthropic), and pick the model that fits your task.
 
 ## Why it’s convenient
 
