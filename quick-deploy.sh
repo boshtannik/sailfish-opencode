@@ -1,5 +1,5 @@
 #!/bin/bash
-# Quick deploy script: SCP RPM to phone, install via devel-su, drop qmlcache, kill booster/app.
+# Quick deploy script: SCP RPM to phone, install via devel-su, drop qmlcache, stop the app.
 #
 # Usage:
 #   ./quick-deploy.sh                   # Auto-finds latest RPM
@@ -62,7 +62,6 @@ rm -f /tmp/harbour-opencode-deploy.rpm
 echo "==> 3/4 Dropping qmlcache and terminating running instance..."
 rm -rf /home/$USER/.cache/harbour-opencode/qmlcache
 killall harbour-opencode 2>/dev/null || true
-echo "$SFOS_PASS" | devel-su killall booster-silica-qt5 booster-qt5 2>/dev/null || true
 
 echo "==> 4/4 Verification:"
 rpm -qa harbour-opencode
