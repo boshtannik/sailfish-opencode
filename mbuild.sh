@@ -25,15 +25,19 @@ IMAGE="${IMAGE:-registry.gitlab.com/whisperfish/sailo-rs/rust-aarch64-5.1.0.11:s
 DOCKER="${DOCKER:-docker}"
 
 MODE=debug
+GEN_ICON=1
 for arg in "$@"; do
     case "$arg" in
         --release) MODE=release ;;
+        --no-icon) GEN_ICON=0 ;;
         -h|--help)
             echo "Build harbour-opencode (RPM)."
             echo "  ./mbuild.sh            — debug (default, fast)."
             echo "  ./mbuild.sh --release  — fully optimized."
+            echo "  --no-icon              — keep the current launcher icon"
+            echo "                           (do not regenerate a random one)."
             exit 0 ;;
-        *) echo "unknown flag: $arg (allowed: --release)"; exit 1 ;;
+        *) echo "unknown flag: $arg (allowed: --release, --no-icon)"; exit 1 ;;
     esac
 done
 
@@ -48,7 +52,10 @@ rm -f "$OUT"/*.rpm
 # into the RPM). Static Rust binary (tools/gen-icon), no Python/cairosvg
 # needed on the build host; the dispatcher picks the binary matching the
 # host architecture (x86_64/i686/aarch64/armv7).
-"$PROJ/tools/gen-icon/gen-icon" --out "$PROJ/icons" --svg "$PROJ/harbour-opencode.svg"
+# --no-icon skips this, leaving the tracked icons/ untouched.
+if [ "$GEN_ICON" = 1 ]; then
+    "$PROJ/tools/gen-icon/gen-icon" --out "$PROJ/icons" --svg "$PROJ/harbour-opencode.svg"
+fi
 
 # Bump Release so the phone/repo sees each build as an update
 # (standard RPM versioning: X.Y.Z-N, Release grows on every build).

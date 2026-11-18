@@ -132,6 +132,9 @@ sg docker -c "./mbuild.sh --release"  # release — optimized
 
 Output: `harbour-opencode-0.2.77-1.aarch64.rpm`.
 
+`--no-icon` keeps the current launcher icon instead of generating a new
+random one.
+
 Paths default to the script's directory and `~/.cache/opencode-sailfish`;
 override them with `PROJ`, `OUT`, `CACHE` or `IMAGE`. `DOCKER` picks the
 container CLI (e.g. `DOCKER=podman`). `scripts/test-sdk.sh` takes the same
