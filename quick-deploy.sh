@@ -51,10 +51,13 @@ scp $SSH_OPTS "$RPM" "$USER@$HOST:/tmp/harbour-opencode-deploy.rpm"
 
 # 4. Install & clear cache on device
 echo "==> 2/4 Installing RPM on phone..."
+# The heredoc expands locally; \$ marks what the phone's shell evaluates.
 ssh $SSH_OPTS "$USER@$HOST" bash -s <<EOF
 set -e
-echo "$SFOS_PASS" | devel-su rpm -Uvh --force /tmp/harbour-opencode-deploy.rpm
+rc=0
+echo "$SFOS_PASS" | devel-su rpm -Uvh --force /tmp/harbour-opencode-deploy.rpm || rc=\$?
 rm -f /tmp/harbour-opencode-deploy.rpm
+[ \$rc -eq 0 ] || { echo "ERROR: install failed (exit \$rc)"; exit \$rc; }
 
 echo "==> 3/4 Dropping qmlcache and terminating running instance..."
 rm -rf /home/$USER/.cache/harbour-opencode/qmlcache
