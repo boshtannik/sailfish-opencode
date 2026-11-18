@@ -130,7 +130,8 @@ sg docker -c "./mbuild.sh"            # debug — fast, for development
 sg docker -c "./mbuild.sh --release"  # release — optimized
 ```
 
-Output: `harbour-opencode-0.2.77-1.aarch64.rpm`.
+Output: `harbour-opencode-0.2.77-N.aarch64.rpm`, copied next to `mbuild.sh`.
+Each build bumps `Release:` in the spec, so the phone sees it as an update.
 
 `--no-icon` keeps the current launcher icon instead of generating a new
 random one.
