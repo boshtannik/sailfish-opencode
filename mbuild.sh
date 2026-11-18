@@ -29,11 +29,11 @@ for arg in "$@"; do
     case "$arg" in
         --release) MODE=release ;;
         -h|--help)
-            echo "Сборка harbour-opencode (RPM)."
-            echo "  ./mbuild.sh            — debug (по умолчанию, быстро)."
-            echo "  ./mbuild.sh --release  — со всеми оптимизациями."
+            echo "Build harbour-opencode (RPM)."
+            echo "  ./mbuild.sh            — debug (default, fast)."
+            echo "  ./mbuild.sh --release  — fully optimized."
             exit 0 ;;
-        *) echo "неизвестный флаг: $arg (допустим только --release)"; exit 1 ;;
+        *) echo "unknown flag: $arg (allowed: --release)"; exit 1 ;;
     esac
 done
 
