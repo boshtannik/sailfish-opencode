@@ -7,12 +7,20 @@
 #
 # The cargo-target cache lives on the host (CACHE) and survives container runs:
 # rebuilds touch only the changed crates, not everything from scratch.
+#
+# Paths can be overridden from the environment:
+#   PROJ   — project checkout (default: the directory of this script)
+#   OUT    — where the container drops RPMs (default: $CACHE_ROOT/out)
+#   CACHE  — persistent cargo/whisper/piper/opencode cache (default: $CACHE_ROOT/cache)
+#   IMAGE  — SDK image (default: sailo-rs rust-aarch64 5.1.0.11)
+# where CACHE_ROOT defaults to ${XDG_CACHE_HOME:-$HOME/.cache}/opencode-sailfish.
 set -e
 
-PROJ=/home/jack/w/sailfish-opencode
-OUT=/home/jack/.cache/opencode-sailfish/out
-CACHE=/home/jack/.cache/opencode-sailfish/cache
-IMAGE=registry.gitlab.com/whisperfish/sailo-rs/rust-aarch64-5.1.0.11:sfos-5-1
+PROJ="${PROJ:-$(cd "$(dirname "$0")" && pwd)}"
+CACHE_ROOT="${XDG_CACHE_HOME:-$HOME/.cache}/opencode-sailfish"
+OUT="${OUT:-$CACHE_ROOT/out}"
+CACHE="${CACHE:-$CACHE_ROOT/cache}"
+IMAGE="${IMAGE:-registry.gitlab.com/whisperfish/sailo-rs/rust-aarch64-5.1.0.11:sfos-5-1}"
 
 MODE=debug
 for arg in "$@"; do

@@ -132,6 +132,10 @@ sg docker -c "./mbuild.sh --release"  # release — optimized
 
 Output: `harbour-opencode-0.2.77-1.aarch64.rpm`.
 
+Paths default to the script's directory and `~/.cache/opencode-sailfish`;
+override them with `PROJ`, `OUT`, `CACHE` or `IMAGE`. `scripts/test-sdk.sh`
+takes the same variables except `OUT`.
+
 Alternative non-Docker build via `mb2`: `scripts/build.sh`.
 
 ## Deploying to a phone
