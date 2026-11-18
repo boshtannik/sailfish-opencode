@@ -161,6 +161,9 @@ hardcoded in the repo):
 - `SFOS_USER` — ssh user (default `defaultuser`)
 - `SFOS_PASS` — devel-su password (prompted for when unset)
 
+`pkcon install-local` does not work over ssh (no polkit agent: "Failed to
+obtain authentication"), so installing always needs the devel-su password.
+
 Dev-only scripts (`restart-probe.sh`, `opencode-client/qml/do-probe.sh`,
 `scripts/tts-restart.sh`, …) reuse `devel-su` and read the password from
 `SFOS_PASS` as well.
