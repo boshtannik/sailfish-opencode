@@ -149,17 +149,17 @@ Alternative non-Docker build via `mb2`: `scripts/build.sh`.
 ## Deploying to a phone
 
 ```sh
-scripts/deploy.sh            # scp the debug binary, defaults below
-scripts/deploy.sh -r         # scp the release binary
+./quick-deploy.sh                 # newest RPM to SFOS_HOST
+./quick-deploy.sh path/to/x.rpm   # a specific RPM
 ```
 
-Env vars (no credentials are hardcoded in the repo):
+It uploads the RPM, installs it with `devel-su rpm -Uvh --force`, drops the
+qmlcache and stops running instances. Env vars (no credentials are
+hardcoded in the repo):
 
 - `SFOS_HOST` — phone address (default `172.28.172.1` — USB/network hotspot of the phone)
 - `SFOS_USER` — ssh user (default `defaultuser`)
-- `SFOS_PASS` — ssh password
-
-Install the RPM on the device: `devel-su rpm -Uvh --force harbour-opencode-0.2.77-1.aarch64.rpm`.
+- `SFOS_PASS` — devel-su password (prompted for when unset)
 
 Dev-only scripts (`restart-probe.sh`, `opencode-client/qml/do-probe.sh`,
 `scripts/tts-restart.sh`, …) reuse `devel-su` and read the password from
