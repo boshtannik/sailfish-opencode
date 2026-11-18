@@ -61,20 +61,20 @@ case "$MODE" in
     export RUSTFLAGS="-Clink-arg=-Wl,-z,relro,-z,now -Ccodegen-units=1 -Clink-arg=-rdynamic"
     export CARGO_INCREMENTAL=0
     export CARGO_TARGET_DIR=/home/mersdk/cargo-cache/cargo/release
-    cargo build --release -j 1
+    cargo build --release %{?_smp_mflags}
     ;;
   *)
     # Dev build by default: no optimizations and no codegen-units freezing.
     export RUSTFLAGS="-Clink-arg=-Wl,-z,relro,-z,now -Clink-arg=-rdynamic"
     export CARGO_INCREMENTAL=1
     export CARGO_TARGET_DIR=/home/mersdk/cargo-cache/cargo/debug
-    cargo build -j 1
+    cargo build %{?_smp_mflags}
     ;;
 esac
 
 # whisper.cpp: static whisper-cli binary (STT). Built without OpenBLAS/COREML.
 cd ../third_party/whisper.cpp
-make -j1 \
+make %{?_smp_mflags} \
   UNAME_M=generic \
   CC=aarch64-meego-linux-gnu-gcc CXX=aarch64-meego-linux-gnu-g++ \
   AR=aarch64-meego-linux-gnu-ar \
