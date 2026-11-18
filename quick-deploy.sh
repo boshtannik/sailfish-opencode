@@ -35,7 +35,7 @@ echo "==> Deploying package: $RPM"
 echo "==> Target: $USER@$HOST"
 
 # 2. Check password for devel-su
-if [ -z "$SFOS_PASS" ]; then
+if [ -z "$SFOS_PASS" ] && [ -t 0 ]; then
     read -s -p "Enter phone devel-su password: " SFOS_PASS
     echo
 fi
