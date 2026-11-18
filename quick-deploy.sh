@@ -8,18 +8,18 @@
 #
 set -e
 
-#HOST="${SFOS_HOST:-172.28.172.1}"
-HOST="${SFOS_HOST:-192.168.76.232}"
+HOST="${SFOS_HOST:-172.28.172.1}"
 USER="${SFOS_USER:-defaultuser}"
 SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10"
 
 # 1. Locate RPM
 RPM="$1"
 if [ -z "$RPM" ]; then
-    # Look in current directory first, then cache out dir
+    # Look in current directory first, then mbuild.sh's OUT dir (same default)
     RPM="$(ls -t harbour-opencode-*.aarch64.rpm 2>/dev/null | head -1)"
     if [ -z "$RPM" ]; then
-        RPM="$(ls -t /home/jack/.cache/opencode-sailfish/out/harbour-opencode-*.aarch64.rpm 2>/dev/null | head -1)"
+        OUT="${OUT:-${XDG_CACHE_HOME:-$HOME/.cache}/opencode-sailfish/out}"
+        RPM="$(ls -t "$OUT"/harbour-opencode-*.aarch64.rpm 2>/dev/null | head -1)"
     fi
 fi
 
