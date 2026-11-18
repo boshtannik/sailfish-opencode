@@ -13,6 +13,7 @@
 #   OUT    — where the container drops RPMs (default: $CACHE_ROOT/out)
 #   CACHE  — persistent cargo/whisper/piper/opencode cache (default: $CACHE_ROOT/cache)
 #   IMAGE  — SDK image (default: sailo-rs rust-aarch64 5.1.0.11)
+#   DOCKER — container CLI (default: docker)
 # where CACHE_ROOT defaults to ${XDG_CACHE_HOME:-$HOME/.cache}/opencode-sailfish.
 set -e
 
@@ -21,6 +22,7 @@ CACHE_ROOT="${XDG_CACHE_HOME:-$HOME/.cache}/opencode-sailfish"
 OUT="${OUT:-$CACHE_ROOT/out}"
 CACHE="${CACHE:-$CACHE_ROOT/cache}"
 IMAGE="${IMAGE:-registry.gitlab.com/whisperfish/sailo-rs/rust-aarch64-5.1.0.11:sfos-5-1}"
+DOCKER="${DOCKER:-docker}"
 
 MODE=debug
 for arg in "$@"; do
@@ -55,7 +57,7 @@ REL="$(sed -n 's/^Release:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$SPEC")"
 sed -i "s/^Release:.*/Release:    $((REL + 1))/" "$SPEC"
 echo "release: $REL -> $((REL + 1))"
 
-docker run --rm \
+"$DOCKER" run --rm \
   -e MBUILD_MODE="$MODE" \
   -v "$PROJ:/src:ro" \
   -v "$OUT:/out" \

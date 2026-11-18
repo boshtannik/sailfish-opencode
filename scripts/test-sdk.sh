@@ -11,15 +11,16 @@
 #   sg docker -c "./scripts/test-sdk.sh -- dispatcher"  # фильтр имён тестов
 set -e
 
-# Same env overrides as mbuild.sh: PROJ, CACHE, IMAGE.
+# Same env overrides as mbuild.sh: PROJ, CACHE, IMAGE, DOCKER.
 PROJ="${PROJ:-$(cd "$(dirname "$0")/.." && pwd)}"
 CACHE="${CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/opencode-sailfish/cache}"
 IMAGE="${IMAGE:-registry.gitlab.com/whisperfish/sailo-rs/rust-aarch64-5.1.0.11:sfos-5-1}"
+DOCKER="${DOCKER:-docker}"
 
 mkdir -p "$CACHE/cargo"
 chmod 777 "$CACHE" "$CACHE/cargo" 2>/dev/null || true
 
-docker run --rm \
+"$DOCKER" run --rm \
   -e HOME=/home/mersdk \
   -v "$PROJ:/src:ro" \
   -v "$CACHE:/home/mersdk/cargo-cache" \
