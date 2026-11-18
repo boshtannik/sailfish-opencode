@@ -10,7 +10,10 @@ set -e
 
 HOST="${SFOS_HOST:-172.28.172.1}"
 USER="${SFOS_USER:-defaultuser}"
-SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10"
+# SFOS_SSH_OPTS adds options, e.g. "-o StrictHostKeyChecking=no
+# -o UserKnownHostsFile=/dev/null" for a phone whose host key changes on
+# every reflash. Left unquoted where used so it splits into separate words.
+SSH_OPTS="-o ConnectTimeout=10 ${SFOS_SSH_OPTS:-}"
 
 # 1. Locate RPM
 RPM="$1"

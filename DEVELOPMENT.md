@@ -160,6 +160,9 @@ hardcoded in the repo):
 - `SFOS_HOST` — phone address (default `172.28.172.1` — USB/network hotspot of the phone)
 - `SFOS_USER` — ssh user (default `defaultuser`)
 - `SFOS_PASS` — devel-su password (prompted for when unset)
+- `SFOS_SSH_OPTS` — extra ssh/scp options. Host-key checking is on; for a
+  phone that is reflashed often, use
+  `SFOS_SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"`
 
 `pkcon install-local` does not work over ssh (no polkit agent: "Failed to
 obtain authentication"), so installing always needs the devel-su password.
