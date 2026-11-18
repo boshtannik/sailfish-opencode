@@ -140,6 +140,9 @@ override them with `PROJ`, `OUT`, `CACHE` or `IMAGE`. `DOCKER` picks the
 container CLI (e.g. `DOCKER=podman`). `scripts/test-sdk.sh` takes the same
 variables except `OUT`.
 
+`MBUILD_JOBS=N` caps parallel build jobs (default: mb2's, all cores);
+use it on hosts with little RAM.
+
 Alternative non-Docker build via `mb2`: `scripts/build.sh`.
 
 ## Deploying to a phone

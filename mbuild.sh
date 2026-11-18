@@ -14,6 +14,8 @@
 #   CACHE  — persistent cargo/whisper/piper/opencode cache (default: $CACHE_ROOT/cache)
 #   IMAGE  — SDK image (default: sailo-rs rust-aarch64 5.1.0.11)
 #   DOCKER — container CLI (default: docker)
+#   MBUILD_JOBS — cap on parallel build jobs, passed as `mb2 build -j N`
+#                 (default: mb2's own, all cores)
 # where CACHE_ROOT defaults to ${XDG_CACHE_HOME:-$HOME/.cache}/opencode-sailfish.
 set -e
 
@@ -23,6 +25,10 @@ OUT="${OUT:-$CACHE_ROOT/out}"
 CACHE="${CACHE:-$CACHE_ROOT/cache}"
 IMAGE="${IMAGE:-registry.gitlab.com/whisperfish/sailo-rs/rust-aarch64-5.1.0.11:sfos-5-1}"
 DOCKER="${DOCKER:-docker}"
+MBUILD_JOBS="${MBUILD_JOBS:-}"
+case "$MBUILD_JOBS" in
+    *[!0-9]*|0*) echo "MBUILD_JOBS must be a positive integer, got: $MBUILD_JOBS"; exit 1 ;;
+esac
 
 MODE=debug
 GEN_ICON=1
@@ -66,6 +72,7 @@ echo "release: $REL -> $((REL + 1))"
 
 "$DOCKER" run --rm \
   -e MBUILD_MODE="$MODE" \
+  -e MBUILD_JOBS="$MBUILD_JOBS" \
   -v "$PROJ:/src:ro" \
   -v "$OUT:/out" \
   -v "$CACHE:/home/mersdk/cargo-cache" \
@@ -161,7 +168,7 @@ echo "release: $REL -> $((REL + 1))"
   echo "opencode CLI sha256: ${OC_SHA_NOW%% *}"
   find "$OC_CLI" -maxdepth 1 -name opencode -type f
   ls -l "$OC_CLI/opencode"
-  mb2 -n -t SailfishOS-5.1.0.11-aarch64 --no-snapshot=force build
+  mb2 -n -t SailfishOS-5.1.0.11-aarch64 --no-snapshot=force build ${MBUILD_JOBS:+-j "$MBUILD_JOBS"}
   echo "=== RPM ($MBUILD_MODE) ==="
   ls -l RPMS/*.rpm
   # Verification: the EXACT pinned opencode must end up inside the RPM.
