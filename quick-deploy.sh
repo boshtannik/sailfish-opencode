@@ -5,8 +5,17 @@
 #   ./quick-deploy.sh                   # Auto-finds latest RPM
 #   ./quick-deploy.sh path/to/file.rpm  # Deploys specific RPM
 #   SFOS_PASS=1234 ./quick-deploy.sh    # Non-interactive password
+#   ./quick-deploy.sh --help            # This help
 #
 set -e
+
+# Checked before any other argument, so --help works anywhere on the line.
+for arg in "$@"; do
+    case "$arg" in
+        # Print the header comment above `set -e` as the help text.
+        -h|--help) sed -n '2,/^set -e/{/^set -e/d;s/^# \{0,1\}//;p;}' "$0"; exit 0 ;;
+    esac
+done
 
 HOST="${SFOS_HOST:-172.28.172.1}"
 USER="${SFOS_USER:-defaultuser}"
