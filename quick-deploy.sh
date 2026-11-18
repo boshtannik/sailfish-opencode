@@ -1,9 +1,11 @@
 #!/bin/bash
 # Quick deploy script: SCP RPM to phone, install via devel-su, drop qmlcache, stop the app.
 #
-# Usage:
-#   ./quick-deploy.sh                   # Auto-finds latest RPM
-#   ./quick-deploy.sh path/to/file.rpm  # Deploys specific RPM
+# Usage: ./quick-deploy.sh [HOST] [path/to/file.rpm]   (either order)
+#   ./quick-deploy.sh                   # SFOS_HOST, auto-finds latest RPM
+#   ./quick-deploy.sh myphone           # host or ssh alias as an argument
+#   ./quick-deploy.sh myphone file.rpm  # Deploys specific RPM
+#   ./quick-deploy.sh me@myphone        # ssh user too (overrides SFOS_USER)
 #   SFOS_PASS=1234 ./quick-deploy.sh    # Non-interactive password
 #   ./quick-deploy.sh --help            # This help
 #
@@ -17,15 +19,26 @@ for arg in "$@"; do
     esac
 done
 
-HOST="${SFOS_HOST:-172.28.172.1}"
+ARG_HOST="" RPM=""
+for arg in "$@"; do
+    case "$arg" in
+        *.rpm) [ -z "$RPM" ] || { echo "ERROR: more than one RPM given"; exit 1; }; RPM="$arg" ;;
+        *)     [ -z "$ARG_HOST" ] || { echo "ERROR: more than one host given"; exit 1; }; ARG_HOST="$arg" ;;
+    esac
+done
+
+HOST="${ARG_HOST:-${SFOS_HOST:-172.28.172.1}}"
 USER="${SFOS_USER:-defaultuser}"
+# user@host (as the argument or in SFOS_HOST) overrides SFOS_USER.
+case "$HOST" in
+    *@*) USER="${HOST%%@*}"; HOST="${HOST#*@}" ;;
+esac
 # SFOS_SSH_OPTS adds options, e.g. "-o StrictHostKeyChecking=no
 # -o UserKnownHostsFile=/dev/null" for a phone whose host key changes on
 # every reflash. Left unquoted where used so it splits into separate words.
 SSH_OPTS="-o ConnectTimeout=10 ${SFOS_SSH_OPTS:-}"
 
 # 1. Locate RPM
-RPM="$1"
 if [ -z "$RPM" ]; then
     # Look in current directory first, then mbuild.sh's OUT dir (same default)
     RPM="$(ls -t harbour-opencode-*.aarch64.rpm 2>/dev/null | head -1)"

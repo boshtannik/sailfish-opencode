@@ -150,14 +150,16 @@ Alternative non-Docker build via `mb2`: `scripts/build.sh`.
 
 ```sh
 ./quick-deploy.sh                 # newest RPM to SFOS_HOST
-./quick-deploy.sh path/to/x.rpm   # a specific RPM
+./quick-deploy.sh myphone         # host or ssh alias as an argument
+./quick-deploy.sh myphone x.rpm   # a specific RPM (host and RPM in either order)
+./quick-deploy.sh me@myphone      # with an ssh user (overrides SFOS_USER)
 ```
 
 It uploads the RPM, installs it with `devel-su rpm -Uvh --force`, drops the
 qmlcache and stops running instances. Env vars (no credentials are
 hardcoded in the repo):
 
-- `SFOS_HOST` — phone address (default `172.28.172.1` — USB/network hotspot of the phone)
+- `SFOS_HOST` — phone address when no host argument is given (default `172.28.172.1` — USB/network hotspot of the phone)
 - `SFOS_USER` — ssh user (default `defaultuser`)
 - `SFOS_PASS` — devel-su password (prompted for when unset on a terminal;
   scripted runs without it fail immediately)
