@@ -182,6 +182,11 @@ anything starting with `|`; or, after an optional list marker, a line that
 may become a link row or a reference definition (`[…`, `http(s)://…` or a
 prefix of `https://`). That removes the visible flips, for example
 `Steps:\n-` flashing as a heading, or a link row turning back into prose.
+A line that starts with a link is withheld only while it is nothing but
+that link (nested brackets and parentheses counted) or a `[label]:`; the
+first text after it settles it as prose, so a long line led by a link
+streams like any other instead of waiting for its newline. A bare URL
+line is settled by whitespace and more text.
 
 Table rows start with `|`, so a row is shown once it is complete and a long
 table is laid out once per row, not once per token. A complete `|` line

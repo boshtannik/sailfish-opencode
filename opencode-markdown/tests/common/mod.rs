@@ -92,13 +92,13 @@ pub fn chunks(s: &str) -> Vec<usize> {
     cuts
 }
 
-/// Stream `body` through `r` the way the feed does and check
+/// Stream `body` through `r` the way the feed does (not live) and check
 /// every step against a full parse. Returns what is shown and its rev.
 pub fn stream(r: &mut Renderer, body: &str) -> (Vec<Segment>, u64) {
     let mut shown = Vec::new();
     let mut rev = 0;
     for cut in chunks(body) {
-        let u = r.render(&body[..cut], false, rev);
+        let u = r.render(&body[..cut], false, false, rev);
         shown = apply(&shown, &u);
         assert_eq!(shown, segments(&body[..cut], false), "after {:?}", &body[..cut]);
         rev = u.rev;

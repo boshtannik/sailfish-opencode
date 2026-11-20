@@ -9,8 +9,8 @@ use opencode_markdown::{segments, Renderer};
 #[test]
 fn an_unchanged_body_keeps_everything() {
     let mut r = Renderer::new();
-    let first = r.render(ANSWER, false, 0);
-    let again = r.render(ANSWER, false, first.rev);
+    let first = r.render(ANSWER, false, false, 0);
+    let again = r.render(ANSWER, false, false, first.rev);
     assert_eq!(again.keep, first.segs.len());
     assert!(again.segs.is_empty());
 }
@@ -18,7 +18,7 @@ fn an_unchanged_body_keeps_everything() {
 #[test]
 fn an_unknown_previous_revision_gets_everything() {
     let mut r = Renderer::new();
-    let u = r.render(ANSWER, false, 12345);
+    let u = r.render(ANSWER, false, false, 12345);
     assert_eq!(u.keep, 0);
     assert_eq!(u.segs, segments(ANSWER, false));
 }
@@ -26,8 +26,8 @@ fn an_unknown_previous_revision_gets_everything() {
 #[test]
 fn an_append_keeps_the_unchanged_leading_segments() {
     let mut r = Renderer::new();
-    let a = r.render("para one\n\npara two", false, 0);
-    let b = r.render("para one\n\npara two grows", false, a.rev);
+    let a = r.render("para one\n\npara two", false, false, 0);
+    let b = r.render("para one\n\npara two grows", false, false, a.rev);
     assert_eq!(b.keep, 1);
     assert_eq!(b.segs.len(), 1);
 }
@@ -35,11 +35,11 @@ fn an_append_keeps_the_unchanged_leading_segments() {
 #[test]
 fn toggling_truncation_only_touches_the_marker() {
     let mut r = Renderer::new();
-    let a = r.render(ANSWER, false, 0);
-    let b = r.render(ANSWER, true, a.rev);
+    let a = r.render(ANSWER, false, false, 0);
+    let b = r.render(ANSWER, true, false, a.rev);
     assert_eq!(b.keep, a.segs.len());
     assert_eq!(b.segs, vec![segments("", true)[0].clone()]);
-    let c = r.render(ANSWER, false, b.rev);
+    let c = r.render(ANSWER, false, false, b.rev);
     assert_eq!(c.keep, a.segs.len());
     assert!(c.segs.is_empty());
 }

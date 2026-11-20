@@ -62,10 +62,10 @@ fn a_shrunk_or_edited_body_is_still_correct() {
     let mut r = Renderer::new();
     let (shown, rev) = stream(&mut r, ANSWER);
     let edited = ANSWER.replace("Install", "Uninstall");
-    let u = r.render(&edited, false, rev);
+    let u = r.render(&edited, false, false, rev);
     assert_eq!(apply(&shown, &u), segments(&edited, false));
     let cut = &ANSWER[..ANSWER.len() / 2];
-    let u2 = r.render(cut, false, u.rev);
+    let u2 = r.render(cut, false, false, u.rev);
     assert_eq!(apply(&segments(&edited, false), &u2), segments(cut, false));
 }
 
@@ -78,13 +78,13 @@ fn two_interleaved_streams_stay_correct_and_incremental() {
     let (ca, cb) = (chunks(ANSWER), chunks(other));
     for i in 0..ca.len().max(cb.len()) {
         if let Some(&c) = ca.get(i) {
-            let u = r.render(&ANSWER[..c], false, ra);
+            let u = r.render(&ANSWER[..c], false, false, ra);
             sa = apply(&sa, &u);
             ra = u.rev;
             assert_eq!(sa, segments(&ANSWER[..c], false));
         }
         if let Some(&c) = cb.get(i) {
-            let u = r.render(&other[..c], false, rb);
+            let u = r.render(&other[..c], false, false, rb);
             sb = apply(&sb, &u);
             rb = u.rev;
             assert_eq!(sb, segments(&other[..c], false));
@@ -106,7 +106,7 @@ fn empty_and_garbage_bodies_stream_safely() {
     let mut r = Renderer::new();
     for body in ["", "\n\n", "[[[***```___|||", "|\n|-\n|", "- \n- \n-"] {
         stream(&mut r, body);
-        r.render(body, true, 0);
+        r.render(body, true, false, 0);
     }
 }
 
@@ -114,7 +114,7 @@ fn empty_and_garbage_bodies_stream_safely() {
 fn crlf_streams_like_lf() {
     let crlf = ANSWER.replace('\n', "\r\n");
     let mut r = Renderer::new();
-    let u = r.render(&crlf, false, 0);
+    let u = r.render(&crlf, false, false, 0);
     assert_eq!(u.segs, segments(ANSWER, false));
 }
 
@@ -129,9 +129,9 @@ fn a_new_line_absorbed_into_the_previous_block_stays_correct() {
         ("- item\n#", "- item\n#tag"),
     ] {
         let mut r = Renderer::new();
-        let a = r.render(before, false, 0);
+        let a = r.render(before, false, false, 0);
         assert_eq!(a.segs, segments(before, false));
-        let b = r.render(after, false, a.rev);
+        let b = r.render(after, false, false, a.rev);
         assert_eq!(apply(&a.segs, &b), segments(after, false), "{before:?} -> {after:?}");
     }
 }

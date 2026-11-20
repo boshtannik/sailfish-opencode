@@ -9,6 +9,7 @@
 use std::collections::VecDeque;
 
 use crate::cache::Cache;
+use crate::holdback::holdback;
 use crate::parse::{normalize_newlines, parse, parse_from, Parsed};
 use crate::segment::Segment;
 
@@ -78,10 +79,12 @@ impl Renderer {
         Stats { cache_bytes: self.cache.bytes(), ..self.stats }
     }
 
-    /// Render `body`. `prev_rev` is the revision the caller currently shows
-    /// (0 when none).
-    pub fn render(&mut self, body: &str, truncated: bool, prev_rev: u64) -> Update {
-        let body = normalize_newlines(body).into_owned();
+    /// Render `body`. `live` means the bubble is still streaming, so an
+    /// unfinished tail that could change the block structure is held back.
+    /// `prev_rev` is the revision the caller currently shows (0 when none).
+    pub fn render(&mut self, body: &str, truncated: bool, live: bool, prev_rev: u64) -> Update {
+        let body = normalize_newlines(body);
+        let body = if live { holdback(&body) } else { &body }.to_string();
         self.stats.last_parsed_bytes = 0;
 
         let (parsed, base) = self.parse_reusing(&body);

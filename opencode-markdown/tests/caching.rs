@@ -12,7 +12,7 @@ fn appends_reparse_only_the_tail() {
     let mut r = Renderer::new();
     let mut rev = 0;
     for cut in chunks(&body) {
-        rev = r.render(&body[..cut], false, rev).rev;
+        rev = r.render(&body[..cut], false, false, rev).rev;
         // The last top-level block of ANSWER is at most a few hundred bytes.
         assert!(r.stats().last_parsed_bytes < 400, "parsed {} bytes at {cut}", r.stats().last_parsed_bytes);
     }
@@ -25,10 +25,10 @@ fn a_finished_body_shown_again_is_not_parsed_again() {
     stream(&mut r, ANSWER);
     // Push it out of the recent states with other messages, as scrolling does.
     for i in 0..50 {
-        r.render(&format!("message {i}\n\n- item"), false, 0);
+        r.render(&format!("message {i}\n\n- item"), false, false, 0);
     }
     let before = r.stats();
-    let u = r.render(ANSWER, false, 0);
+    let u = r.render(ANSWER, false, false, 0);
     assert_eq!(u.segs, segments(ANSWER, false));
     let after = r.stats();
     assert_eq!(after.full_parses, before.full_parses);
@@ -40,7 +40,7 @@ fn the_cache_stays_within_its_byte_bound() {
     let mut r = Renderer::new();
     for i in 0..400 {
         let body = format!("{i}\n\n{}", "word ".repeat(10_000));
-        r.render(&body, false, 0);
+        r.render(&body, false, false, 0);
     }
     assert!(r.stats().cache_bytes <= CACHE_BYTES, "{:?}", r.stats());
 }

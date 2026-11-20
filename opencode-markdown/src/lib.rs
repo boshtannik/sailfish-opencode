@@ -14,6 +14,7 @@ mod autolink;
 mod blocks;
 mod builder;
 mod cache;
+mod holdback;
 mod inline;
 mod link_rows;
 mod markup;
