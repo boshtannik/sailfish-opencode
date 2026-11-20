@@ -4,7 +4,7 @@
 mod common;
 
 use common::*;
-use opencode_markdown::segments;
+use opencode_markdown::{segments, Renderer};
 
 #[test]
 fn a_reference_shows_as_written() {
@@ -42,4 +42,11 @@ fn a_definition_continues_in_its_indented_paragraphs() {
         segments("[^1]: first\n\n    second\n\nafter", false),
         vec![prose("[^1]: first"), gap(ind(prose("second"), 1)), gap(prose("after"))]
     );
+}
+
+#[test]
+fn streamed_footnotes_equal_a_full_parse() {
+    let body = "Claim one[^1] and two[^b].\n\n[^1]: https://e.com/source\n[^b]: Another note.\n\nAfter.\n";
+    let (shown, _) = stream(&mut Renderer::new(), body);
+    assert_eq!(shown, segments(body, false));
 }

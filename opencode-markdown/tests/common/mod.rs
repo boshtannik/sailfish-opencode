@@ -56,3 +56,52 @@ pub fn table_html(body: &str) -> String {
 pub fn table(html: &str) -> Segment {
     seg(Kind::Table, html, "", "", "", 0, false)
 }
+
+// ── Streaming ────────────────────────────────────────────────────────────
+
+use opencode_markdown::{Renderer, Update};
+
+/// What QML does with an update: keep the first `keep`, replace the rest.
+pub fn apply(shown: &[Segment], u: &Update) -> Vec<Segment> {
+    assert!(u.keep <= shown.len(), "keep {} > shown {}", u.keep, shown.len());
+    let mut v = shown[..u.keep].to_vec();
+    v.extend(u.segs.iter().cloned());
+    v
+}
+
+pub const ANSWER: &str = "# Plan\n\nIntro with **bold**, `code` and https://e.com.\n\n\
+1. Install the package\n1. Configure it\n\n    Run this as root.\n\n1. Restart\n\n\
+- a\n  - nested\n- [a link](https://e.com)\n- ```sh\n  ls -l\n  ```\n  after code\n\n\
+> a quote\n> - with a list\n\n| col a | col b |\n|:--|--:|\n| 1 | **2** |\n| 3 | 4 |\n\n\
+***\n\n```rust\nfn main() {\n\n    println!(\"hi\");\n}\n```\n\nSteps:\n- one\n- two\n\nDone.\n";
+
+/// Deterministic token-sized cut points (1..=7 bytes apart, on char
+/// boundaries).
+pub fn chunks(s: &str) -> Vec<usize> {
+    let mut cuts = Vec::new();
+    let mut i = 0;
+    let mut seed = 7u32;
+    while i < s.len() {
+        seed = seed.wrapping_mul(1103515245).wrapping_add(12345);
+        i = (i + 1 + (seed >> 16) as usize % 7).min(s.len());
+        while !s.is_char_boundary(i) {
+            i += 1;
+        }
+        cuts.push(i);
+    }
+    cuts
+}
+
+/// Stream `body` through `r` the way the feed does and check
+/// every step against a full parse. Returns what is shown and its rev.
+pub fn stream(r: &mut Renderer, body: &str) -> (Vec<Segment>, u64) {
+    let mut shown = Vec::new();
+    let mut rev = 0;
+    for cut in chunks(body) {
+        let u = r.render(&body[..cut], false, rev);
+        shown = apply(&shown, &u);
+        assert_eq!(shown, segments(&body[..cut], false), "after {:?}", &body[..cut]);
+        rev = u.rev;
+    }
+    (shown, rev)
+}

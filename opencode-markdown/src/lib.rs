@@ -13,19 +13,23 @@
 mod autolink;
 mod blocks;
 mod builder;
+mod cache;
 mod inline;
 mod link_rows;
 mod markup;
 mod parse;
+mod renderer;
 mod segment;
 
+pub use cache::CACHE_BYTES;
+pub use renderer::{Renderer, Stats, Update};
 pub use segment::{Kind, Segment, MAX_INDENT, TRUNCATED_NOTE};
 
 /// Cut `body` into display segments. `truncated` appends the truncation note
 /// as its own segment, so it can never land inside a table, list or open
 /// fence the way text appended to the source would.
 pub fn segments(body: &str, truncated: bool) -> Vec<Segment> {
-    let mut out = parse::parse(&parse::normalize_newlines(body));
+    let mut out = parse::parse(&parse::normalize_newlines(body)).segs;
     if truncated {
         out.push(Segment::truncation_note());
     }

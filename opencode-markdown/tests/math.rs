@@ -4,6 +4,7 @@
 mod common;
 
 use common::*;
+use opencode_markdown::{segments, Renderer};
 
 #[test]
 fn inline_math_is_not_formatted() {
@@ -38,4 +39,11 @@ fn dollar_amounts_are_not_math() {
 #[test]
 fn math_inside_code_is_code() {
     assert_eq!(one_html("run `echo $a*b*c$`"), format!("run {CODE_OPEN}echo $a*b*c$</font>"));
+}
+
+#[test]
+fn streamed_math_equals_a_full_parse() {
+    let body = "Euler: $e^{i\\pi} + 1 = 0$.\n\n$$\nx = \\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}\n$$\n\nDone.\n";
+    let (shown, _) = stream(&mut Renderer::new(), body);
+    assert_eq!(shown, segments(body, false));
 }

@@ -1,18 +1,49 @@
-//! Parsing a body into segments.
+//! Parsing a body (or the rest of it from a restart point) into segments.
 
 use std::borrow::Cow;
 
 use pulldown_cmark::{Options, Parser};
 
 use crate::builder::Builder;
-use crate::segment::Segment;
+use crate::segment::{Kind, Segment};
 
-pub(crate) fn parse(src: &str) -> Vec<Segment> {
-    let mut b = Builder::new(src);
-    for (ev, r) in Parser::new_ext(src, options()).into_offset_iter() {
-        b.event(ev, r);
+/// A point where parsing can restart: the start of a top-level block or of a
+/// top-level list item. Everything before it is closed, so a suffix parse from
+/// here yields the same segments as a full parse.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Boundary {
+    /// Byte offset in the source.
+    pub at: usize,
+    /// Number of segments emitted before this point.
+    pub seg: usize,
+    /// For an ordered item, the number it shows (source numbers can repeat,
+    /// e.g. `1. 1. 1.`, so a restart cannot read it from the text).
+    pub next: Option<u64>,
+}
+
+#[derive(Clone)]
+pub(crate) struct Parsed {
+    pub segs: Vec<Segment>,
+    pub boundaries: Vec<Boundary>,
+}
+
+/// Parse `src[from.at..]` as if it followed the already-rendered
+/// `src[..from.at]`; `prev` is the kind of the last segment before it (for
+/// the gap rules). Boundaries are indexed as in a full parse.
+pub(crate) fn parse_from(src: &str, from: Boundary, prev: Option<Kind>) -> Parsed {
+    let mut b = Builder::new(src, prev, from.next);
+    for (ev, r) in Parser::new_ext(&src[from.at..], options()).into_offset_iter() {
+        b.event(ev, r.start + from.at..r.end + from.at);
     }
-    b.finish()
+    let (segs, mut boundaries) = b.finish();
+    for bd in &mut boundaries {
+        bd.seg += from.seg;
+    }
+    Parsed { segs, boundaries }
+}
+
+pub(crate) fn parse(src: &str) -> Parsed {
+    parse_from(src, Boundary { at: 0, seg: 0, next: None }, None)
 }
 
 fn options() -> Options {

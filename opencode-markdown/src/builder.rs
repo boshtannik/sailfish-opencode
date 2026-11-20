@@ -1,5 +1,6 @@
 //! Turns parser events into segments: tracks list and quote nesting, gives
-//! every leaf block and list item its own segment, and decides gaps.
+//! every leaf block and list item its own segment, decides gaps, and records
+//! the restart points.
 
 use std::ops::Range;
 
@@ -7,6 +8,7 @@ use pulldown_cmark::{CodeBlockKind, Event, Tag, TagEnd};
 
 use crate::blocks::{self, Leaf, LeafKind};
 use crate::markup::esc;
+use crate::parse::Boundary;
 use crate::segment::{Kind, Segment, MAX_INDENT};
 
 enum Ctx {
@@ -19,24 +21,34 @@ enum Ctx {
 }
 
 pub(crate) struct Builder<'a> {
-    /// The source; event ranges index it.
+    /// The whole source; event ranges index it even for a suffix parse.
     src: &'a str,
     stack: Vec<Ctx>,
     leaf: Option<Leaf<'a>>,
     out: Vec<Segment>,
+    /// Kind of the segment before the parsed part (suffix parses).
+    prev: Option<Kind>,
+    /// Number the first top-level ordered item shows (suffix parses).
+    resume: Option<u64>,
+    boundaries: Vec<Boundary>,
 }
 
 impl<'a> Builder<'a> {
-    pub(crate) fn new(src: &'a str) -> Self {
-        Builder { src, stack: Vec::new(), leaf: None, out: Vec::new() }
+    pub(crate) fn new(src: &'a str, prev: Option<Kind>, resume: Option<u64>) -> Self {
+        Builder { src, stack: Vec::new(), leaf: None, out: Vec::new(), prev, resume, boundaries: Vec::new() }
     }
 
-    pub(crate) fn finish(mut self) -> Vec<Segment> {
+    /// The segments and restart points; boundary `seg`s count from 0.
+    pub(crate) fn finish(mut self) -> (Vec<Segment>, Vec<Boundary>) {
         self.close_leaf();
-        self.out
+        (self.out, self.boundaries)
     }
 
     pub(crate) fn event(&mut self, ev: Event<'a>, r: Range<usize>) {
+        if self.stack.is_empty() && starts_block(&ev) {
+            let at = line_start(self.src, r.start);
+            self.boundaries.push(Boundary { at, seg: self.out.len(), next: None });
+        }
         match ev {
             Event::Start(Tag::Paragraph) => self.open(LeafKind::Paragraph, r.start),
             Event::Start(Tag::Heading { level, .. }) => self.open(LeafKind::Heading(level as u8), r.start),
@@ -152,11 +164,19 @@ impl<'a> Builder<'a> {
     }
 
     fn start_list(&mut self, start: Option<u64>) {
-        self.enter(Ctx::List { next: start });
+        let next = match (self.stack.is_empty(), start) {
+            (true, Some(_)) => self.resume.take().or(start),
+            _ => start,
+        };
+        self.enter(Ctx::List { next });
     }
 
     fn start_item(&mut self, at: usize) {
         self.close_implicit();
+        if let [Ctx::List { next }] = self.stack[..] {
+            let at = line_start(self.src, at);
+            self.boundaries.push(Boundary { at, seg: self.out.len(), next });
+        }
         let marker = self.next_marker();
         self.stack.push(Ctx::Item { marker: Some(marker), start: at, label: false });
     }
@@ -252,7 +272,7 @@ impl<'a> Builder<'a> {
     /// Append a segment, deciding its gap: cards are always gapped, other
     /// segments only after a blank source line (`start` is where it begins).
     fn push(&mut self, mut s: Segment, start: Option<usize>) {
-        if let Some(prev) = self.out.last().map(|p| p.kind) {
+        if let Some(prev) = self.out.last().map(|p| p.kind).or(self.prev) {
             s.gap_before = s.kind.is_card()
                 || prev.is_card()
                 || start.is_some_and(|at| blank_line_before(self.src, at));
@@ -266,6 +286,22 @@ fn indent(depth: usize) -> u8 {
     depth.min(MAX_INDENT.into()) as u8
 }
 
+/// A block that can start at the top level (a list starts with its item).
+fn starts_block(ev: &Event<'_>) -> bool {
+    matches!(
+        ev,
+        Event::Rule
+            | Event::Start(
+                Tag::Paragraph
+                    | Tag::Heading { .. }
+                    | Tag::HtmlBlock
+                    | Tag::Table(_)
+                    | Tag::CodeBlock(_)
+                    | Tag::BlockQuote(_)
+            )
+    )
+}
+
 /// Whether the source line just above the one holding `start` is blank
 /// (only whitespace and quote markers). Block ranges from the parser run on
 /// past the blank lines that follow a block, so the gap is judged from the
@@ -277,4 +313,19 @@ fn blank_line_before(src: &str, start: usize) -> bool {
     }
     let prev_start = src[..line_start - 1].rfind('\n').map_or(0, |i| i + 1);
     src[prev_start..line_start - 1].chars().all(|c| c.is_whitespace() || c == '>')
+}
+
+/// The start of the line holding `at`, when only indentation precedes it.
+/// A block's range begins after its indent, but the indent is part of the
+/// block: a fence indented by two strips two spaces from its code lines, so
+/// a parse restarted past the indent would keep them.
+fn line_start(src: &str, at: usize) -> usize {
+    let head = &src[..at];
+    let indent = head.len() - head.trim_end_matches([' ', '\t']).len();
+    let start = at - indent;
+    if start == 0 || src.as_bytes()[start - 1] == b'\n' {
+        start
+    } else {
+        at
+    }
 }
