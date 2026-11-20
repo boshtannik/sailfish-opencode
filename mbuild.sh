@@ -7,23 +7,43 @@
 #
 # The cargo-target cache lives on the host (CACHE) and survives container runs:
 # rebuilds touch only the changed crates, not everything from scratch.
+#
+# Paths can be overridden from the environment:
+#   PROJ   — project checkout (default: the directory of this script)
+#   OUT    — where the container drops RPMs (default: $CACHE_ROOT/out)
+#   CACHE  — persistent cargo/whisper/piper/opencode cache (default: $CACHE_ROOT/cache)
+#   IMAGE  — SDK image (default: sailo-rs rust-aarch64 5.1.0.11)
+#   DOCKER — container CLI (default: docker)
+#   MBUILD_JOBS — cap on parallel build jobs, passed as `mb2 build -j N`
+#                 (default: mb2's own, all cores)
+# where CACHE_ROOT defaults to ${XDG_CACHE_HOME:-$HOME/.cache}/opencode-sailfish.
 set -e
 
-PROJ=/home/jack/w/sailfish-opencode
-OUT=/home/jack/.cache/opencode-sailfish/out
-CACHE=/home/jack/.cache/opencode-sailfish/cache
-IMAGE=registry.gitlab.com/whisperfish/sailo-rs/rust-aarch64-5.1.0.11:sfos-5-1
+PROJ="${PROJ:-$(cd "$(dirname "$0")" && pwd)}"
+CACHE_ROOT="${XDG_CACHE_HOME:-$HOME/.cache}/opencode-sailfish"
+OUT="${OUT:-$CACHE_ROOT/out}"
+CACHE="${CACHE:-$CACHE_ROOT/cache}"
+IMAGE="${IMAGE:-registry.gitlab.com/whisperfish/sailo-rs/rust-aarch64-5.1.0.11:sfos-5-1}"
+DOCKER="${DOCKER:-docker}"
+MBUILD_JOBS="${MBUILD_JOBS:-}"
+case "$MBUILD_JOBS" in
+    *[!0-9]*|0*) echo "MBUILD_JOBS must be a positive integer, got: $MBUILD_JOBS"; exit 1 ;;
+esac
 
 MODE=debug
+GEN_ICON=1
 for arg in "$@"; do
     case "$arg" in
         --release) MODE=release ;;
+        --no-icon) GEN_ICON=0 ;;
         -h|--help)
-            echo "Сборка harbour-opencode (RPM)."
-            echo "  ./mbuild.sh            — debug (по умолчанию, быстро)."
-            echo "  ./mbuild.sh --release  — со всеми оптимизациями."
+            echo "Build harbour-opencode (RPM)."
+            echo "  ./mbuild.sh            — debug (default, fast)."
+            echo "  ./mbuild.sh --release  — fully optimized."
+            echo "  --no-icon              — keep the current launcher icon"
+            echo "                           (do not regenerate a random one)."
             exit 0 ;;
-        *) echo "неизвестный флаг: $arg (допустим только --release)"; exit 1 ;;
+        *) echo "unknown flag: $arg (allowed: --release, --no-icon)"; exit 1 ;;
     esac
 done
 
@@ -38,7 +58,10 @@ rm -f "$OUT"/*.rpm
 # into the RPM). Static Rust binary (tools/gen-icon), no Python/cairosvg
 # needed on the build host; the dispatcher picks the binary matching the
 # host architecture (x86_64/i686/aarch64/armv7).
-"$PROJ/tools/gen-icon/gen-icon" --out "$PROJ/icons" --svg "$PROJ/harbour-opencode.svg"
+# --no-icon skips this, leaving the tracked icons/ untouched.
+if [ "$GEN_ICON" = 1 ]; then
+    "$PROJ/tools/gen-icon/gen-icon" --out "$PROJ/icons" --svg "$PROJ/harbour-opencode.svg"
+fi
 
 # Bump Release so the phone/repo sees each build as an update
 # (standard RPM versioning: X.Y.Z-N, Release grows on every build).
@@ -47,8 +70,9 @@ REL="$(sed -n 's/^Release:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$SPEC")"
 sed -i "s/^Release:.*/Release:    $((REL + 1))/" "$SPEC"
 echo "release: $REL -> $((REL + 1))"
 
-docker run --rm \
+"$DOCKER" run --rm \
   -e MBUILD_MODE="$MODE" \
+  -e MBUILD_JOBS="$MBUILD_JOBS" \
   -v "$PROJ:/src:ro" \
   -v "$OUT:/out" \
   -v "$CACHE:/home/mersdk/cargo-cache" \
@@ -144,7 +168,7 @@ docker run --rm \
   echo "opencode CLI sha256: ${OC_SHA_NOW%% *}"
   find "$OC_CLI" -maxdepth 1 -name opencode -type f
   ls -l "$OC_CLI/opencode"
-  mb2 -n -t SailfishOS-5.1.0.11-aarch64 --no-snapshot=force build
+  mb2 -n -t SailfishOS-5.1.0.11-aarch64 --no-snapshot=force build ${MBUILD_JOBS:+-j "$MBUILD_JOBS"}
   echo "=== RPM ($MBUILD_MODE) ==="
   ls -l RPMS/*.rpm
   # Verification: the EXACT pinned opencode must end up inside the RPM.

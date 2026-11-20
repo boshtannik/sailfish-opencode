@@ -130,24 +130,45 @@ sg docker -c "./mbuild.sh"            # debug — fast, for development
 sg docker -c "./mbuild.sh --release"  # release — optimized
 ```
 
-Output: `harbour-opencode-0.2.77-1.aarch64.rpm`.
+Output: `harbour-opencode-0.2.77-N.aarch64.rpm`, copied next to `mbuild.sh`.
+Each build bumps `Release:` in the spec, so the phone sees it as an update.
+
+`--no-icon` keeps the current launcher icon instead of generating a new
+random one.
+
+Paths default to the script's directory and `~/.cache/opencode-sailfish`;
+override them with `PROJ`, `OUT`, `CACHE` or `IMAGE`. `DOCKER` picks the
+container CLI (e.g. `DOCKER=podman`). `scripts/test-sdk.sh` takes the same
+variables except `OUT`.
+
+`MBUILD_JOBS=N` caps parallel build jobs (default: mb2's, all cores);
+use it on hosts with little RAM.
 
 Alternative non-Docker build via `mb2`: `scripts/build.sh`.
 
 ## Deploying to a phone
 
 ```sh
-scripts/deploy.sh            # scp the debug binary, defaults below
-scripts/deploy.sh -r         # scp the release binary
+./quick-deploy.sh                 # newest RPM to SFOS_HOST
+./quick-deploy.sh myphone         # host or ssh alias as an argument
+./quick-deploy.sh myphone x.rpm   # a specific RPM (host and RPM in either order)
+./quick-deploy.sh me@myphone      # with an ssh user (overrides SFOS_USER)
 ```
 
-Env vars (no credentials are hardcoded in the repo):
+It uploads the RPM, installs it with `devel-su rpm -Uvh --force`, drops the
+qmlcache and stops running instances. Env vars (no credentials are
+hardcoded in the repo):
 
-- `SFOS_HOST` — phone address (default `172.28.172.1` — USB/network hotspot of the phone)
+- `SFOS_HOST` — phone address when no host argument is given (default `172.28.172.1` — USB/network hotspot of the phone)
 - `SFOS_USER` — ssh user (default `defaultuser`)
-- `SFOS_PASS` — ssh password
+- `SFOS_PASS` — devel-su password (prompted for when unset on a terminal;
+  scripted runs without it fail immediately)
+- `SFOS_SSH_OPTS` — extra ssh/scp options. Host-key checking is on; for a
+  phone that is reflashed often, use
+  `SFOS_SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"`
 
-Install the RPM on the device: `devel-su rpm -Uvh --force harbour-opencode-0.2.77-1.aarch64.rpm`.
+`pkcon install-local` does not work over ssh (no polkit agent: "Failed to
+obtain authentication"), so installing always needs the devel-su password.
 
 Dev-only scripts (`restart-probe.sh`, `opencode-client/qml/do-probe.sh`,
 `scripts/tts-restart.sh`, …) reuse `devel-su` and read the password from
