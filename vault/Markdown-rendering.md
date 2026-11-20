@@ -62,7 +62,7 @@ Segment {
     text:     String  // code: verbatim code; link: title; marker: text
     url:      String  // link only
     lang:     String  // code: fence language
-    indent:   u8      // list and quote nesting depth
+    indent:   u8      // list and quote nesting depth, at most 8 (MAX_INDENT)
     gapBefore: bool   // QML draws the inter-segment gap only when true
 }
 ```
@@ -81,7 +81,8 @@ Boundaries:
   quotes, shown unwrapped in a horizontally scrolling card: a phone in
   portrait has too little width for most tables, and squeezing columns to
   word width makes them unreadable. Like a code card, a table never carries
-  a list bullet; an item that starts with one shows its bullet on its own;
+  a list bullet; an item that starts with one shows its bullet on its own
+  line before it, as does an item that starts with a quote or a nested list;
 - a line that is exactly one link becomes a `link` segment: `[title](url)`,
   a bare URL, and those behind a `-`, `*`, `+` or `N.` marker, at any
   nesting depth;
@@ -124,6 +125,9 @@ Keep today's device-proven markup:
 | quote | italic, prefixed as today (exact styling decided in the device spike) |
 | table | `<table border="1" cellspacing="0" cellpadding="...">`, `<th>`, `<td align>` |
 | image | alt text as a link to the URL. Never `<img>`: Qt RichText may fetch remote images (tracking, layout jumps) |
+| link or image without text | the URL as its label (as text when the URL is not linked), so it never shows as nothing |
+| math `$…$`, `$$…$$` | escaped text as written, delimiters included, newlines as `<br/>`; not typeset. Parsed as math so markup and backslash escapes inside TeX are left alone |
+| footnotes | a reference stays `[^1]`; a definition is shown where it stands, its label `[^1]: ` taking the place of a list marker. Parsed as footnotes so `[^1]: url` is not taken for a link reference definition |
 | raw HTML (block or inline) | escaped text, newlines as `<br/>` |
 | hrefs | `"`, `'`, `<`, `&` escaped; `javascript:` and other non-http(s)/mailto schemes are not linked |
 
@@ -239,8 +243,13 @@ crate's public API only, run by `make test`:
 - **Inline:** soft breaks become `<br/>`; inline code is not formatted
   inside; escapes; `~~x~~` strikes, `~5` does not; bare URLs linked with
   trailing punctuation left outside, never inside code; images never
-  produce `<img>`; raw HTML escaped, including `<div>\n- a\n- b` and `<pre>`
-  at the start of a line; `"`, `'` and `javascript:` in hrefs.
+  produce `<img>`; a link or image without text shows its URL; raw HTML
+  escaped, including `<div>\n- a\n- b` and `<pre>` at the start of a line;
+  `"`, `'` and `javascript:` in hrefs.
+- **Math and footnotes:** markup, escapes and HTML inside `$…$` and
+  `$$…$$` are shown as written, dollar amounts stay text; footnote
+  definitions keep their label, also with a one-word or URL note, which
+  then does not link the references.
 - **Segments:** fenced code (` ``` `, `~~~`, four backticks holding ```,
   info string with spaces) at top level, in list items and in quotes, and
   an unclosed fence inside a list item; indented code; link rows in every

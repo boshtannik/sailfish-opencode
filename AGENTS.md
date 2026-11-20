@@ -74,8 +74,8 @@ These are not suggestions — they are the owner's explicit preferences. Keep th
 - Build the RPM (authoritative gate — the host cannot `cargo check` because the
   build targets aarch64 via `.cargo/config.toml` and needs the cross toolchain):
   `sg docker -c "./mbuild.sh"`.
-- Test the dependency-free protocol crate on the host: `make test`
-  (`cargo test --manifest-path opencode-proto/Cargo.toml`).
+- Test the host-testable crates (protocol `opencode-proto`, chat markdown
+  renderer `opencode-markdown`) on the host: `make test`.
 - Test the `opencode-client` library (links Qt/SFOS, so it needs the SDK
   cross toolchain + qemu): `make test-sdk` (`sg docker -c
   "./scripts/test-sdk.sh"`). The host cannot run it.
