@@ -16,6 +16,7 @@ mod builder;
 mod cache;
 mod holdback;
 mod inline;
+mod json;
 mod link_rows;
 mod markup;
 mod parse;
@@ -23,6 +24,7 @@ mod renderer;
 mod segment;
 
 pub use cache::CACHE_BYTES;
+pub use json::{KIND_CODE, KIND_LINK, KIND_MARKER, KIND_PROSE, KIND_TABLE};
 pub use renderer::{Renderer, Stats, Update};
 pub use segment::{Kind, Segment, MAX_INDENT, TRUNCATED_NOTE};
 
