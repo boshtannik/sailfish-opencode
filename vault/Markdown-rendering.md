@@ -132,6 +132,23 @@ Keep today's device-proven markup:
 | raw HTML (block or inline) | escaped text, newlines as `<br/>` |
 | hrefs | `"`, `'`, `<`, `&` escaped; `javascript:` and other non-http(s)/mailto schemes are not linked |
 
+Qt 5.6 tables have no max-width, and laid out unwrapped a long cell is one
+very long line. So the table card measures each cell's text from the
+segment's `cells` with `TextMetrics` (the header row in bold, italic in
+thinking bubbles and quotes), re-measuring only rows whose text changed. A
+table whose columns all fit within 92.5% of the card is shown as before:
+unwrapped, at its natural width. Otherwise each column wider than that gets
+a fixed `width` in place of its `data-col` attributes, so its text wraps,
+and the Label gets the table's width, computed: Qt does not report it
+(with wrapping on, `implicitWidth` is the table laid out unwrapped, and
+`contentWidth` is never less than the Label's width). Capped columns count
+as the cap, the others as their measure plus 10%, since the plain-text
+measure falls short for monospace code and bold cells; each column adds
+its padding and border. The card scrolls by the larger of that width and
+`contentWidth`, so a capped column that a long word pushes wider is still
+reachable. The 7.5% left over shows the next column's edge, hinting that
+the card scrolls sideways.
+
 Table borders on a dark ambiance still need a look on the device.
 
 Behaviour changes to state in the PR (they match CommonMark and the opencode

@@ -68,6 +68,72 @@ Item {
     readonly property string kKindMarker: "marker"
     readonly property string kKindTable: "table"
 
+    // ── Table cards ───────────────────────────────────────────────────────
+    // Qt 5.6 tables have no max-width, so a column whose widest cell exceeds
+    // this share of the card gets a fixed width and wraps. Below the full
+    // width, the next column's edge stays visible as a hint that the card
+    // scrolls sideways.
+    readonly property real tableColumnCap: 0.925
+    // Per column: cellpadding="4" on both sides plus the border (see the
+    // renderer's table markup).
+    readonly property real tableColumnChrome: 2 * 4 + 2
+    // Extra room for uncapped columns: they are measured as plain text in
+    // the body font, but monospace code and bold text are wider, and a
+    // column given less than it needs wraps.
+    readonly property real tableColumnSlack: 1.1
+
+    // Widths of each row's cells, from the renderer's JSON array of rows of
+    // cell text; the header row is measured in bold. A row whose text equals
+    // the one at the same index in `prev` reuses its widths, so a table that
+    // streams in row by row measures only its new rows. Throws on bad JSON.
+    function tableMeasure(cells, prev, metrics, headMetrics) {
+        var rows = JSON.parse(cells || "[]")
+        var keys = [], widths = []
+        for (var r = 0; r < rows.length; r++) {
+            var key = rows[r].join("\u001f")
+            if (prev.keys[r] === key) {
+                widths.push(prev.widths[r])
+            } else {
+                var m = r === 0 ? headMetrics : metrics
+                var w = []
+                for (var c = 0; c < rows[r].length; c++) {
+                    m.text = rows[r][c]
+                    w.push(m.advanceWidth)
+                }
+                widths.push(w)
+            }
+            keys.push(key)
+        }
+        return { keys: keys, widths: widths }
+    }
+
+    // How to show a table: `width` 0 means as it is, unwrapped at its
+    // natural width, as long as no column is wider than `cap`. Otherwise each
+    // such column gets a fixed width (the renderer marks every cell tag with
+    // `data-col="N"`) and its text wraps there, and `width` is the table's
+    // width. Qt does not report that width: with wrapping on, a Label's
+    // implicitWidth is the table laid out unwrapped, and its contentWidth is
+    // never less than the Label's own width.
+    function tableLayout(html, rowWidths, cap) {
+        var cols = []
+        for (var r = 0; r < rowWidths.length; r++)
+            for (var c = 0; c < rowWidths[r].length; c++)
+                cols[c] = Math.max(cols[c] || 0, rowWidths[r][c])
+        var capped = cap > 0 && cols.some(function (w) { return w > cap })
+        if (!capped)
+            return { html: html, width: 0 }
+        // The table's outer border.
+        var total = 2
+        for (c = 0; c < cols.length; c++)
+            total += (cols[c] > cap ? cap : cols[c] * tableColumnSlack) + tableColumnChrome
+        return {
+            html: html.replace(/ data-col="(\d+)"/g, function (m, col) {
+                return cols[col] > cap ? ' width="' + Math.floor(cap) + '"' : ""
+            }),
+            width: Math.ceil(total)
+        }
+    }
+
     Connections {
         target: chatPage.appWindow
         onDictated: {
@@ -668,6 +734,8 @@ Item {
                         segModel.set(at, it)
                         continue
                     }
+                    // `cells` before `html`: the table card measures on the
+                    // first and lays out on the second, once.
                     if (cur.cells !== it.cells) segModel.setProperty(at, "cells", it.cells)
                     if (cur.html !== it.html) segModel.setProperty(at, "html", it.html)
                     if (cur.text !== it.text) segModel.setProperty(at, "text", it.text)
@@ -814,9 +882,11 @@ Item {
                                 }
                             }
 
-                            // Table: laid out at its natural width (no wrap)
-                            // and scrolled sideways; a portrait phone is too
-                            // narrow for most tables. Horizontal-only flicking
+                            // Table, scrolled sideways when wider than the
+                            // card: a portrait phone is too narrow for most
+                            // tables. Shown unwrapped unless a column would
+                            // be wider than tableColumnCap of the card; see
+                            // chatPage.tableLayout. Horizontal-only flicking
                             // leaves vertical drags to the chat list.
                             Component {
                                 id: tableSegment
@@ -827,17 +897,73 @@ Item {
                                     // when it does not fit.
                                     height: tableLbl.height
                                             + (contentWidth > width ? Theme.paddingSmall : 0)
-                                    contentWidth: tableLbl.width
+                                    // Qt can lay out wider than the Label (a capped
+                                    // column holding a long word); contentWidth
+                                    // then says so.
+                                    contentWidth: Math.max(tableLbl.width, tableLbl.contentWidth)
                                     contentHeight: height
                                     clip: true
                                     flickableDirection: Flickable.HorizontalFlick
+
+                                    readonly property real cap: width * chatPage.tableColumnCap
+                                    readonly property string cells: segItem.seg.cells
+                                    readonly property string html: segItem.seg.html
+                                    readonly property real fontPx: appWindow.fs(Theme.fontSizeSmall)
+                                    // Thinking bubbles and quoted tables (wrapped in
+                                    // <i> by the renderer) are italic, so measure so.
+                                    readonly property bool italic: line.isThink || html.indexOf("<i>") === 0
+
+                                    // Measured on change rather than bound: a binding
+                                    // that sets TextMetrics.text while reading its
+                                    // advanceWidth would loop.
+                                    property var measured: ({ keys: [], widths: [] })
+                                    // What the Label shows; empty until measured, so a
+                                    // new table is laid out once, not first squeezed.
+                                    property string shownHtml: ""
+                                    property real fixedWidth: 0
+                                    function measure(reuse) {
+                                        // Set here, not bound: the change handlers
+                                        // below would race the bindings' update.
+                                        cellMetrics.font.pixelSize = fontPx
+                                        cellMetrics.font.italic = italic
+                                        headMetrics.font.pixelSize = fontPx
+                                        headMetrics.font.italic = italic
+                                        try {
+                                            measured = chatPage.tableMeasure(cells,
+                                                reuse ? measured : { keys: [], widths: [] },
+                                                cellMetrics, headMetrics)
+                                        } catch (e) {
+                                            // Unreadable cells: no widths, so the
+                                            // table is shown as it is.
+                                            console.warn("table cells not measured: " + e)
+                                            measured = { keys: [], widths: [] }
+                                        }
+                                    }
+                                    function relayout() {
+                                        var l = chatPage.tableLayout(html, measured.widths, cap)
+                                        if (l.width !== fixedWidth) fixedWidth = l.width
+                                        if (l.html !== shownHtml) shownHtml = l.html
+                                    }
+                                    // syncSegments sets `cells` before `html`, so a
+                                    // streamed row is measured first and laid out
+                                    // once, when its HTML arrives.
+                                    onCellsChanged: measure(true)
+                                    onHtmlChanged: relayout()
+                                    onCapChanged: relayout()
+                                    onFontPxChanged: { measure(false); relayout() }
+                                    onItalicChanged: { measure(false); relayout() }
+                                    Component.onCompleted: { measure(false); relayout() }
+                                    TextMetrics { id: cellMetrics }
+                                    TextMetrics { id: headMetrics; font.bold: true }
+
                                     Label {
                                         id: tableLbl
-                                        text: segItem.seg.html
+                                        width: tableFlick.fixedWidth > 0 ? tableFlick.fixedWidth : implicitWidth
+                                        text: tableFlick.shownHtml
                                         textFormat: Text.RichText
-                                        wrapMode: Text.NoWrap
+                                        wrapMode: tableFlick.fixedWidth > 0 ? Text.Wrap : Text.NoWrap
                                         onLinkActivated: Qt.openUrlExternally(link)
-                                        font.pixelSize: appWindow.fs(Theme.fontSizeSmall)
+                                        font.pixelSize: tableFlick.fontPx
                                         font.italic: line.isThink
                                         color: (line.isThink || line.isSvc)
                                                ? Theme.secondaryColor : Theme.primaryColor
