@@ -173,8 +173,10 @@ keyed by content.
 
 ### Streaming holdback
 
-QML passes `live` for a bubble that is still streaming (it has a part id
-and the session is busy). While live and the body does not end in a
+QML passes `live` for a bubble that is still streaming: the session is
+busy and the bubble holds the newest live part (a finished part keeps its
+part id in the feed, and the newest live part is forgotten when the next run
+starts). While live and the body does not end in a
 newline, its last line may still change the block structure, and Rust
 withholds it when it is ambiguous: only `-`, `=`, `*`, `+`, `_` and spaces;
 only `#`; digits with an optional `.`/`)`; one or two backticks or tildes;
