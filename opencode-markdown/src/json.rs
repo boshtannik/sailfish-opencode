@@ -22,6 +22,7 @@ fn segment_json(s: &Segment) -> Value {
         "lang": s.lang,
         "indent": s.indent,
         "gap": s.gap_before,
+        "cells": s.cells,
     })
 }
 

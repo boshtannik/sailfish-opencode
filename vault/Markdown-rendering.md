@@ -64,6 +64,7 @@ Segment {
     lang:     String  // code: fence language
     indent:   u8      // list and quote nesting depth, at most 8 (MAX_INDENT)
     gapBefore: bool   // QML draws the inter-segment gap only when true
+    cells:    [[String]] // table: each cell's plain text, row by row
 }
 ```
 
@@ -123,7 +124,7 @@ Keep today's device-proven markup:
 | list item | bullet `•` or number written as text (Qt 5.6 support for `<ol start>` is unverified), indented by nesting depth |
 | task item | `☐` / `☑` glyphs |
 | quote | italic, prefixed as today (exact styling decided in the device spike) |
-| table | `<table border="1" cellspacing="0" cellpadding="...">`, `<th>`, `<td align>` |
+| table | `<table border="1" cellspacing="0" cellpadding="...">`, `<th>`, `<td align>`; every cell tag carries `data-col="N"` (Qt ignores it), so the UI can give a too-wide column a fixed width |
 | image | alt text as a link to the URL. Never `<img>`: Qt RichText may fetch remote images (tracking, layout jumps) |
 | link or image without text | the URL as its label (as text when the URL is not linked), so it never shows as nothing |
 | math `$…$`, `$$…$$` | escaped text as written, delimiters included, newlines as `<br/>`; not typeset. Parsed as math so markup and backslash escapes inside TeX are left alone |

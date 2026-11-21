@@ -655,6 +655,9 @@ Item {
                     segModel.remove(segModel.count - 1)
                 for (var i = 0; i < u.segs.length; i++) {
                     var it = u.segs[i]
+                    // A ListModel turns nested arrays into sub-models; the
+                    // table card only needs the cells once, as text.
+                    it.cells = JSON.stringify(it.cells || [])
                     var at = u.keep + i
                     if (at >= segModel.count) {
                         segModel.append(it)
@@ -665,6 +668,7 @@ Item {
                         segModel.set(at, it)
                         continue
                     }
+                    if (cur.cells !== it.cells) segModel.setProperty(at, "cells", it.cells)
                     if (cur.html !== it.html) segModel.setProperty(at, "html", it.html)
                     if (cur.text !== it.text) segModel.setProperty(at, "text", it.text)
                     if (cur.url !== it.url) segModel.setProperty(at, "url", it.url)
@@ -784,7 +788,7 @@ Item {
                             id: segItem
                             y: segWrap.topGap
                             width: segWrap.width
-                            // Role object of segModel: kind/html/text/url/lang/indent/gap.
+                            // Role object of segModel: kind/html/text/url/lang/indent/gap/cells.
                             property var seg: model
                             sourceComponent: segItem.seg.kind === chatPage.kKindCode ? codeSegment
                                              : segItem.seg.kind === chatPage.kKindLink ? linkSegment

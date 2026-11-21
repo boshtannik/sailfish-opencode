@@ -3,16 +3,26 @@
 use pulldown_cmark::{Alignment, Event, Tag, TagEnd};
 
 use crate::autolink::linkify;
-use crate::markup::{anchor_open, esc, safe_href, CODE_OPEN};
+use crate::markup::{anchor_open, esc, plain_text, safe_href, CODE_OPEN};
 
-/// `aligns` are the column alignments when the events are a table's body.
-pub(crate) fn inline_html(events: &[Event<'_>], aligns: &[Alignment]) -> String {
+pub(crate) fn inline_html(events: &[Event<'_>]) -> String {
+    write(events, &[]).out
+}
+
+/// A table's rows and cells as HTML (`aligns` are the column alignments),
+/// and each cell's visible text, row by row.
+pub(crate) fn table_html(events: &[Event<'_>], aligns: &[Alignment]) -> (String, Vec<Vec<String>>) {
+    let w = write(events, aligns);
+    (w.out, w.table.cells)
+}
+
+fn write<'t>(events: &[Event<'_>], aligns: &'t [Alignment]) -> Writer<'t> {
     let mut w = Writer { out: String::new(), text: String::new(), links: Vec::new(), table: Table::new(aligns) };
     for ev in events {
         w.event(ev);
     }
     w.flush_text();
-    w.out
+    w
 }
 
 struct Writer<'t> {
@@ -150,15 +160,22 @@ impl Writer<'_> {
     }
 }
 
+/// Table rows and cells. pulldown-cmark already pads short rows with empty
+/// cells and drops cells beyond the header's count, so every row has one
+/// cell per column.
 struct Table<'t> {
     aligns: &'t [Alignment],
     head: bool,
     col: usize,
+    /// Where the current cell's content starts in the output.
+    cell_start: usize,
+    /// Each cell's visible text, row by row.
+    cells: Vec<Vec<String>>,
 }
 
 impl<'t> Table<'t> {
     fn new(aligns: &'t [Alignment]) -> Self {
-        Table { aligns, head: false, col: 0 }
+        Table { aligns, head: false, col: 0, cell_start: 0, cells: Vec::new() }
     }
 
     fn cell_tag(&self) -> &'static str {
@@ -168,30 +185,35 @@ impl<'t> Table<'t> {
     fn start_row(&mut self, out: &mut String, head: bool) {
         self.head = head;
         self.col = 0;
+        self.cells.push(Vec::new());
         out.push_str("<tr>");
     }
 
-    fn start_cell(&self, out: &mut String) {
+    fn start_cell(&mut self, out: &mut String) {
         let align = match self.aligns.get(self.col) {
             Some(Alignment::Left) => " align=\"left\"",
             Some(Alignment::Right) => " align=\"right\"",
             Some(Alignment::Center) => " align=\"center\"",
             _ => "",
         };
-        out.push_str(&format!("<{}{align}>", self.cell_tag()));
+        // `data-col` lets the UI give a too-wide column a fixed width; Qt
+        // ignores the attribute when it is left in.
+        out.push_str(&format!("<{}{align} data-col=\"{}\">", self.cell_tag(), self.col));
+        self.cell_start = out.len();
     }
 
+    /// The cell's text is taken from its finished HTML, so it is exactly what
+    /// the cell shows (escaped source HTML, task boxes and all).
     fn end_cell(&mut self, out: &mut String) {
+        let text = plain_text(&out[self.cell_start..]);
+        if let Some(row) = self.cells.last_mut() {
+            row.push(text);
+        }
         out.push_str(&format!("</{}>", self.cell_tag()));
         self.col += 1;
     }
 
-    /// Short (ragged) rows still get a cell per column.
-    fn end_row(&mut self, out: &mut String) {
-        while self.col < self.aligns.len() {
-            out.push_str(&format!("<{0}></{0}>", self.cell_tag()));
-            self.col += 1;
-        }
+    fn end_row(&self, out: &mut String) {
         out.push_str("</tr>");
     }
 }

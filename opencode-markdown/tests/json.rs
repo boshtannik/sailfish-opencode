@@ -15,9 +15,9 @@ fn every_segment_field_is_carried() {
     assert_eq!(
         v["segs"],
         json!([
-            {"kind": "prose", "html": "Hi <b>you</b>", "text": "", "url": "", "lang": "", "indent": 0, "gap": false},
-            {"kind": "code", "html": "", "text": "ls", "url": "", "lang": "sh", "indent": 0, "gap": true},
-            {"kind": "marker", "html": "", "text": TRUNCATED_NOTE, "url": "", "lang": "", "indent": 0, "gap": false},
+            {"kind": "prose", "html": "Hi <b>you</b>", "text": "", "url": "", "lang": "", "indent": 0, "gap": false, "cells": []},
+            {"kind": "code", "html": "", "text": "ls", "url": "", "lang": "sh", "indent": 0, "gap": true, "cells": []},
+            {"kind": "marker", "html": "", "text": TRUNCATED_NOTE, "url": "", "lang": "", "indent": 0, "gap": false, "cells": []},
         ])
     );
 }
@@ -29,6 +29,7 @@ fn links_and_tables_name_their_kind() {
     assert_eq!(v["segs"][0]["url"], json!("https://e.com"));
     assert_eq!(v["segs"][1]["kind"], json!("table"));
     assert!(v["segs"][1]["html"].as_str().unwrap().starts_with("<table"));
+    assert_eq!(v["segs"][1]["cells"], json!([["a"], ["1"]]));
 }
 
 #[test]

@@ -3,7 +3,7 @@
 
 use pulldown_cmark::{Alignment, Event};
 
-use crate::inline::inline_html;
+use crate::inline::{inline_html, table_html};
 use crate::link_rows::{link_row, split_lines};
 use crate::markup::{esc, TABLE_OPEN};
 use crate::segment::{Kind, Segment};
@@ -77,8 +77,9 @@ fn code(leaf: &Leaf<'_>) -> Segment {
 }
 
 fn table(leaf: &Leaf<'_>) -> Segment {
-    let html = format!("{TABLE_OPEN}{}</table>", inline_html(&leaf.events, &leaf.aligns));
-    Segment { html: quote(leaf, html), ..Segment::new(Kind::Table, leaf.indent) }
+    let (rows, cells) = table_html(&leaf.events, &leaf.aligns);
+    let html = format!("{TABLE_OPEN}{rows}</table>");
+    Segment { html: quote(leaf, html), cells, ..Segment::new(Kind::Table, leaf.indent) }
 }
 
 fn html_block(events: &[Event<'_>]) -> String {
@@ -98,7 +99,7 @@ fn heading(level: u8, events: &[Event<'_>]) -> String {
         3 => "+1",
         _ => "+0",
     };
-    format!("<font size=\"{size}\"><b>{}</b></font>", inline_html(events, &[]))
+    format!("<font size=\"{size}\"><b>{}</b></font>", inline_html(events))
 }
 
 /// Prose, with each line that is only a link split out as a link row. Runs
@@ -123,7 +124,7 @@ fn paragraph(leaf: &Leaf<'_>) -> Vec<Segment> {
                 marker = None;
                 out.push(Segment { text, url, ..Segment::new(Kind::Link, leaf.indent) });
             }
-            None => lines.push(inline_html(line, &[])),
+            None => lines.push(inline_html(line)),
         }
     }
     flush(&mut lines, &mut marker, &mut out);

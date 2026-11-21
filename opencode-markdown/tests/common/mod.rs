@@ -15,6 +15,7 @@ pub fn seg(kind: Kind, html: &str, text: &str, url: &str, lang: &str, indent: u8
         lang: lang.into(),
         indent,
         gap_before: gap,
+        cells: Vec::new(),
     }
 }
 pub fn prose(html: &str) -> Segment {
@@ -53,8 +54,10 @@ pub fn table_html(body: &str) -> String {
     assert_eq!(s[0].kind, Kind::Table, "{s:#?}");
     s[0].html.clone()
 }
-pub fn table(html: &str) -> Segment {
-    seg(Kind::Table, html, "", "", "", 0, false)
+/// A table segment with its cells' plain text, row by row.
+pub fn table(html: &str, cells: &[&[&str]]) -> Segment {
+    let cells = cells.iter().map(|row| row.iter().map(|c| c.to_string()).collect()).collect();
+    Segment { cells, ..seg(Kind::Table, html, "", "", "", 0, false) }
 }
 
 // ── Streaming ────────────────────────────────────────────────────────────

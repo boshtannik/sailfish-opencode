@@ -39,6 +39,8 @@ pub struct Segment {
     pub indent: u8,
     /// Draw the inter-segment gap above this segment.
     pub gap_before: bool,
+    /// Table only: each cell's plain text, row by row (the header first).
+    pub cells: Vec<Vec<String>>,
 }
 
 pub const TRUNCATED_NOTE: &str = "… [text truncated]";
@@ -58,6 +60,7 @@ impl Segment {
             lang: String::new(),
             indent,
             gap_before: false,
+            cells: Vec::new(),
         }
     }
 

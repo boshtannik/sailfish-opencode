@@ -24,6 +24,27 @@ pub(crate) fn esc(s: &str) -> String {
     o
 }
 
+/// The text RichText shows for `html` made by this crate: tags dropped and
+/// the entities `esc` writes decoded. Not a general HTML parser: it relies
+/// on every literal `<`, `>`, `&` and `"` in the input being escaped.
+pub(crate) fn plain_text(html: &str) -> String {
+    let mut out = String::with_capacity(html.len());
+    let mut in_tag = false;
+    for c in html.chars() {
+        match c {
+            '<' => in_tag = true,
+            '>' if in_tag => in_tag = false,
+            _ if !in_tag => out.push(c),
+            _ => {}
+        }
+    }
+    out.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&amp;", "&")
+}
+
 fn esc_attr(s: &str) -> String {
     esc(s).replace('\'', "&#39;")
 }
