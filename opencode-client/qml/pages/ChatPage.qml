@@ -3,7 +3,6 @@ import Sailfish.Silica 1.0
 import Sailfish.Pickers 1.0
 import Nemo.Thumbnailer 1.0
 import "../components"
-import "../components/MdCache.js" as MdCache
 
 Item {
     id: chatPage
@@ -40,9 +39,9 @@ Item {
     readonly property int barButtonSize: Math.round(Theme.itemSizeMedium * appWindow.iconScale)
     readonly property int barIconSize: Math.round(Theme.iconSizeMedium * appWindow.iconScale)
 
-    // ── Mini-markdown → HTML (Text.RichText) ──────────────────────────────
-    // No third-party libraries: headings, lists, quotes, bold/italic,
-    // inline code and ``` fenced blocks. Rendering is basic but readable.
+    // ── HTML helpers (Text.RichText) ──────────────────────────────────────
+    // Chat markdown itself is rendered in Rust (opencode-markdown, exposed
+    // as `markdown`); these escape plain text for code cards and tool rows.
 
     function mdEscape(s) {
         return String(s)
@@ -57,93 +56,6 @@ Item {
                         .replace(/>/g, "&gt;").replace(/"/g, "&quot;")
     }
 
-    // Inline markup of a single line (after escaping, no newlines).
-    function mdInline(s) {
-        // 1. Markdown links [text](url) → placeholders, so the bare-URL
-        // detector (step 2) cannot re-wrap the same URL inside an href.
-        var ml = []
-        s = s.replace(/\[([^\]]+)\]\(([^)\s]+)(?:\s+["'][^"']*["'])?\)/g,
-            function (m, t, u) {
-                ml.push([t, u])
-                return "\u0000" + (ml.length - 1) + "\u0000"
-            })
-        // 2. Bare web URLs inside a paragraph → clickable links (trailing
-        // punctuation stays outside the link).
-        s = s.replace(/(^|[\s(])(https?:\/\/[\w\-+~!$&'()*,;=:%@\/.?#[\]\\]+)(?=[\s<)]|$)/g,
-            function (m, p, u) {
-                return p + '<a href="' + htmlEsc(u) + '" color="#82c4ff">'
-                       + htmlEsc(u) + '</a>'
-            })
-        // 3. Restore markdown links.
-        s = s.replace(/\u0000(\d+)\u0000/g, function (m, n) {
-            return '<a href="' + htmlEsc(ml[+n][1]) + '" color="#82c4ff">'
-                   + htmlEsc(ml[+n][0]) + '</a>'
-        })
-        // Code; bold; italic (*…* and _…_).
-        s = s.replace(/`([^`]+)`/g, "<font face='monospace' color='#e0e0e0'>$1</font>")
-        s = s.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
-        s = s.replace(/(^|[\s(])_([^_]+)_(?=\s|[)\]!.,:;]|$)/g, "$1<i>$2</i>")
-        s = s.replace(/(^|[\s(])[*]([^*]+)[*](?=\s|[)\]!.,:;]|$)/g, "$1<i>$2</i>")
-        return s
-    }
-
-    // Rendered prose per source text: a delegate re-created while scrolling
-    // reuses the HTML instead of re-running the regex pipeline (MdCache.js).
-    function mdRender(text) {
-        var hit = MdCache.get(text)
-        if (hit !== undefined)
-            return hit
-        var html = chatPage.mdBlock(chatPage.mdEscape(text))
-        MdCache.put(text, html)
-        return html
-    }
-
-    // Block-level per line: headings, lists, quotes, rules, fenced code.
-    function mdBlock(s) {
-        var out = []
-        var lines = s.split("\n")
-        var inPre = false
-        var preBuf = []
-        for (var i = 0; i < lines.length; i++) {
-            var l = lines[i]
-            var fence = /^```([\w+-]*)\s*$/.exec(l)
-            if (fence) {
-                if (inPre) {
-                    // Line breaks inside <pre> are preserved verbatim (Qt RichText),
-                    // code spaces/indentation are not collapsed, the font is monospace.
-                    out.push("<pre>" + preBuf.join("\n") + "</pre>")
-                    preBuf = []
-                    inPre = false
-                } else {
-                    inPre = true
-                }
-                continue
-            }
-            if (inPre) { preBuf.push(l); continue }
-            var h = /^(#{1,6})\s+(.*)$/.exec(l)
-            if (h) {
-                var sz = h[1].length === 1 ? "+3"
-                       : h[1].length === 2 ? "+2"
-                       : h[1].length === 3 ? "+1" : "+0"
-                out.push("<font size=\"" + sz + "\"><b>" + chatPage.mdInline(h[2]) + "</b></font>")
-                continue
-            }
-            var ul = /^[-*]\s+(.*)$/.exec(l)
-            if (ul) { out.push("\u2022 " + chatPage.mdInline(ul[1])); continue }
-            var ol = /^\s*(\d+)[.)]\s*(.*)$/.exec(l)
-            if (ol) { out.push("<b>" + ol[1] + "</b>. " + chatPage.mdInline(ol[2])); continue }
-            var qt = /^&gt;\s*(.*)$/.exec(l)
-            if (qt) { out.push("&gt; <i>" + chatPage.mdInline(qt[1]) + "</i>"); continue }
-            var hr = /^\s*([-*_])\1{2,}\s*$/.exec(l)
-            if (hr) { out.push("<hr/>"); continue }
-            out.push(chatPage.mdInline(l))
-        }
-        if (inPre) {
-            out.push("<pre>" + preBuf.join("\n") + "</pre>")
-        }
-        return out.join("<br/>")
-    }
-
     // Dedicated HTML for a code block: monospace, verbatim whitespace/newlines.
     function mdCode(s) {
         return "<pre>" + chatPage.mdEscape(s) + "</pre>"
@@ -155,74 +67,6 @@ Item {
     readonly property string kKindLink: "link"
     readonly property string kKindMarker: "marker"
     readonly property string kKindTable: "table"
-
-    // Split a bubble body into display segments so that fenced code blocks and
-    // whole-line links become their own blocks (each with a copy button):
-    //   {code:false, link:false, text:<prose>, url:"", lang:""}
-    //   {code:true,  link:false, text:<code>, url:"", lang:"<fence-lang>"}
-    //   {code:false, link:true,  text:<title>, url:<url>, lang:""}
-    function splitBody(body) {
-        var segs = []
-        var prose = []
-        function flush() {
-            if (prose.length > 0) {
-                segs.push({ code: false, link: false, text: prose.join("\n"),
-                            url: "", lang: "" })
-                prose = []
-            }
-        }
-        // A whole line that is exactly one link: `- [title](url)` / `[title](url)`
-        // / `- url` / `url`.
-        var linkRe = /^\s*(?:[-*]\s+)?(?:\[([^\]]+)\]\(([^)\s]+)(?:\s+["'][^"']*["'])?\)|(https?:\/\/\S+))\s*$/
-        var fenceRe = /^```([\w+-]*)\s*$/
-        var inPre = false
-        var preBuf = []
-        var lines = String(body).split("\n")
-        for (var i = 0; i < lines.length; i++) {
-            var l = lines[i]
-            var fence = fenceRe.exec(l)
-            if (fence) {
-                if (inPre) {
-                    flush()
-                    segs.push({ code: true, link: false,
-                                text: preBuf.join("\n").replace(/\s+$/, ""),
-                                url: "", lang: fence[1] })
-                    preBuf = []
-                    inPre = false
-                } else {
-                    flush()
-                    inPre = true
-                }
-                continue
-            }
-            if (inPre) { preBuf.push(l); continue }
-            var lm = linkRe.exec(l)
-            if (lm) {
-                flush()
-                var url = lm[2] !== undefined ? lm[2] : lm[3]
-                var title = lm[1] !== undefined ? lm[1] : url
-                segs.push({ code: false, link: true, text: title, url: url, lang: "" })
-                continue
-            }
-            // A blank line ends a paragraph: each paragraph is its own segment,
-            // so while an answer streams only the paragraph being written is
-            // laid out again (one long rich-text block re-laid out the whole
-            // answer on every update and made the feed stutter).
-            if (l.trim() === "") {
-                flush()
-                continue
-            }
-            prose.push(l)
-        }
-        if (inPre) {
-            flush()
-            segs.push({ code: true, link: false,
-                        text: preBuf.join("\n").replace(/\s+$/, ""),
-                        url: "", lang: "" })
-        }
-        flush()
-        return segs
-    }
 
     Connections {
         target: chatPage.appWindow
