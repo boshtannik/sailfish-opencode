@@ -11,6 +11,7 @@ use tokio::sync::Mutex;
 
 use opencode_client::api;
 use opencode_client::bridge::app::AppBridge;
+use opencode_client::bridge::markdown::MarkdownBridge;
 use opencode_client::cmd::Cmd;
 use opencode_client::event;
 use opencode_client::i18n::{self, err_line, now_ms, svc_line};
@@ -266,6 +267,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ("connecting" → "idle"/"error") once `opencode serve` is ready, so a slow
     // cold start no longer blocks the UI or flashes a false "error" badge.
 
+    // Declared before `app`, so it is dropped after the QML engine that
+    // holds it (locals drop in reverse order).
+    let markdown = RefCell::new(MarkdownBridge::default());
     // QML runs on the main thread; exec() blocks until the window is closed.
     let mut app = QmlApp::application(APP_NAME.to_string());
     // Native Qt i18n: load translation (harbour-opencode-ru.qm, etc.) according to system locale.
@@ -274,6 +278,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(e) => log::warn!("translation not loaded: {e}"),
     }
     app.set_object_property("bridge".into(), bridge_pinned);
+    app.set_object_property("markdown".into(), unsafe { QObjectPinned::new(&markdown) });
     app.set_source(QmlApp::path_to(MAIN_QML.into()));
     app.show_full_screen();
     app.exec();
