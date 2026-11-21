@@ -787,7 +787,9 @@ Item {
                             // Role object of segModel: kind/html/text/url/lang/indent/gap.
                             property var seg: model
                             sourceComponent: segItem.seg.kind === chatPage.kKindCode ? codeSegment
-                                             : (segItem.seg.kind === chatPage.kKindLink ? linkSegment : proseSegment)
+                                             : segItem.seg.kind === chatPage.kKindLink ? linkSegment
+                                             : segItem.seg.kind === chatPage.kKindTable ? tableSegment
+                                             : proseSegment
 
                             // Prose (rendered by the Rust markdown renderer), or
                             // the truncation note.
@@ -805,6 +807,38 @@ Item {
                                     font.italic: line.isThink
                                     color: (line.isThink || line.isSvc)
                                            ? Theme.secondaryColor : Theme.primaryColor
+                                }
+                            }
+
+                            // Table: laid out at its natural width (no wrap)
+                            // and scrolled sideways; a portrait phone is too
+                            // narrow for most tables. Horizontal-only flicking
+                            // leaves vertical drags to the chat list.
+                            Component {
+                                id: tableSegment
+                                SilicaFlickable {
+                                    id: tableFlick
+                                    width: segItem.width
+                                    // Room under the table for the scroll decorator
+                                    // when it does not fit.
+                                    height: tableLbl.height
+                                            + (contentWidth > width ? Theme.paddingSmall : 0)
+                                    contentWidth: tableLbl.width
+                                    contentHeight: height
+                                    clip: true
+                                    flickableDirection: Flickable.HorizontalFlick
+                                    Label {
+                                        id: tableLbl
+                                        text: segItem.seg.html
+                                        textFormat: Text.RichText
+                                        wrapMode: Text.NoWrap
+                                        onLinkActivated: Qt.openUrlExternally(link)
+                                        font.pixelSize: appWindow.fs(Theme.fontSizeSmall)
+                                        font.italic: line.isThink
+                                        color: (line.isThink || line.isSvc)
+                                               ? Theme.secondaryColor : Theme.primaryColor
+                                    }
+                                    HorizontalScrollDecorator {}
                                 }
                             }
 
