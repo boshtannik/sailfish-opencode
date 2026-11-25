@@ -3,7 +3,6 @@ import Sailfish.Silica 1.0
 import Sailfish.Pickers 1.0
 import Nemo.Thumbnailer 1.0
 import "../components"
-import "../components/MdCache.js" as MdCache
 
 Item {
     id: chatPage
@@ -40,9 +39,9 @@ Item {
     readonly property int barButtonSize: Math.round(Theme.itemSizeMedium * appWindow.iconScale)
     readonly property int barIconSize: Math.round(Theme.iconSizeMedium * appWindow.iconScale)
 
-    // ── Mini-markdown → HTML (Text.RichText) ──────────────────────────────
-    // No third-party libraries: headings, lists, quotes, bold/italic,
-    // inline code and ``` fenced blocks. Rendering is basic but readable.
+    // ── HTML helpers (Text.RichText) ──────────────────────────────────────
+    // Chat markdown itself is rendered in Rust (opencode-markdown, exposed
+    // as `markdown`); these escape plain text for code cards and tool rows.
 
     function mdEscape(s) {
         return String(s)
@@ -57,164 +56,82 @@ Item {
                         .replace(/>/g, "&gt;").replace(/"/g, "&quot;")
     }
 
-    // Inline markup of a single line (after escaping, no newlines).
-    function mdInline(s) {
-        // 1. Markdown links [text](url) → placeholders, so the bare-URL
-        // detector (step 2) cannot re-wrap the same URL inside an href.
-        var ml = []
-        s = s.replace(/\[([^\]]+)\]\(([^)\s]+)(?:\s+["'][^"']*["'])?\)/g,
-            function (m, t, u) {
-                ml.push([t, u])
-                return "\u0000" + (ml.length - 1) + "\u0000"
-            })
-        // 2. Bare web URLs inside a paragraph → clickable links (trailing
-        // punctuation stays outside the link).
-        s = s.replace(/(^|[\s(])(https?:\/\/[\w\-+~!$&'()*,;=:%@\/.?#[\]\\]+)(?=[\s<)]|$)/g,
-            function (m, p, u) {
-                return p + '<a href="' + htmlEsc(u) + '" color="#82c4ff">'
-                       + htmlEsc(u) + '</a>'
-            })
-        // 3. Restore markdown links.
-        s = s.replace(/\u0000(\d+)\u0000/g, function (m, n) {
-            return '<a href="' + htmlEsc(ml[+n][1]) + '" color="#82c4ff">'
-                   + htmlEsc(ml[+n][0]) + '</a>'
-        })
-        // Code; bold; italic (*…* and _…_).
-        s = s.replace(/`([^`]+)`/g, "<font face='monospace' color='#e0e0e0'>$1</font>")
-        s = s.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
-        s = s.replace(/(^|[\s(])_([^_]+)_(?=\s|[)\]!.,:;]|$)/g, "$1<i>$2</i>")
-        s = s.replace(/(^|[\s(])[*]([^*]+)[*](?=\s|[)\]!.,:;]|$)/g, "$1<i>$2</i>")
-        return s
-    }
-
-    // Rendered prose per source text: a delegate re-created while scrolling
-    // reuses the HTML instead of re-running the regex pipeline (MdCache.js).
-    function mdRender(text) {
-        var hit = MdCache.get(text)
-        if (hit !== undefined)
-            return hit
-        var html = chatPage.mdBlock(chatPage.mdEscape(text))
-        MdCache.put(text, html)
-        return html
-    }
-
-    // Block-level per line: headings, lists, quotes, rules, fenced code.
-    function mdBlock(s) {
-        var out = []
-        var lines = s.split("\n")
-        var inPre = false
-        var preBuf = []
-        for (var i = 0; i < lines.length; i++) {
-            var l = lines[i]
-            var fence = /^```([\w+-]*)\s*$/.exec(l)
-            if (fence) {
-                if (inPre) {
-                    // Line breaks inside <pre> are preserved verbatim (Qt RichText),
-                    // code spaces/indentation are not collapsed, the font is monospace.
-                    out.push("<pre>" + preBuf.join("\n") + "</pre>")
-                    preBuf = []
-                    inPre = false
-                } else {
-                    inPre = true
-                }
-                continue
-            }
-            if (inPre) { preBuf.push(l); continue }
-            var h = /^(#{1,6})\s+(.*)$/.exec(l)
-            if (h) {
-                var sz = h[1].length === 1 ? "+3"
-                       : h[1].length === 2 ? "+2"
-                       : h[1].length === 3 ? "+1" : "+0"
-                out.push("<font size=\"" + sz + "\"><b>" + chatPage.mdInline(h[2]) + "</b></font>")
-                continue
-            }
-            var ul = /^[-*]\s+(.*)$/.exec(l)
-            if (ul) { out.push("\u2022 " + chatPage.mdInline(ul[1])); continue }
-            var ol = /^\s*(\d+)[.)]\s*(.*)$/.exec(l)
-            if (ol) { out.push("<b>" + ol[1] + "</b>. " + chatPage.mdInline(ol[2])); continue }
-            var qt = /^&gt;\s*(.*)$/.exec(l)
-            if (qt) { out.push("&gt; <i>" + chatPage.mdInline(qt[1]) + "</i>"); continue }
-            var hr = /^\s*([-*_])\1{2,}\s*$/.exec(l)
-            if (hr) { out.push("<hr/>"); continue }
-            out.push(chatPage.mdInline(l))
-        }
-        if (inPre) {
-            out.push("<pre>" + preBuf.join("\n") + "</pre>")
-        }
-        return out.join("<br/>")
-    }
-
     // Dedicated HTML for a code block: monospace, verbatim whitespace/newlines.
     function mdCode(s) {
         return "<pre>" + chatPage.mdEscape(s) + "</pre>"
     }
 
-    // Split a bubble body into display segments so that fenced code blocks and
-    // whole-line links become their own blocks (each with a copy button):
-    //   {code:false, link:false, text:<prose>, url:"", lang:""}
-    //   {code:true,  link:false, text:<code>, url:"", lang:"<fence-lang>"}
-    //   {code:false, link:true,  text:<title>, url:<url>, lang:""}
-    function splitBody(body) {
-        var segs = []
-        var prose = []
-        function flush() {
-            if (prose.length > 0) {
-                segs.push({ code: false, link: false, text: prose.join("\n"),
-                            url: "", lang: "" })
-                prose = []
-            }
-        }
-        // A whole line that is exactly one link: `- [title](url)` / `[title](url)`
-        // / `- url` / `url`.
-        var linkRe = /^\s*(?:[-*]\s+)?(?:\[([^\]]+)\]\(([^)\s]+)(?:\s+["'][^"']*["'])?\)|(https?:\/\/\S+))\s*$/
-        var fenceRe = /^```([\w+-]*)\s*$/
-        var inPre = false
-        var preBuf = []
-        var lines = String(body).split("\n")
-        for (var i = 0; i < lines.length; i++) {
-            var l = lines[i]
-            var fence = fenceRe.exec(l)
-            if (fence) {
-                if (inPre) {
-                    flush()
-                    segs.push({ code: true, link: false,
-                                text: preBuf.join("\n").replace(/\s+$/, ""),
-                                url: "", lang: fence[1] })
-                    preBuf = []
-                    inPre = false
-                } else {
-                    flush()
-                    inPre = true
+    // A segment's `kind` from the renderer (mirror of opencode-markdown's
+    // KIND_* constants in json.rs).
+    readonly property string kKindCode: "code"
+    readonly property string kKindLink: "link"
+    readonly property string kKindMarker: "marker"
+    readonly property string kKindTable: "table"
+
+    // ── Table cards ───────────────────────────────────────────────────────
+    // Qt 5.6 tables have no max-width, so a column whose widest cell exceeds
+    // this share of the card gets a fixed width and wraps. Below the full
+    // width, the next column's edge stays visible as a hint that the card
+    // scrolls sideways.
+    readonly property real tableColumnCap: 0.925
+    // Per column: cellpadding="4" on both sides plus the border (see the
+    // renderer's table markup).
+    readonly property real tableColumnChrome: 2 * 4 + 2
+    // Extra room for uncapped columns: they are measured as plain text in
+    // the body font, but monospace code and bold text are wider, and a
+    // column given less than it needs wraps.
+    readonly property real tableColumnSlack: 1.1
+
+    // Widths of each row's cells, from the renderer's JSON array of rows of
+    // cell text; the header row is measured in bold. A row whose text equals
+    // the one at the same index in `prev` reuses its widths, so a table that
+    // streams in row by row measures only its new rows. Throws on bad JSON.
+    function tableMeasure(cells, prev, metrics, headMetrics) {
+        var rows = JSON.parse(cells || "[]")
+        var keys = [], widths = []
+        for (var r = 0; r < rows.length; r++) {
+            var key = rows[r].join("\u001f")
+            if (prev.keys[r] === key) {
+                widths.push(prev.widths[r])
+            } else {
+                var m = r === 0 ? headMetrics : metrics
+                var w = []
+                for (var c = 0; c < rows[r].length; c++) {
+                    m.text = rows[r][c]
+                    w.push(m.advanceWidth)
                 }
-                continue
+                widths.push(w)
             }
-            if (inPre) { preBuf.push(l); continue }
-            var lm = linkRe.exec(l)
-            if (lm) {
-                flush()
-                var url = lm[2] !== undefined ? lm[2] : lm[3]
-                var title = lm[1] !== undefined ? lm[1] : url
-                segs.push({ code: false, link: true, text: title, url: url, lang: "" })
-                continue
-            }
-            // A blank line ends a paragraph: each paragraph is its own segment,
-            // so while an answer streams only the paragraph being written is
-            // laid out again (one long rich-text block re-laid out the whole
-            // answer on every update and made the feed stutter).
-            if (l.trim() === "") {
-                flush()
-                continue
-            }
-            prose.push(l)
+            keys.push(key)
         }
-        if (inPre) {
-            flush()
-            segs.push({ code: true, link: false,
-                        text: preBuf.join("\n").replace(/\s+$/, ""),
-                        url: "", lang: "" })
+        return { keys: keys, widths: widths }
+    }
+
+    // How to show a table: `width` 0 means as it is, unwrapped at its
+    // natural width, as long as no column is wider than `cap`. Otherwise each
+    // such column gets a fixed width (the renderer marks every cell tag with
+    // `data-col="N"`) and its text wraps there, and `width` is the table's
+    // width. Qt does not report that width: with wrapping on, a Label's
+    // implicitWidth is the table laid out unwrapped, and its contentWidth is
+    // never less than the Label's own width.
+    function tableLayout(html, rowWidths, cap) {
+        var cols = []
+        for (var r = 0; r < rowWidths.length; r++)
+            for (var c = 0; c < rowWidths[r].length; c++)
+                cols[c] = Math.max(cols[c] || 0, rowWidths[r][c])
+        var capped = cap > 0 && cols.some(function (w) { return w > cap })
+        if (!capped)
+            return { html: html, width: 0 }
+        // The table's outer border.
+        var total = 2
+        for (c = 0; c < cols.length; c++)
+            total += (cols[c] > cap ? cap : cols[c] * tableColumnSlack) + tableColumnChrome
+        return {
+            html: html.replace(/ data-col="(\d+)"/g, function (m, col) {
+                return cols[col] > cap ? ' width="' + Math.floor(cap) + '"' : ""
+            }),
+            width: Math.ceil(total)
         }
-        flush()
-        return segs
     }
 
     Connections {
@@ -744,7 +661,7 @@ Item {
                     h += " " + chatPage.htmlEsc(line.toolText)
                 return h
             }
-            property string body: {
+            property string fullBody: {
                 var b = appWindow.stripTs(line.raw)
                 if (appWindow.lineIs(b, appWindow.kThinkTag))
                     b = b.substring(appWindow.kThinkTag.length)
@@ -756,42 +673,84 @@ Item {
                     b = b.substring(appWindow.kSvcTag.length)
                 b = appWindow.stripMsgId(b)
                 b = appWindow.stripPartId(b)
-                b = b.replace(/^\n+/, "")
-                if (b.length > appWindow.kFeedBodyCap)
-                    b = b.substring(0, appWindow.kFeedBodyCap) + "\n… [text truncated]"
-                return b
+                return b.replace(/^\n+/, "")
             }
-            // The body split into display segments: prose, fenced-code blocks
-            // and whole-line links — so copy buttons can sit next to each block.
-            // `{code, link, text, url, lang}` (see chatPage.splitBody).
-            property var segments: (line.isTool || line.isModelSwitch) ? [] : chatPage.splitBody(line.body)
-            // Segments mirrored into a ListModel in place: while an answer
-            // streams, only the segment that grew is laid out again. A plain
-            // array model rebuilt every segment (and its rich text) on every
-            // update, which stalled scrolling during generation.
+            readonly property bool truncated: line.fullBody.length > appWindow.kFeedBodyCap
+            // What is rendered; the truncation note is added by the renderer as
+            // its own segment, so it cannot land inside a table or open fence.
+            readonly property string shownBody: line.truncated
+                                                ? line.fullBody.substring(0, appWindow.kFeedBodyCap)
+                                                : line.fullBody
+            // Copy, speech and edit take this plain text, which has no note
+            // segment, so the note is appended to it.
+            property string body: line.truncated ? line.shownBody + "\n… [text truncated]" : line.fullBody
+            // Still streaming: the renderer then holds back an unfinished last
+            // line that could still change shape. Only the newest live part
+            // can grow; history lines carry no part id at all.
+            readonly property bool live: chatPage.busy && appWindow.livePartId !== ""
+                                         && appWindow.partIdOf(line.raw) === appWindow.livePartId
+            // Display segments (prose, code cards, link rows, truncation note)
+            // from the Rust renderer, mirrored into a ListModel in place.
+            // `mdRev` names what segModel shows; the renderer answers with how
+            // many leading segments are unchanged, so while an answer streams
+            // only the changed tail is touched and laid out again.
+            property real mdRev: 0
+            // What `mdRev` was rendered from. A new delegate calls in twice
+            // with the same input: once for the first evaluation of
+            // `shownBody`, once from Component.onCompleted.
+            property string mdBody: ""
+            property bool mdTruncated: false
+            property bool mdLive: false
             ListModel { id: segModel }
             function syncSegments() {
-                var s = line.segments
-                while (segModel.count > s.length)
+                if (line.isTool || line.isModelSwitch) {
+                    segModel.clear()
+                    line.mdRev = 0
+                    return
+                }
+                if (line.mdRev !== 0 && line.mdBody === line.shownBody
+                        && line.mdTruncated === line.truncated && line.mdLive === line.live)
+                    return
+                var u = JSON.parse(markdown.render(line.shownBody, line.truncated, line.live, line.mdRev))
+                line.mdRev = u.rev
+                line.mdBody = line.shownBody
+                line.mdTruncated = line.truncated
+                line.mdLive = line.live
+                var n = u.keep + u.segs.length
+                while (segModel.count > n)
                     segModel.remove(segModel.count - 1)
-                for (var i = 0; i < s.length; i++) {
-                    var it = { code: !!s[i].code, link: !!s[i].link, text: s[i].text || "",
-                               url: s[i].url || "", lang: s[i].lang || "" }
-                    if (i >= segModel.count) {
+                for (var i = 0; i < u.segs.length; i++) {
+                    var it = u.segs[i]
+                    // A ListModel turns nested arrays into sub-models; the
+                    // table card only needs the cells once, as text.
+                    it.cells = JSON.stringify(it.cells || [])
+                    var at = u.keep + i
+                    if (at >= segModel.count) {
                         segModel.append(it)
                         continue
                     }
-                    var cur = segModel.get(i)
-                    if (cur.code !== it.code || cur.link !== it.link) {
-                        segModel.set(i, it)
+                    var cur = segModel.get(at)
+                    if (cur.kind !== it.kind) {
+                        segModel.set(at, it)
                         continue
                     }
-                    if (cur.text !== it.text) segModel.setProperty(i, "text", it.text)
-                    if (cur.url !== it.url) segModel.setProperty(i, "url", it.url)
-                    if (cur.lang !== it.lang) segModel.setProperty(i, "lang", it.lang)
+                    // `cells` before `html`: the table card measures on the
+                    // first and lays out on the second, once.
+                    if (cur.cells !== it.cells) segModel.setProperty(at, "cells", it.cells)
+                    if (cur.html !== it.html) segModel.setProperty(at, "html", it.html)
+                    if (cur.text !== it.text) segModel.setProperty(at, "text", it.text)
+                    if (cur.url !== it.url) segModel.setProperty(at, "url", it.url)
+                    if (cur.lang !== it.lang) segModel.setProperty(at, "lang", it.lang)
+                    if (cur.indent !== it.indent) segModel.setProperty(at, "indent", it.indent)
+                    if (cur.gap !== it.gap) segModel.setProperty(at, "gap", it.gap)
                 }
             }
-            onSegmentsChanged: syncSegments()
+            onShownBodyChanged: syncSegments()
+            // A body that grows past the cap from exactly the cap keeps its
+            // shown text, so only this change brings the note.
+            onTruncatedChanged: syncSegments()
+            onLiveChanged: syncSegments()
+            onIsToolChanged: syncSegments()
             Component.onCompleted: syncSegments()
             // Server messageID of this bubble (user lines only): enables the
             // long-press revert/fork menu. Empty for agent/system bubbles.
@@ -874,28 +833,45 @@ Item {
                     id: bodyCol
                     y: line.thinkCollapsed ? Math.min(0, bodyClip.height - bodyCol.height) : 0
                     width: bodyClip.width
-                    spacing: Theme.paddingSmall
+                    // Segments carry their own gap: list items are separate
+                    // segments and must sit tight unless the source had a
+                    // blank line between them.
 
                     Repeater {
                         model: segModel
+                        delegate: Item {
+                            id: segWrap
+                            readonly property real topGap: model.gap ? Theme.paddingSmall : 0
+                            // List and quote nesting.
+                            x: model.indent * Theme.paddingLarge
+                            width: bodyCol.width - x
+                            height: segItem.height + topGap
+
                         // Each segment builds only the layout of its own kind.
                         // Before, every segment created the prose label, the link
                         // row and a whole code card (flickable, two buttons,
                         // scroll decorator) and hid two of them, which made each
                         // bubble cost dozens of objects as it scrolled into view.
-                        delegate: Loader {
+                        Loader {
                             id: segItem
-                            // Role object of segModel: code/link/text/url/lang.
+                            y: segWrap.topGap
+                            width: segWrap.width
+                            // Role object of segModel: kind/html/text/url/lang/indent/gap/cells.
                             property var seg: model
-                            sourceComponent: segItem.seg.code ? codeSegment
-                                             : (segItem.seg.link ? linkSegment : proseSegment)
+                            sourceComponent: segItem.seg.kind === chatPage.kKindCode ? codeSegment
+                                             : segItem.seg.kind === chatPage.kKindLink ? linkSegment
+                                             : segItem.seg.kind === chatPage.kKindTable ? tableSegment
+                                             : proseSegment
 
-                            // Free-form prose (markdown → rich text).
+                            // Prose (rendered by the Rust markdown renderer), or
+                            // the truncation note.
                             Component {
                                 id: proseSegment
                                 Label {
-                                    width: bodyCol.width
-                                    text: chatPage.mdRender(segItem.seg.text)
+                                    width: segItem.width
+                                    text: segItem.seg.kind === chatPage.kKindMarker
+                                          ? "<i>" + chatPage.htmlEsc(segItem.seg.text) + "</i>"
+                                          : segItem.seg.html
                                     textFormat: Text.RichText
                                     wrapMode: Text.Wrap
                                     onLinkActivated: Qt.openUrlExternally(link)
@@ -906,6 +882,96 @@ Item {
                                 }
                             }
 
+                            // Table, scrolled sideways when wider than the
+                            // card: a portrait phone is too narrow for most
+                            // tables. Shown unwrapped unless a column would
+                            // be wider than tableColumnCap of the card; see
+                            // chatPage.tableLayout. Horizontal-only flicking
+                            // leaves vertical drags to the chat list.
+                            Component {
+                                id: tableSegment
+                                SilicaFlickable {
+                                    id: tableFlick
+                                    width: segItem.width
+                                    // Room under the table for the scroll decorator
+                                    // when it does not fit.
+                                    height: tableLbl.height
+                                            + (contentWidth > width ? Theme.paddingSmall : 0)
+                                    // Qt can lay out wider than the Label (a capped
+                                    // column holding a long word); contentWidth
+                                    // then says so.
+                                    contentWidth: Math.max(tableLbl.width, tableLbl.contentWidth)
+                                    contentHeight: height
+                                    clip: true
+                                    flickableDirection: Flickable.HorizontalFlick
+
+                                    readonly property real cap: width * chatPage.tableColumnCap
+                                    readonly property string cells: segItem.seg.cells
+                                    readonly property string html: segItem.seg.html
+                                    readonly property real fontPx: appWindow.fs(Theme.fontSizeSmall)
+                                    // Thinking bubbles and quoted tables (wrapped in
+                                    // <i> by the renderer) are italic, so measure so.
+                                    readonly property bool italic: line.isThink || html.indexOf("<i>") === 0
+
+                                    // Measured on change rather than bound: a binding
+                                    // that sets TextMetrics.text while reading its
+                                    // advanceWidth would loop.
+                                    property var measured: ({ keys: [], widths: [] })
+                                    // What the Label shows; empty until measured, so a
+                                    // new table is laid out once, not first squeezed.
+                                    property string shownHtml: ""
+                                    property real fixedWidth: 0
+                                    function measure(reuse) {
+                                        // Set here, not bound: the change handlers
+                                        // below would race the bindings' update.
+                                        cellMetrics.font.pixelSize = fontPx
+                                        cellMetrics.font.italic = italic
+                                        headMetrics.font.pixelSize = fontPx
+                                        headMetrics.font.italic = italic
+                                        try {
+                                            measured = chatPage.tableMeasure(cells,
+                                                reuse ? measured : { keys: [], widths: [] },
+                                                cellMetrics, headMetrics)
+                                        } catch (e) {
+                                            // Unreadable cells: no widths, so the
+                                            // table is shown as it is.
+                                            console.warn("table cells not measured: " + e)
+                                            measured = { keys: [], widths: [] }
+                                        }
+                                    }
+                                    function relayout() {
+                                        var l = chatPage.tableLayout(html, measured.widths, cap)
+                                        if (l.width !== fixedWidth) fixedWidth = l.width
+                                        if (l.html !== shownHtml) shownHtml = l.html
+                                    }
+                                    // syncSegments sets `cells` before `html`, so a
+                                    // streamed row is measured first and laid out
+                                    // once, when its HTML arrives.
+                                    onCellsChanged: measure(true)
+                                    onHtmlChanged: relayout()
+                                    onCapChanged: relayout()
+                                    onFontPxChanged: { measure(false); relayout() }
+                                    onItalicChanged: { measure(false); relayout() }
+                                    Component.onCompleted: { measure(false); relayout() }
+                                    TextMetrics { id: cellMetrics }
+                                    TextMetrics { id: headMetrics; font.bold: true }
+
+                                    Label {
+                                        id: tableLbl
+                                        width: tableFlick.fixedWidth > 0 ? tableFlick.fixedWidth : implicitWidth
+                                        text: tableFlick.shownHtml
+                                        textFormat: Text.RichText
+                                        wrapMode: tableFlick.fixedWidth > 0 ? Text.Wrap : Text.NoWrap
+                                        onLinkActivated: Qt.openUrlExternally(link)
+                                        font.pixelSize: tableFlick.fontPx
+                                        font.italic: line.isThink
+                                        color: (line.isThink || line.isSvc)
+                                               ? Theme.secondaryColor : Theme.primaryColor
+                                    }
+                                    HorizontalScrollDecorator {}
+                                }
+                            }
+
                             // Whole-line link: label + copy button. The button is pinned to the row's
                             // right edge and the label is cut off at the icon's edge —
                             // the icon can never sit ON the text.
@@ -913,7 +979,7 @@ Item {
                                 id: linkSegment
                                 Item {
                                     id: linkRow
-                                    width: bodyCol.width
+                                    width: segItem.width
                                     height: Math.max(urlLbl.height, copyLinkBtn.height)
                                     Label {
                                         id: urlLbl
@@ -956,7 +1022,7 @@ Item {
                                 id: codeSegment
                                 Rectangle {
                                     id: segBox
-                                    width: bodyCol.width
+                                    width: segItem.width
                                     radius: Theme.paddingSmall
                                     color: Theme.rgba(Theme.highlightColor, 0.08)
                                     height: codeHeader.height
@@ -1016,6 +1082,7 @@ Item {
                                     }
                                 }
                             }
+                        }
                         }
                     }
                 }

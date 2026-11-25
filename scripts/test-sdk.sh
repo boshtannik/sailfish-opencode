@@ -33,6 +33,7 @@ chmod 777 "$CACHE" "$CACHE/cargo" 2>/dev/null || true
     --exclude=./opencode-client/target \
     --exclude=./voice-engine/target \
     --exclude=./opencode-proto/target \
+    --exclude=./opencode-markdown/target \
     --exclude=./.git \
     --exclude=./spike \
     --exclude=./sfos-sysroot \

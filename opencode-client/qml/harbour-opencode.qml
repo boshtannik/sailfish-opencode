@@ -53,6 +53,13 @@ ApplicationWindow {
         }
     }
     property string statusText: app.kServerStatusConnecting
+    // Part-id of the newest live answer or reasoning line: the one bubble that
+    // may still grow while the session is busy. A finished part keeps its
+    // `[[p:<id>]]` in the feed for good, so the marker alone does not tell.
+    // The last push of a run can be drained in the same poll that sees the
+    // session go idle, so the id is cleared when the next run starts, not
+    // when one ends; until then the bubble is not live because nothing is busy.
+    property string livePartId: ""
     property string inputMode: inputModeSetting.value !== undefined
                                ? inputModeSetting.value : "text_ptt"
     property var sessions: []
@@ -749,6 +756,8 @@ ApplicationWindow {
             app.statusText = st
         app.compactionActive = bridge.compaction_active()
         if (app.statusBase(app.statusText) === "busy") {
+            if (!app.wasBusy)
+                app.livePartId = ""
             app.wasBusy = true
         } else if (app.wasBusy) {
             app.wasBusy = false
@@ -817,6 +826,7 @@ ApplicationWindow {
                         if (!app.showReasoning)
                             continue
                         var rPart = app.partIdOf(bodyTmp)
+                        app.livePartId = rPart
                         var rText = app.stripPartId(bodyTmp.substring(app.kThinkLiveTag.length))
                         var rLine = app.kTsOpen + app.msOf(line) + app.kTsClose
                                     + app.kThinkTag + rText
@@ -841,6 +851,7 @@ ApplicationWindow {
                     // replacement duplicated the answer in that case).
                     if (app.lineIs(bodyTmp, app.kAnswerLiveTag)) {
                         var aPart = app.partIdOf(bodyTmp)
+                        app.livePartId = aPart
                         var aText = app.stripPartId(bodyTmp.substring(app.kAnswerLiveTag.length))
                         var aLine = app.kTsOpen + app.msOf(line) + app.kTsClose + aText
                         if (aPart !== "")

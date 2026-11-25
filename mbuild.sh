@@ -82,12 +82,14 @@ echo "release: $REL -> $((REL + 1))"
   rm -rf ~/opencode-build
   mkdir -p ~/opencode-build
   cd /src
-  # `opencode-proto` is built on the host (`make test`), so its target dir is
-  # owned by the host user with 0600 incremental lock files — the SDK container
-  # (uid 100000) cannot read them and tar spams "Permission denied".
+  # `opencode-proto` and `opencode-markdown` are built on the host (`make
+  # test`), so their target dirs are owned by the host user with 0600
+  # incremental lock files — the SDK container (uid 100000) cannot read them
+  # and tar spams "Permission denied".
   tar -cf - \
     --exclude=./opencode-client/target \
     --exclude=./opencode-proto/target \
+    --exclude=./opencode-markdown/target \
     --exclude=./voice-engine/target \
     --exclude=./.git \
     --exclude=./spike \
