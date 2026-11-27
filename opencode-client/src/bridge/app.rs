@@ -401,6 +401,18 @@ pub struct AppBridge {
         let v = self.saved_permissions_shared.lock().map(|s| s.clone()).unwrap_or_default();
         QString::from(v)
     }),
+    /// QML: global agent permission policy from opencode config.
+    /// Returns JSON `{policy, configPath, writable, warning?, restartRequired?}`.
+    permission_policy_json: qt_method!(fn permission_policy_json(&self) -> QString {
+        QString::from(global_permission_policy_json())
+    }),
+    /// QML: set global agent permission policy in opencode config.
+    /// `policy`: "default" | "ask" | "allow". Returns same JSON shape as permission_policy_json plus `ok`.
+    set_permission_policy: qt_method!(fn set_permission_policy(&self, policy: QString) -> QString {
+        let policy = policy.to_string();
+        log::info!("QML set_permission_policy {policy:?}");
+        QString::from(set_global_permission_policy(&policy))
+    }),
     /// QML: pending forms from the model as JSON (read-only).
     ///
     /// The list holds the forms the server still waits an answer for (the
@@ -741,6 +753,206 @@ impl AppBridge {
             q.push(v.to_string());
         }
     }
+}
+
+fn opencode_global_config_dir() -> std::path::PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/home/defaultuser".into());
+    let xdg = std::env::var("XDG_CONFIG_HOME").unwrap_or_else(|_| format!("{home}/.config"));
+    std::path::PathBuf::from(xdg).join("opencode")
+}
+
+fn global_permission_policy_json() -> String {
+    let dir = opencode_global_config_dir();
+    let jsonc = dir.join("opencode.jsonc");
+    let json = dir.join("opencode.json");
+
+    if jsonc.exists() {
+        // JSONC may contain comments/trailing commas; don't overwrite it.
+        let policy = read_permission_policy_from_file(&jsonc).unwrap_or_else(|| "unknown".to_string());
+        return serde_json::json!({
+            "policy": policy,
+            "configPath": jsonc.to_string_lossy(),
+            "writable": false,
+            "warning": "opencode.jsonc detected; edit it manually to change permission policy."
+        })
+        .to_string();
+    }
+
+    if json.exists() {
+        let policy = read_permission_policy_from_file(&json).unwrap_or_else(|| "unknown".to_string());
+        let writable = serde_json::from_str::<serde_json::Value>(
+            &std::fs::read_to_string(&json).unwrap_or_default(),
+        )
+        .is_ok();
+        let mut obj = serde_json::json!({
+            "policy": policy,
+            "configPath": json.to_string_lossy(),
+            "writable": writable,
+        });
+        if !writable {
+            obj["warning"] = serde_json::Value::String(
+                "opencode.json is not valid JSON; not overwriting it.".to_string(),
+            );
+        }
+        return obj.to_string();
+    }
+
+    serde_json::json!({
+        "policy": "default",
+        "configPath": json.to_string_lossy(),
+        "writable": true,
+    })
+    .to_string()
+}
+
+fn read_permission_policy_from_file(path: &std::path::Path) -> Option<String> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let perm = v.get("permission")?;
+    match perm {
+        serde_json::Value::String(s) if s == "allow" => Some("allow".to_string()),
+        serde_json::Value::String(s) if s == "ask" => Some("ask".to_string()),
+        serde_json::Value::String(s) if s == "deny" => Some("deny".to_string()),
+        serde_json::Value::Object(map) => {
+            if map.get("*") == Some(&serde_json::Value::String("allow".to_string())) {
+                Some("allow".to_string())
+            } else if map.get("*") == Some(&serde_json::Value::String("ask".to_string())) {
+                Some("ask".to_string())
+            } else if map.get("*") == Some(&serde_json::Value::String("deny".to_string())) {
+                Some("deny".to_string())
+            } else {
+                Some("custom".to_string())
+            }
+        }
+        _ => Some("custom".to_string()),
+    }
+}
+
+fn set_global_permission_policy(policy: &str) -> String {
+    let dir = opencode_global_config_dir();
+    let jsonc = dir.join("opencode.jsonc");
+    let json = dir.join("opencode.json");
+
+    if jsonc.exists() {
+        return serde_json::json!({
+            "ok": false,
+            "policy": read_permission_policy_from_file(&jsonc).unwrap_or_else(|| "unknown".to_string()),
+            "configPath": jsonc.to_string_lossy(),
+            "writable": false,
+            "warning": "opencode.jsonc detected; edit it manually to change permission policy."
+        })
+        .to_string();
+    }
+
+    let target = if json.exists() { json.clone() } else { json.clone() };
+    let mut root = if target.exists() {
+        let text = match std::fs::read_to_string(&target) {
+            Ok(t) => t,
+            Err(e) => {
+                return serde_json::json!({
+                    "ok": false,
+                    "policy": "unknown",
+                    "configPath": target.to_string_lossy(),
+                    "writable": false,
+                    "warning": format!("Cannot read config: {e}")
+                })
+                .to_string();
+            }
+        };
+        match serde_json::from_str::<serde_json::Value>(&text) {
+            Ok(serde_json::Value::Object(map)) => serde_json::Value::Object(map),
+            Ok(_) => {
+                return serde_json::json!({
+                    "ok": false,
+                    "policy": "unknown",
+                    "configPath": target.to_string_lossy(),
+                    "writable": false,
+                    "warning": "opencode.json root is not an object; not overwriting it."
+                })
+                .to_string();
+            }
+            Err(e) => {
+                return serde_json::json!({
+                    "ok": false,
+                    "policy": "unknown",
+                    "configPath": target.to_string_lossy(),
+                    "writable": false,
+                    "warning": format!("opencode.json is not valid JSON; not overwriting it ({e}).")
+                })
+                .to_string();
+            }
+        }
+    } else {
+        serde_json::json!({})
+    };
+
+    let obj = root.as_object_mut().unwrap();
+    match policy {
+        "allow" => {
+            obj.insert("permission".to_string(), serde_json::Value::String("allow".to_string()));
+        }
+        "ask" => {
+            obj.insert("permission".to_string(), serde_json::Value::String("ask".to_string()));
+        }
+        "default" => {
+            obj.remove("permission");
+        }
+        _ => {
+            return serde_json::json!({
+                "ok": false,
+                "policy": read_permission_policy_from_file(&target).unwrap_or_else(|| "default".to_string()),
+                "configPath": target.to_string_lossy(),
+                "writable": true,
+                "warning": format!("Unknown policy: {policy}")
+            })
+            .to_string();
+        }
+    }
+
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        return serde_json::json!({
+            "ok": false,
+            "policy": policy,
+            "configPath": target.to_string_lossy(),
+            "writable": false,
+            "warning": format!("Cannot create config dir: {e}")
+        })
+        .to_string();
+    }
+
+    let pretty = match serde_json::to_string_pretty(&root) {
+        Ok(s) => s + "\n",
+        Err(e) => {
+            return serde_json::json!({
+                "ok": false,
+                "policy": policy,
+                "configPath": target.to_string_lossy(),
+                "writable": false,
+                "warning": format!("Cannot serialize config: {e}")
+            })
+            .to_string();
+        }
+    };
+
+    if let Err(e) = std::fs::write(&target, pretty) {
+        return serde_json::json!({
+            "ok": false,
+            "policy": policy,
+            "configPath": target.to_string_lossy(),
+            "writable": false,
+            "warning": format!("Cannot write config: {e}")
+        })
+        .to_string();
+    }
+
+    serde_json::json!({
+        "ok": true,
+        "policy": policy,
+        "configPath": target.to_string_lossy(),
+        "writable": true,
+        "restartRequired": true
+    })
+    .to_string()
 }
 
 #[cfg(test)]

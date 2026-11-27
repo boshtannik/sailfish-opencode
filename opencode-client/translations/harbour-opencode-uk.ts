@@ -262,6 +262,76 @@
         <translation>Anthropic відхилив збережений API-ключ, тому моделі Claude заблоковано. Введіть дійсний ключ, щоб відкрити їх.</translation>
     </message>
     <message>
+        <location filename="../qml/pages/GlobalSettingsPage.qml" line="172"/>
+        <source>Chat display</source>
+        <translation>Відображення чату</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GlobalSettingsPage.qml" line="220"/>
+        <source>Input &amp; Voice</source>
+        <translation>Введення та голос</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GlobalSettingsPage.qml" line="408"/>
+        <source>Accounts &amp; Providers</source>
+        <translation>Облікові записи та провайдери</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GlobalSettingsPage.qml" line="560"/>
+        <source>Advanced</source>
+        <translation>Додатково</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GlobalSettingsPage.qml" line="412"/>
+        <source>Agent permissions</source>
+        <translation>Дозволи агента</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GlobalSettingsPage.qml" line="416"/>
+        <source>Permission policy</source>
+        <translation>Політика дозволів</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GlobalSettingsPage.qml" line="417"/>
+        <source>Controls how the agent asks before running actions</source>
+        <translation>Керує тим, як агент запитує перед виконанням дій</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GlobalSettingsPage.qml" line="426"/>
+        <source>Server default</source>
+        <translation>Типово з сервера</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GlobalSettingsPage.qml" line="427"/>
+        <source>Ask for actions</source>
+        <translation>Запитувати перед діями</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GlobalSettingsPage.qml" line="428"/>
+        <source>Allow all actions (dangerous)</source>
+        <translation>Дозволяти всі дії (небезпечно)</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GlobalSettingsPage.qml" line="449"/>
+        <source>Warning: the agent can run actions without asking. Use only if you trust the model and environment.</source>
+        <translation>Увага: агент зможе виконувати дії без запиту. Використовуйте лише якщо довіряєте моделі та середовищу.</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GlobalSettingsPage.qml" line="473"/>
+        <source>Restart the app to apply the permission policy change.</source>
+        <translation>Перезапустіть застосунок, щоб застосувати зміну політики дозволів.</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GlobalSettingsPage.qml" line="474"/>
+        <source>Permission policy is read from the global opencode config. Restart the app after changing it.</source>
+        <translation>Політика дозволів читається з глобального конфіга opencode. Після зміни перезапустіть застосунок.</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GlobalSettingsPage.qml" line="485"/>
+        <source>Always allowed rules</source>
+        <translation>Завжди дозволені правила</translation>
+    </message>
+    <message>
         <source>Appearance</source>
         <translation>Зовнішній вигляд</translation>
     </message>

@@ -272,6 +272,76 @@
         <translation>Anthropic отклонил сохранённый API-ключ, поэтому модели Claude заблокированы. Введите действующий ключ, чтобы открыть их.</translation>
     </message>
     <message>
+        <location filename="../qml/pages/GlobalSettingsPage.qml" line="172"/>
+        <source>Chat display</source>
+        <translation>Отображение чата</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GlobalSettingsPage.qml" line="220"/>
+        <source>Input &amp; Voice</source>
+        <translation>Ввод и голос</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GlobalSettingsPage.qml" line="408"/>
+        <source>Accounts &amp; Providers</source>
+        <translation>Аккаунты и провайдеры</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GlobalSettingsPage.qml" line="560"/>
+        <source>Advanced</source>
+        <translation>Дополнительно</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GlobalSettingsPage.qml" line="412"/>
+        <source>Agent permissions</source>
+        <translation>Разрешения агента</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GlobalSettingsPage.qml" line="416"/>
+        <source>Permission policy</source>
+        <translation>Политика разрешений</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GlobalSettingsPage.qml" line="417"/>
+        <source>Controls how the agent asks before running actions</source>
+        <translation>Управляет тем, как агент спрашивает перед выполнением действий</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GlobalSettingsPage.qml" line="426"/>
+        <source>Server default</source>
+        <translation>По умолчанию сервера</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GlobalSettingsPage.qml" line="427"/>
+        <source>Ask for actions</source>
+        <translation>Спрашивать перед действиями</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GlobalSettingsPage.qml" line="428"/>
+        <source>Allow all actions (dangerous)</source>
+        <translation>Разрешать все действия (опасно)</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GlobalSettingsPage.qml" line="449"/>
+        <source>Warning: the agent can run actions without asking. Use only if you trust the model and environment.</source>
+        <translation>Внимание: агент сможет выполнять действия без запроса. Используйте только если доверяете модели и окружению.</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GlobalSettingsPage.qml" line="473"/>
+        <source>Restart the app to apply the permission policy change.</source>
+        <translation>Перезапустите приложение, чтобы применить изменение политики разрешений.</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GlobalSettingsPage.qml" line="474"/>
+        <source>Permission policy is read from the global opencode config. Restart the app after changing it.</source>
+        <translation>Политика разрешений читается из глобального конфига opencode. После изменения перезапустите приложение.</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GlobalSettingsPage.qml" line="485"/>
+        <source>Always allowed rules</source>
+        <translation>Всегда разрешённые правила</translation>
+    </message>
+    <message>
         <source>Appearance</source>
         <translation>Внешний вид</translation>
     </message>

@@ -364,6 +364,34 @@ ApplicationWindow {
     // Saved ("always allow") rules of the server
     // (`[{id,action,resource,projectID}]`).
     property var savedPermissions: []
+    // Global opencode permission policy from config (read/write via bridge).
+    property var globalPermissionPolicy: ({
+        "policy": "default",
+        "configPath": "",
+        "writable": true,
+        "warning": "",
+        "restartRequired": false
+    })
+    function refreshGlobalPermissionPolicy() {
+        var raw = bridge.permission_policy_json()
+        if (raw) {
+            try {
+                globalPermissionPolicy = JSON.parse(raw)
+            } catch (e) {
+                console.log("refreshGlobalPermissionPolicy parse error", e, raw)
+            }
+        }
+    }
+    function setGlobalPermissionPolicy(policy) {
+        var raw = bridge.set_permission_policy(policy)
+        if (raw) {
+            try {
+                globalPermissionPolicy = JSON.parse(raw)
+            } catch (e) {
+                console.log("setGlobalPermissionPolicy parse error", e, raw)
+            }
+        }
+    }
     // The optional reason sent with the answer (the model sees it).
     property string permissionReason: ""
     // Granting "Allow once": true if the request is really new

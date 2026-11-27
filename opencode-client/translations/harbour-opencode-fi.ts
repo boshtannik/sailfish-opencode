@@ -262,6 +262,76 @@
         <translation>Anthropic hylkäsi tallennetun API-avaimen, joten Claude-mallit on lukittu. Syötä kelvollinen avain avataksesi ne.</translation>
     </message>
     <message>
+        <location filename="../qml/pages/GlobalSettingsPage.qml" line="172"/>
+        <source>Chat display</source>
+        <translation>Keskustelunäkymä</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GlobalSettingsPage.qml" line="220"/>
+        <source>Input &amp; Voice</source>
+        <translation>Syöttö ja ääni</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GlobalSettingsPage.qml" line="408"/>
+        <source>Accounts &amp; Providers</source>
+        <translation>Tilit ja palveluntarjoajat</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GlobalSettingsPage.qml" line="560"/>
+        <source>Advanced</source>
+        <translation>Lisäasetukset</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GlobalSettingsPage.qml" line="412"/>
+        <source>Agent permissions</source>
+        <translation>Agentin oikeudet</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GlobalSettingsPage.qml" line="416"/>
+        <source>Permission policy</source>
+        <translation>Oikeuskäytäntö</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GlobalSettingsPage.qml" line="417"/>
+        <source>Controls how the agent asks before running actions</source>
+        <translation>Määrittää, miten agentti kysyy ennen toimintoja</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GlobalSettingsPage.qml" line="426"/>
+        <source>Server default</source>
+        <translation>Palvelimen oletus</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GlobalSettingsPage.qml" line="427"/>
+        <source>Ask for actions</source>
+        <translation>Kysy ennen toimintoja</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GlobalSettingsPage.qml" line="428"/>
+        <source>Allow all actions (dangerous)</source>
+        <translation>Salli kaikki toiminnot (vaarallinen)</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GlobalSettingsPage.qml" line="449"/>
+        <source>Warning: the agent can run actions without asking. Use only if you trust the model and environment.</source>
+        <translation>Varoitus: agentti voi suorittaa toimintoja kysymättä. Käytä vain, jos luotat malliin ja ympäristöön.</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GlobalSettingsPage.qml" line="473"/>
+        <source>Restart the app to apply the permission policy change.</source>
+        <translation>Käynnistä sovellus uudelleen, jotta oikeuskäytännön muutos tulee voimaan.</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GlobalSettingsPage.qml" line="474"/>
+        <source>Permission policy is read from the global opencode config. Restart the app after changing it.</source>
+        <translation>Oikeuskäytäntö luetaan opencoden yleisestä asetustiedostosta. Käynnistä sovellus uudelleen muutoksen jälkeen.</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/GlobalSettingsPage.qml" line="485"/>
+        <source>Always allowed rules</source>
+        <translation>Aina sallitut säännöt</translation>
+    </message>
+    <message>
         <source>Appearance</source>
         <translation>Ulkoasu</translation>
     </message>

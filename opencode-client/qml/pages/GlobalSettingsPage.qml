@@ -1,13 +1,19 @@
 import QtQuick 2.6
 import Sailfish.Silica 1.0
+import "../components"
 
 Item {
     id: globalSettingsPage
 
     // Size of the icons in the copy/speaker switches: follows the Icon size
     // slider while it is dragged.
-    readonly property int iconPreviewSize: Math.round(Theme.iconSizeMedium
-        * (iconScaleSlider ? iconScaleSlider.sliderValue / 100 : appWindow.iconScale))
+    property real iconScaleSliderValue: appWindow ? appWindow.iconScale * 100 : 100
+    readonly property int iconPreviewSize: Math.round(Theme.iconSizeMedium * iconScaleSliderValue / 100)
+
+    // Refs to items inside ExpandingSection loader components.
+    property var pttPosComboRef: null
+    property var anthropicKeyFieldRef: null
+    property var claudeHeaderRef: null
 
     property bool providerKeySet: false
     // Mirrors `auth::ANTHROPIC_PROVIDER` in Rust.
@@ -21,7 +27,11 @@ Item {
                                  ? appWindow.consoleLogin
                                  : ({ "state": "idle", "url": "", "code": "", "message": "" })
 
-    Component.onCompleted: refreshProviderKey()
+    Component.onCompleted: {
+        refreshProviderKey()
+        if (typeof appWindow !== "undefined" && appWindow)
+            appWindow.refreshGlobalPermissionPolicy()
+    }
 
     function refreshProviderKey() {
         if (typeof appWindow !== "undefined" && appWindow) {
@@ -37,20 +47,44 @@ Item {
         onProviderKeyRequested: {
             if (provider !== globalSettingsPage.kAnthropicProvider)
                 return
+            accountsSection.expanded = true
+            // Content loads lazily; retry until refs are available.
+            globalSettingsPage._focusAnthropicKeyRetries = 10
+            focusAnthropicKeyTimer.restart()
+        }
+    }
+
+    property int _focusAnthropicKeyRetries: 0
+    Timer {
+        id: focusAnthropicKeyTimer
+        interval: 50
+        repeat: false
+        onTriggered: {
+            var h = globalSettingsPage.claudeHeaderRef
+            var f = globalSettingsPage.anthropicKeyFieldRef
+            if (!h || !f) {
+                if (globalSettingsPage._focusAnthropicKeyRetries > 0) {
+                    globalSettingsPage._focusAnthropicKeyRetries--
+                    focusAnthropicKeyTimer.restart()
+                }
+                return
+            }
+            var pos = h.mapToItem(column, 0, 0).y
             settingsFlick.contentY = Math.max(0, Math.min(
-                claudeHeader.y + column.y - Theme.paddingLarge,
+                pos - Theme.paddingLarge,
                 settingsFlick.contentHeight - settingsFlick.height))
-            anthropicKeyField.forceActiveFocus()
+            f.forceActiveFocus()
         }
     }
 
     function saveAnthropicKey() {
-        if (typeof appWindow === "undefined" || !appWindow
-                || anthropicKeyField.text.trim().length === 0)
+        var f = anthropicKeyFieldRef
+        if (typeof appWindow === "undefined" || !appWindow || !f
+                || f.text.trim().length === 0)
             return
-        appWindow.saveProviderKeyFor(kAnthropicProvider, anthropicKeyField.text)
-        anthropicKeyField.text = ""
-        anthropicKeyField.focus = false
+        appWindow.saveProviderKeyFor(kAnthropicProvider, f.text)
+        f.text = ""
+        f.focus = false
     }
 
     // The worker refreshes the connected-provider cache together with the
@@ -75,6 +109,9 @@ Item {
     readonly property bool pttCenterAllowed: appWindow.inputMode === "voice"
 
     function syncPttCombo() {
+        var pttPosCombo = pttPosComboRef
+        if (!pttPosCombo)
+            return
         // Read the mode directly: the `pttCenterAllowed` binding may not have
         // re-evaluated yet when this is called from the mode dropdown handler.
         var centerAllowed = appWindow.inputMode === "voice"
@@ -104,7 +141,18 @@ Item {
                 right: parent.right
             }
 
-            SectionHeader { text: qsTr("Appearance") }
+            ExpandingSectionGroup {
+                id: settingsGroup
+                width: parent.width
+                // All collapsed by default; user expands what they need.
+                currentIndex: -1
+
+            ExpandingSection {
+                id: appearanceSection
+                title: qsTr("Appearance")
+                content.sourceComponent: Component {
+                    Column {
+                        width: parent ? parent.width : Screen.width
 
             Slider {
                 id: fontScaleSlider
@@ -129,33 +177,6 @@ Item {
                 color: Theme.secondaryHighlightColor
             }
 
-            SectionHeader { text: qsTr("Messages") }
-
-            // The switches show the icons they control, at the size picked
-            // below, so the slider previews its effect live.
-            IconTextSwitch {
-                text: qsTr("Copy button on messages")
-                icon.source: "image://theme/icon-m-clipboard"
-                icon.width: globalSettingsPage.iconPreviewSize
-                icon.height: globalSettingsPage.iconPreviewSize
-                icon.sourceSize.width: globalSettingsPage.iconPreviewSize
-                icon.sourceSize.height: globalSettingsPage.iconPreviewSize
-                checked: appWindow.showCopyButton
-                onCheckedChanged: appWindow.setShowCopyButton(checked)
-            }
-
-            IconTextSwitch {
-                text: qsTr("Speaker button on answers")
-                description: qsTr("Read an answer aloud (needs a speech synthesis model)")
-                icon.source: "image://theme/icon-m-speaker-on"
-                icon.width: globalSettingsPage.iconPreviewSize
-                icon.height: globalSettingsPage.iconPreviewSize
-                icon.sourceSize.width: globalSettingsPage.iconPreviewSize
-                icon.sourceSize.height: globalSettingsPage.iconPreviewSize
-                checked: appWindow.showSpeakButton
-                onCheckedChanged: appWindow.setShowSpeakButton(checked)
-            }
-
             Slider {
                 id: iconScaleSlider
                 width: parent.width
@@ -167,7 +188,9 @@ Item {
                 valueText: Math.round(sliderValue) + " %"
                 // The icons above follow the slider live; the chat applies
                 // the size on release.
+                onSliderValueChanged: globalSettingsPage.iconScaleSliderValue = sliderValue
                 onDownChanged: if (!down) appWindow.setIconScale(sliderValue / 100)
+                Component.onCompleted: globalSettingsPage.iconScaleSliderValue = sliderValue
             }
 
             // The input bar icons at the chosen size (mic, paperclip, send).
@@ -196,6 +219,41 @@ Item {
                 font.pixelSize: appWindow.fs(Theme.fontSizeExtraSmall)
             }
 
+                    }
+                }
+            }
+
+            ExpandingSection {
+                id: chatDisplaySection
+                title: qsTr("Chat display")
+                content.sourceComponent: Component {
+                    Column {
+                        width: parent ? parent.width : Screen.width
+
+            // The switches show the icons they control, at the chosen icon size.
+            IconTextSwitch {
+                text: qsTr("Copy button on messages")
+                icon.source: "image://theme/icon-m-clipboard"
+                icon.width: globalSettingsPage.iconPreviewSize
+                icon.height: globalSettingsPage.iconPreviewSize
+                icon.sourceSize.width: globalSettingsPage.iconPreviewSize
+                icon.sourceSize.height: globalSettingsPage.iconPreviewSize
+                checked: appWindow.showCopyButton
+                onCheckedChanged: appWindow.setShowCopyButton(checked)
+            }
+
+            IconTextSwitch {
+                text: qsTr("Speaker button on answers")
+                description: qsTr("Read an answer aloud (needs a speech synthesis model)")
+                icon.source: "image://theme/icon-m-speaker-on"
+                icon.width: globalSettingsPage.iconPreviewSize
+                icon.height: globalSettingsPage.iconPreviewSize
+                icon.sourceSize.width: globalSettingsPage.iconPreviewSize
+                icon.sourceSize.height: globalSettingsPage.iconPreviewSize
+                checked: appWindow.showSpeakButton
+                onCheckedChanged: appWindow.setShowSpeakButton(checked)
+            }
+
             TextSwitch {
                 text: qsTr("Label thinking and answers")
                 description: qsTr("Show \"Answer\" above the model's replies; thinking is always marked")
@@ -203,7 +261,6 @@ Item {
                 onCheckedChanged: appWindow.setLabelRoles(checked)
             }
 
-            SectionHeader { text: qsTr("Thinking") }
 
             TextSwitch {
                 text: qsTr("Show model thinking (reasoning)")
@@ -219,7 +276,16 @@ Item {
                 onCheckedChanged: appWindow.setExpandThinking(checked)
             }
 
-            SectionHeader { text: qsTr("Input") }
+                    }
+                }
+            }
+
+            ExpandingSection {
+                id: inputVoiceSection
+                title: qsTr("Input & Voice")
+                content.sourceComponent: Component {
+                    Column {
+                        width: parent ? parent.width : Screen.width
 
             ComboBox {
                 label: qsTr("Mode")
@@ -276,7 +342,10 @@ Item {
                     }
                     appWindow.pttPosition = pos
                 }
-                Component.onCompleted: globalSettingsPage.syncPttCombo()
+                Component.onCompleted: {
+                    globalSettingsPage.pttPosComboRef = pttPosCombo
+                    globalSettingsPage.syncPttCombo()
+                }
             }
 
             TextSwitch {
@@ -286,7 +355,6 @@ Item {
                 onCheckedChanged: appWindow.pttVibrate = checked
             }
 
-            SectionHeader { text: qsTr("Voice") }
 
             BackgroundItem {
                 width: parent.width
@@ -311,7 +379,15 @@ Item {
             // "Downloaded · Synthesis" sections, with the active model marked ✓.
 
             // — Dictation: a separate section about sending recognized text.
-            SectionHeader { text: qsTr("Dictation") }
+            Label {
+                x: Theme.horizontalPageMargin
+                width: parent.width - 2 * Theme.horizontalPageMargin
+                text: qsTr("Dictation")
+                color: Theme.secondaryHighlightColor
+                font.pixelSize: appWindow.fs(Theme.fontSizeSmall)
+                topPadding: Theme.paddingMedium
+            }
+
 
             TextSwitch {
                 text: qsTr("Send immediately")
@@ -321,7 +397,15 @@ Item {
 
             // — Auto-TTS of answers - a separate section. Available only when
             // a speech synthesis model is downloaded and selected; otherwise — a hint.
-            SectionHeader { text: qsTr("Voice answers") }
+            Label {
+                x: Theme.horizontalPageMargin
+                width: parent.width - 2 * Theme.horizontalPageMargin
+                text: qsTr("Voice answers")
+                color: Theme.secondaryHighlightColor
+                font.pixelSize: appWindow.fs(Theme.fontSizeSmall)
+                topPadding: Theme.paddingMedium
+            }
+
 
             Label {
                 visible: !appWindow.ttsModelReady
@@ -349,7 +433,16 @@ Item {
                 }
             }
 
-            SectionHeader { text: qsTr("Notifications") }
+                    }
+                }
+            }
+
+            ExpandingSection {
+                id: notificationsSection
+                title: qsTr("Notifications")
+                content.sourceComponent: Component {
+                    Column {
+                        width: parent ? parent.width : Screen.width
 
             TextSwitch {
                 text: qsTr("Sound when agent finishes (ding)")
@@ -392,7 +485,149 @@ Item {
                                                          qsTr("Test notification"))
             }
 
-            SectionHeader { text: qsTr("OpenCode account") }
+                    }
+                }
+            }
+
+            ExpandingSection {
+                id: agentPermissionsSection
+                title: qsTr("Agent permissions")
+                content.sourceComponent: Component {
+                    Column {
+                        width: parent ? parent.width : Screen.width
+
+            ComboBox {
+                id: permissionPolicyCombo
+                label: qsTr("Permission policy")
+                description: qsTr("Controls how the agent asks before running actions")
+                currentIndex: {
+                    var p = (appWindow && appWindow.globalPermissionPolicy)
+                            ? appWindow.globalPermissionPolicy.policy : "default"
+                    if (p === "allow") return 2
+                    if (p === "ask") return 1
+                    return 0
+                }
+                menu: ContextMenu {
+                    MenuItem { text: qsTr("Server default") }
+                    MenuItem { text: qsTr("Ask for actions") }
+                    MenuItem { text: qsTr("Allow all actions (dangerous)") }
+                }
+                onCurrentIndexChanged: {
+                    var map = ["default", "ask", "allow"]
+                    if (currentIndex < 0 || currentIndex >= map.length)
+                        return
+                    var next = map[currentIndex]
+                    var cur = (appWindow && appWindow.globalPermissionPolicy)
+                              ? appWindow.globalPermissionPolicy.policy : "default"
+                    if (next === cur)
+                        return
+                    if (appWindow)
+                        appWindow.setGlobalPermissionPolicy(next)
+                }
+            }
+
+            Label {
+                visible: appWindow && appWindow.globalPermissionPolicy
+                         && appWindow.globalPermissionPolicy.policy === "allow"
+                x: Theme.horizontalPageMargin
+                width: parent.width - 2 * Theme.horizontalPageMargin
+                text: qsTr("Warning: the agent can run actions without asking. Use only if you trust the model and environment.")
+                wrapMode: Text.Wrap
+                color: "#ff8a80"
+                font.pixelSize: appWindow.fs(Theme.fontSizeExtraSmall)
+            }
+
+            Label {
+                visible: appWindow && appWindow.globalPermissionPolicy
+                         && appWindow.globalPermissionPolicy.warning !== undefined
+                         && appWindow.globalPermissionPolicy.warning !== ""
+                x: Theme.horizontalPageMargin
+                width: parent.width - 2 * Theme.horizontalPageMargin
+                text: appWindow && appWindow.globalPermissionPolicy
+                      ? (appWindow.globalPermissionPolicy.warning || "") : ""
+                wrapMode: Text.Wrap
+                color: Theme.secondaryColor
+                font.pixelSize: appWindow.fs(Theme.fontSizeExtraSmall)
+            }
+
+            Label {
+                x: Theme.horizontalPageMargin
+                width: parent.width - 2 * Theme.horizontalPageMargin
+                text: appWindow && appWindow.globalPermissionPolicy
+                      && appWindow.globalPermissionPolicy.restartRequired
+                      ? qsTr("Restart the app to apply the permission policy change.")
+                      : qsTr("Permission policy is read from the global opencode config. Restart the app after changing it.")
+                wrapMode: Text.Wrap
+                color: Theme.secondaryColor
+                font.pixelSize: appWindow.fs(Theme.fontSizeExtraSmall)
+            }
+
+            Label {
+                visible: appWindow && appWindow.savedPermissions
+                         && appWindow.savedPermissions.length > 0
+                x: Theme.horizontalPageMargin
+                width: parent.width - 2 * Theme.horizontalPageMargin
+                text: qsTr("Always allowed rules")
+                color: Theme.secondaryHighlightColor
+                font.pixelSize: appWindow.fs(Theme.fontSizeSmall)
+                topPadding: Theme.paddingMedium
+            }
+
+            Repeater {
+                model: (appWindow && appWindow.savedPermissions) ? appWindow.savedPermissions : []
+                delegate: BackgroundItem {
+                    width: parent ? parent.width : 0
+                    contentHeight: Math.max(savedPermLabel.height + 2 * Theme.paddingSmall, Theme.itemSizeSmall)
+                    onClicked: if (appWindow) appWindow.removeSavedPermission(modelData.id)
+
+                    Label {
+                        id: savedPermLabel
+                        anchors {
+                            left: parent.left
+                            leftMargin: Theme.horizontalPageMargin
+                            right: revokeHint.left
+                            rightMargin: Theme.paddingSmall
+                            verticalCenter: parent.verticalCenter
+                        }
+                        text: (modelData.action || "") + (modelData.resource ? " / " + modelData.resource : "")
+                        wrapMode: Text.Wrap
+                        color: parent.highlighted ? Theme.highlightColor : Theme.primaryColor
+                        font.pixelSize: appWindow ? appWindow.fs(Theme.fontSizeSmall) : Theme.fontSizeSmall
+                    }
+                    Label {
+                        id: revokeHint
+                        anchors {
+                            right: parent.right
+                            rightMargin: Theme.horizontalPageMargin
+                            verticalCenter: parent.verticalCenter
+                        }
+                        text: qsTr("Revoke")
+                        color: parent.highlighted ? Theme.highlightColor : Theme.secondaryColor
+                        font.pixelSize: appWindow ? appWindow.fs(Theme.fontSizeExtraSmall) : Theme.fontSizeExtraSmall
+                    }
+                }
+            }
+
+                    }
+                }
+            }
+
+            ExpandingSection {
+                id: accountsSection
+                title: qsTr("Accounts & Providers")
+                content.sourceComponent: Component {
+                    Column {
+                        width: parent ? parent.width : Screen.width
+
+            Label {
+                x: Theme.horizontalPageMargin
+                width: parent.width - 2 * Theme.horizontalPageMargin
+                text: qsTr("OpenCode account")
+                color: Theme.secondaryHighlightColor
+                font.pixelSize: appWindow.fs(Theme.fontSizeSmall)
+                topPadding: Theme.paddingSmall
+            }
+
 
             Label {
                 visible: globalSettingsPage.login.state !== "waiting"
@@ -476,7 +711,16 @@ Item {
                 font.pixelSize: appWindow.fs(Theme.fontSizeExtraSmall)
             }
 
-            SectionHeader { id: claudeHeader; text: qsTr("Claude (Anthropic)") }
+            Label {
+                id: claudeHeader
+                x: Theme.horizontalPageMargin
+                width: parent.width - 2 * Theme.horizontalPageMargin
+                text: qsTr("Claude (Anthropic)")
+                color: Theme.secondaryHighlightColor
+                font.pixelSize: appWindow.fs(Theme.fontSizeSmall)
+                topPadding: Theme.paddingMedium
+            }
+
 
             Label {
                 x: Theme.horizontalPageMargin
@@ -525,7 +769,16 @@ Item {
                 }
             }
 
-            SectionHeader { text: qsTr("General") }
+                    }
+                }
+            }
+
+            ExpandingSection {
+                id: advancedSection
+                title: qsTr("Advanced")
+                content.sourceComponent: Component {
+                    Column {
+                        width: parent ? parent.width : Screen.width
 
             TextField {
                 id: workdirField
@@ -557,6 +810,11 @@ Item {
                 color: Theme.secondaryColor
                 font.pixelSize: appWindow.fs(Theme.fontSizeExtraSmall)
                 wrapMode: Text.Wrap
+            }
+
+                    }
+                }
+            }
             }
 
             // The UI language is the system one; translations are loaded natively (.qm).
